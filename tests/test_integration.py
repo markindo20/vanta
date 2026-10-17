@@ -41,6 +41,10 @@ class IntegrationTests(unittest.TestCase):
     def test_physics_example(self):
         self._build_and_run(os.path.join(EXAMPLES, 'physics.vnt'), ['60', '120', '180'])
 
+    def test_loops_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'loops.vnt'),
+                            ['0', '1', '2', '3', '4', '6', '7', '8', '9', '40'])
+
     def test_invalid_fails_before_codegen(self):
         from compiler.type_checker import CheckError
         with tempfile.NamedTemporaryFile('w', suffix='.vnt', delete=False) as f:

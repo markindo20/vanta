@@ -16,6 +16,11 @@ BIN_PREC = {
     TT.STAR: 6, TT.SLASH: 6, TT.PERCENT: 6,
 }
 
+COMPOUND_OPS = {
+    TT.PLUS_EQ: '+', TT.MINUS_EQ: '-',
+    TT.STAR_EQ: '*', TT.SLASH_EQ: '/',
+}
+
 
 class Parser:
     def __init__(self, tokens, filename="<input>"):
@@ -137,6 +142,14 @@ class Parser:
             return self.parse_var_decl()
         if t.type == TT.RETURN:
             return self.parse_return()
+        if t.type == TT.BREAK:
+            tok = self.advance()
+            self.expect(TT.NEWLINE)
+            return A.BreakStmt(A.Pos(tok.line, tok.col))
+        if t.type == TT.CONTINUE:
+            tok = self.advance()
+            self.expect(TT.NEWLINE)
+            return A.ContinueStmt(A.Pos(tok.line, tok.col))
         if t.type == TT.IF:
             return self.parse_if()
         if t.type == TT.WHILE:
@@ -209,6 +222,23 @@ class Parser:
     def parse_expr_or_assign(self):
         tok = self.peek()
         expr = self.parse_expr()
+
+        # Compound assignment desugars: `x += v` becomes `x = x + v`.
+        # NOTE: the target expression is evaluated twice at runtime. Safe for
+        # simple lvalues like `a`, `a.b`, `a[i]` (no side effects). Not safe
+        # if the target involves a function call, but such targets are
+        # rejected by the type checker's _is_assignable anyway.
+        if self.peek().type in COMPOUND_OPS:
+            op_tok = self.advance()
+            op = COMPOUND_OPS[op_tok.type]
+            val = self.parse_expr()
+            self.expect(TT.NEWLINE)
+            return A.AssignStmt(
+                expr,
+                A.BinOp(op, expr, val, A.Pos(op_tok.line, op_tok.col)),
+                A.Pos(tok.line, tok.col),
+            )
+
         if self.check(TT.ASSIGN):
             self.advance()
             val = self.parse_expr()

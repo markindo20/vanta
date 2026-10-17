@@ -19,6 +19,11 @@ class LexerTests(unittest.TestCase):
             TT.TRUE, TT.FALSE, TT.AND, TT.OR, TT.NOT,
         ])
 
+    def test_break_continue_keywords(self):
+        toks = lex("break continue\n")
+        self.assertEqual(toks[0].type, TT.BREAK)
+        self.assertEqual(toks[1].type, TT.CONTINUE)
+
     def test_ident_and_int(self):
         toks = lex("x 42 3.14\n")
         self.assertEqual(toks[0].type, TT.IDENT)
@@ -30,14 +35,14 @@ class LexerTests(unittest.TestCase):
     def test_operators(self):
         toks = lex("a == b != c < d <= e > f >= g -> h :: i\n")
         names = [t.type for t in toks]
-        self.assertIn(TT.EQ, names)
-        self.assertIn(TT.NEQ, names)
-        self.assertIn(TT.LT, names)
-        self.assertIn(TT.LTE, names)
-        self.assertIn(TT.GT, names)
-        self.assertIn(TT.GTE, names)
-        self.assertIn(TT.ARROW, names)
-        self.assertIn(TT.COLONCOLON, names)
+        for expected in (TT.EQ, TT.NEQ, TT.LT, TT.LTE, TT.GT, TT.GTE, TT.ARROW, TT.COLONCOLON):
+            self.assertIn(expected, names)
+
+    def test_compound_ops(self):
+        toks = lex("a += b -= c *= d /= e\n")
+        kinds = [t.type for t in toks]
+        for expected in (TT.PLUS_EQ, TT.MINUS_EQ, TT.STAR_EQ, TT.SLASH_EQ):
+            self.assertIn(expected, kinds)
 
     def test_comments(self):
         toks = lex("# comment only\nx = 1\n")

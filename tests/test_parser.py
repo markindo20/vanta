@@ -53,6 +53,33 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, A.ForRangeStmt)
         self.assertEqual(stmt.var, 'i')
 
+    def test_compound_assignment(self):
+        prog = parse("func f() -> void:\n    mut x = 1\n    x += 2\n")
+        stmt = prog.decls[0].body[1]
+        self.assertIsInstance(stmt, A.AssignStmt)
+        self.assertIsInstance(stmt.value, A.BinOp)
+        self.assertEqual(stmt.value.op, '+')
+
+    def test_compound_minus(self):
+        prog = parse("func f() -> void:\n    mut x = 5\n    x -= 2\n")
+        stmt = prog.decls[0].body[1]
+        self.assertIsInstance(stmt.value, A.BinOp)
+        self.assertEqual(stmt.value.op, '-')
+
+    def test_break_continue_parse(self):
+        src = ("func f() -> void:\n"
+               "    for i in range(0, 10):\n"
+               "        if i == 5:\n"
+               "            continue\n"
+               "        if i == 8:\n"
+               "            break\n")
+        prog = parse(src)
+        body = prog.decls[0].body[0].body
+        inner1 = body[0].then_body[0]
+        inner2 = body[1].then_body[0]
+        self.assertIsInstance(inner1, A.ContinueStmt)
+        self.assertIsInstance(inner2, A.BreakStmt)
+
     def test_syntax_error(self):
         with self.assertRaises(ParseError):
             parse("func f(:\n    return 1\n")

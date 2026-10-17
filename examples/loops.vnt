@@ -1,0 +1,11 @@
+# Demonstrates break / continue and compound assignment
+func main() -> void:
+    mut sum = 0
+    for i in range(0, 20):
+        if i == 5:
+            continue
+        if i == 10:
+            break
+        print_i32(i)
+        sum += i
+    print_i32(sum)

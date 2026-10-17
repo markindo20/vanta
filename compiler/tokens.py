@@ -8,11 +8,13 @@ class TT(Enum):
     STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto()
     IF = auto(); ELIF = auto(); ELSE = auto()
     WHILE = auto(); FOR = auto(); IN = auto()
+    BREAK = auto(); CONTINUE = auto()
     TRUE = auto(); FALSE = auto()
     AND = auto(); OR = auto(); NOT = auto()
     PLUS = auto(); MINUS = auto(); STAR = auto(); SLASH = auto(); PERCENT = auto()
     EQ = auto(); NEQ = auto(); LT = auto(); LTE = auto(); GT = auto(); GTE = auto()
-    ASSIGN = auto(); ARROW = auto()
+    ASSIGN = auto(); PLUS_EQ = auto(); MINUS_EQ = auto(); STAR_EQ = auto(); SLASH_EQ = auto()
+    ARROW = auto()
     LPAREN = auto(); RPAREN = auto(); LBRACKET = auto(); RBRACKET = auto()
     COLON = auto(); COMMA = auto(); DOT = auto(); COLONCOLON = auto()
     NEWLINE = auto(); INDENT = auto(); DEDENT = auto(); EOF = auto()
@@ -23,6 +25,7 @@ KEYWORDS = {
     'struct': TT.STRUCT, 'component': TT.COMPONENT, 'system': TT.SYSTEM,
     'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE,
     'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,
+    'break': TT.BREAK, 'continue': TT.CONTINUE,
     'true': TT.TRUE, 'false': TT.FALSE,
     'and': TT.AND, 'or': TT.OR, 'not': TT.NOT,
 }

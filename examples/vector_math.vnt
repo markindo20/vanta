@@ -1,10 +1,13 @@
-# Example A: vector mathematics
+# Example A: vector mathematics with a user-defined print helper
+func print_vec3(v: Vec3) -> void:
+    print_f32(v.x)
+    print_f32(v.y)
+    print_f32(v.z)
+
 func main() -> void:
     let a: Vec3 = Vec3(1.0, 2.0, 3.0)
     let b: Vec3 = Vec3(4.0, 5.0, 6.0)
     let c = a + b
-    print_f32(c.x)
-    print_f32(c.y)
-    print_f32(c.z)
+    print_vec3(c)
     let d = a.dot(b)
     print_f32(d)

@@ -25,6 +25,7 @@ class TypeChecker:
         self.functions: dict[str, FuncSig] = {}
         self.scopes = []
         self.current_ret: Type = VOID
+        self.loop_depth = 0
         self._register_builtins()
 
     # ---------------- registration ----------------
@@ -87,10 +88,10 @@ class TypeChecker:
     def _pop(self):
         self.scopes.pop()
 
-    def _declare(self, name, typ, mutable):
+    def _declare(self, name, typ, mutable, pos=None):
         if self.scopes[-1].get(name) is not None:
             raise CheckError(f"'{name}' already declared in this scope",
-                             self.filename, A.Pos(0, 0))
+                             self.filename, pos or A.Pos(0, 0))
         self.scopes[-1][name] = (typ, mutable)
 
     def _lookup(self, name):
@@ -126,6 +127,12 @@ class TypeChecker:
             self._check_assign(stmt)
         elif isinstance(stmt, A.ReturnStmt):
             self._check_return(stmt)
+        elif isinstance(stmt, A.BreakStmt):
+            if self.loop_depth == 0:
+                raise CheckError("'break' outside loop", self.filename, stmt.pos)
+        elif isinstance(stmt, A.ContinueStmt):
+            if self.loop_depth == 0:
+                raise CheckError("'continue' outside loop", self.filename, stmt.pos)
         elif isinstance(stmt, A.IfStmt):
             self._check_if(stmt)
         elif isinstance(stmt, A.WhileStmt):
@@ -148,11 +155,10 @@ class TypeChecker:
         if vt is VOID:
             raise CheckError("cannot bind a variable to void", self.filename, v.pos)
         if isinstance(vt, StructType) and vt.name == "Arena":
-            # Arena can only be produced by a fresh Arena(...) construction.
             if not (isinstance(v.value, A.Call) and isinstance(v.value.func, A.Name)
                     and v.value.func.name == "Arena"):
                 raise CheckError("Arena values cannot be copied or reassigned", self.filename, v.pos)
-        self._declare(v.name, vt, v.mutable)
+        self._declare(v.name, vt, v.mutable, v.pos)
         v.var_type = vt
 
     def _check_assign(self, a: A.AssignStmt):
@@ -205,7 +211,14 @@ class TypeChecker:
 
     def _check_while(self, w: A.WhileStmt):
         self._check_cond(w.cond, w.pos)
-        self._push(); [self._check_stmt(s) for s in w.body]; self._pop()
+        self._push()
+        self.loop_depth += 1
+        try:
+            for s in w.body:
+                self._check_stmt(s)
+        finally:
+            self.loop_depth -= 1
+            self._pop()
 
     def _check_for(self, f: A.ForRangeStmt):
         st = self._check_expr(f.start)
@@ -214,9 +227,13 @@ class TypeChecker:
         self._coerce_value(f.end, et, I32, f.pos, "range end")
         self._push()
         self.scopes[-1][f.var] = (I32, False)
-        for s in f.body:
-            self._check_stmt(s)
-        self._pop()
+        self.loop_depth += 1
+        try:
+            for s in f.body:
+                self._check_stmt(s)
+        finally:
+            self.loop_depth -= 1
+            self._pop()
 
     def _check_cond(self, cond, pos):
         ct = self._check_expr(cond)
@@ -273,11 +290,11 @@ class TypeChecker:
             self._coerce_value(expr.index, it, I32, expr.pos, "index")
             expr.type = ot.inner
             return ot.inner
-        raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename, getattr(expr, 'pos', A.Pos(0, 0)))
+        raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename,
+                         getattr(expr, 'pos', A.Pos(0, 0)))
 
     def _check_binop(self, expr: A.BinOp, lt, rt) -> Type:
         op = expr.op
-        # literal coercion
         lt, rt = self._coerce_binop_lits(expr, lt, rt)
         if op in ('and', 'or'):
             if lt is not BOOL or rt is not BOOL:
@@ -328,7 +345,6 @@ class TypeChecker:
             return lt, lt
         return lt, rt
 
-    # ---------------- literal & type coercion ----------------
     def _coerce_value(self, expr, actual, expected, pos, ctx):
         if actual is expected or actual == expected:
             return
@@ -400,8 +416,6 @@ class TypeChecker:
             if any(x is None for x in names):
                 raise CheckError("cannot mix named and positional arguments", self.filename, call.pos)
             seen = set()
-            ordered_args = []
-            order = []
             for nm, arg in zip(names, call.args):
                 if nm not in fields:
                     raise CheckError(f"unknown field '{nm}'", self.filename, call.pos)
@@ -410,11 +424,8 @@ class TypeChecker:
                 seen.add(nm)
                 at = self._check_expr(arg)
                 self._coerce_value(arg, at, ftype, call.pos, f"field '{nm}'")
-                ordered_args.append(arg)
-                order.append(nm)
             if len(seen) != len(fields):
                 raise CheckError("missing fields in constructor", self.filename, call.pos)
-            # reorder args to declaration order
             by_name = dict(zip(names, call.args))
             call.args = [by_name[f] for f in fields]
             call.arg_names = None

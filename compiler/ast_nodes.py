@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Any
 
 
@@ -15,7 +15,7 @@ class Program:
 
 @dataclass
 class TypeExpr:
-    kind: str                    # 'named' or 'ptr'
+    kind: str
     name: Optional[str] = None
     inner: Optional['TypeExpr'] = None
     pos: Optional[Pos] = None
@@ -41,7 +41,7 @@ class FuncDecl:
 @dataclass
 class StructDecl:
     name: str
-    fields: List[Any]            # (name, TypeExpr, Pos)
+    fields: List[Any]
     is_component: bool
     pos: Pos
 
@@ -69,10 +69,20 @@ class ReturnStmt:
 
 
 @dataclass
+class BreakStmt:
+    pos: Pos
+
+
+@dataclass
+class ContinueStmt:
+    pos: Pos
+
+
+@dataclass
 class IfStmt:
     cond: Any
     then_body: List[Any]
-    elif_branches: List[Any]     # list of (cond, body)
+    elif_branches: List[Any]
     else_body: Optional[List[Any]]
     pos: Pos
 

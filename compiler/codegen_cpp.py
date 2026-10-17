@@ -47,26 +47,21 @@ class CodeGen:
         self.emit('')
         self.emit('namespace vanta_user {')
         self.indent += 1
-        # forward declarations of structs
         structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
         for sd in structs:
             self.emit(f'struct {sd.name};')
         self.emit('')
-        # struct definitions
         for sd in structs:
             self._gen_struct(sd)
-        # function forward declarations
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
         self.emit('')
-        # function bodies
         for fd in funcs:
             self._gen_func(fd)
         self.indent -= 1
         self.emit('}  // namespace vanta_user')
         self.emit('')
-        # entry point
         main = next((f for f in funcs if f.name == 'main'), None)
         if main is not None:
             self.emit('int main() {')
@@ -99,7 +94,6 @@ class CodeGen:
         self.indent += 1
         for stmt in fn.body:
             self._gen_stmt(stmt)
-        # fallback return for non-void
         ret_type = self.tc.functions[fn.name].ret
         if ret_type is not VOID:
             self.emit(f'return {cpp_type(ret_type)}{{}};')
@@ -118,6 +112,10 @@ class CodeGen:
                 self.emit('return;')
             else:
                 self.emit(f'return {self._expr(stmt.value)};')
+        elif isinstance(stmt, A.BreakStmt):
+            self.emit('break;')
+        elif isinstance(stmt, A.ContinueStmt):
+            self.emit('continue;')
         elif isinstance(stmt, A.IfStmt):
             self.emit(f'if ({self._expr(stmt.cond)}) {{')
             self.indent += 1
@@ -206,20 +204,16 @@ class CodeGen:
         f = c.func
         if isinstance(f, A.Name):
             name = f.name
-            # builtin constructors
             if name in ('Vec2', 'Vec3', 'Quat', 'Matrix4', 'Arena'):
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'vanta::{name}({args})'
-            # user struct construction
             st = self.tc.structs.get(name)
             if st is not None and not st.builtin:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{name}{{{args}}}'
-            # builtin function
             if name in BUILTIN_PRINT:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{BUILTIN_PRINT[name]}({args})'
-            # user function
             args = ', '.join(self._expr(a) for a in c.args)
             return f'fn_{name}({args})'
         if isinstance(f, A.Member):
@@ -242,4 +236,4 @@ class CodeGen:
                     return f'vanta::cross({base}, {self._expr(c.args[0])})'
                 if m == 'normalized':
                     return f'vanta::normalize({base})'
-        raise RuntimeError(f"cannot codegen call")
+        raise RuntimeError("cannot codegen call")

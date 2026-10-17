@@ -119,6 +119,8 @@ class Lexer:
         two_map = {
             '->': TT.ARROW, '==': TT.EQ, '!=': TT.NEQ,
             '<=': TT.LTE, '>=': TT.GTE, '::': TT.COLONCOLON,
+            '+=': TT.PLUS_EQ, '-=': TT.MINUS_EQ,
+            '*=': TT.STAR_EQ, '/=': TT.SLASH_EQ,
         }
         if two in two_map:
             self._adv()

@@ -1,4 +1,4 @@
-# Example B: ECS-style physics simulation
+# Example B: ECS-style physics simulation using compound assignment
 component Position:
     x: i32
     y: i32
@@ -11,9 +11,9 @@ component Velocity:
 
 system physics_system(positions: ptr<Position>, velocities: ptr<Velocity>, count: i32) -> void:
     for i in range(0, count):
-        positions[i].x = positions[i].x + velocities[i].x
-        positions[i].y = positions[i].y + velocities[i].y
-        positions[i].z = positions[i].z + velocities[i].z
+        positions[i].x += velocities[i].x
+        positions[i].y += velocities[i].y
+        positions[i].z += velocities[i].z
 
 func main() -> void:
     let arena = Arena(1048576)
