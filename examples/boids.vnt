@@ -1,0 +1,106 @@
+# boids.vnt — classic flocking simulation
+# 30 boids in a 100x100 torus, 60 update steps, deterministic init.
+# Exercises: ptr<Vec2>, nested loops, vector math, constants,
+# compound assignment, wrap-around bounds, elif chains.
+
+const N: i32 = 30
+const STEPS: i32 = 60
+const WIDTH: f32 = 100.0
+const HEIGHT: f32 = 100.0
+const NEIGHBOR_DIST: f32 = 25.0
+const SEPARATION_DIST: f32 = 8.0
+const MAX_SPEED: f32 = 2.0
+const MIN_SPEED: f32 = 0.5
+
+func init_boids(positions: ptr<Vec2>, velocities: ptr<Vec2>, count: i32) -> void:
+    for i in range(0, count):
+        let px = (i * 37 + 11) % 100
+        let py = (i * 71 + 43) % 100
+        positions[i] = Vec2(i32_to_f32(px), i32_to_f32(py))
+        let vx = (i * 23 + 5) % 20 - 10
+        let vy = (i * 53 + 7) % 20 - 10
+        velocities[i] = Vec2(i32_to_f32(vx) * 0.1, i32_to_f32(vy) * 0.1)
+
+func update_boids(positions: ptr<Vec2>, velocities: ptr<Vec2>, new_velocities: ptr<Vec2>, count: i32) -> void:
+    for i in range(0, count):
+        let pos_i = positions[i]
+        let vel_i = velocities[i]
+        mut coh_x: f32 = 0.0
+        mut coh_y: f32 = 0.0
+        mut ali_x: f32 = 0.0
+        mut ali_y: f32 = 0.0
+        mut sep_x: f32 = 0.0
+        mut sep_y: f32 = 0.0
+        mut n_neighbors: i32 = 0
+        for j in range(0, count):
+            if i == j:
+                continue
+            let d = pos_i - positions[j]
+            let dist = d.length()
+            if dist > 0.0 and dist < NEIGHBOR_DIST:
+                coh_x += positions[j].x
+                coh_y += positions[j].y
+                ali_x += velocities[j].x
+                ali_y += velocities[j].y
+                n_neighbors += 1
+                if dist < SEPARATION_DIST:
+                    sep_x -= d.x / dist
+                    sep_y -= d.y / dist
+        mut desired_x = vel_i.x
+        mut desired_y = vel_i.y
+        if n_neighbors > 0:
+            let n = i32_to_f32(n_neighbors)
+            desired_x += (coh_x / n - pos_i.x) * 0.005
+            desired_x += sep_x * 0.05
+            desired_x += (ali_x / n - vel_i.x) * 0.05
+            desired_y += (coh_y / n - pos_i.y) * 0.005
+            desired_y += sep_y * 0.05
+            desired_y += (ali_y / n - vel_i.y) * 0.05
+        let speed = sqrt_f32(desired_x * desired_x + desired_y * desired_y)
+        if speed > MAX_SPEED:
+            desired_x = desired_x / speed * MAX_SPEED
+            desired_y = desired_y / speed * MAX_SPEED
+        elif speed > 0.0 and speed < MIN_SPEED:
+            desired_x = desired_x / speed * MIN_SPEED
+            desired_y = desired_y / speed * MIN_SPEED
+        new_velocities[i] = Vec2(desired_x, desired_y)
+    for i in range(0, count):
+        velocities[i] = new_velocities[i]
+        mut p = positions[i] + velocities[i]
+        if p.x < 0.0:
+            p.x += WIDTH
+        elif p.x >= WIDTH:
+            p.x -= WIDTH
+        if p.y < 0.0:
+            p.y += HEIGHT
+        elif p.y >= HEIGHT:
+            p.y -= HEIGHT
+        positions[i] = p
+
+func main() -> void:
+    let arena = Arena(65536)
+    let positions = arena.alloc::<Vec2>(N)
+    let velocities = arena.alloc::<Vec2>(N)
+    let new_velocities = arena.alloc::<Vec2>(N)
+    init_boids(positions, velocities, N)
+    for step in range(0, STEPS):
+        update_boids(positions, velocities, new_velocities, N)
+    mut q0: i32 = 0
+    mut q1: i32 = 0
+    mut q2: i32 = 0
+    mut q3: i32 = 0
+    for i in range(0, N):
+        let x = positions[i].x
+        let y = positions[i].y
+        if x < 50.0 and y < 50.0:
+            q0 += 1
+        elif x >= 50.0 and y < 50.0:
+            q1 += 1
+        elif x < 50.0 and y >= 50.0:
+            q2 += 1
+        else:
+            q3 += 1
+    print_i32(q0)
+    print_i32(q1)
+    print_i32(q2)
+    print_i32(q3)

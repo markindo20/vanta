@@ -99,6 +99,32 @@ class IntegrationTests(unittest.TestCase):
                             ['Hello, Vanta!', 'tab:\there', 'quote: "hi"',
                              'true', 'false'])
 
+    def test_boids_example(self):
+        name, path = find_cxx_compiler()
+        source = os.path.join(EXAMPLES, 'boids.vnt')
+        prog, tc = _frontend_only(source)
+        tmp = tempfile.mkdtemp(prefix='vanta_boids_')
+        try:
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            lines = r.stdout.strip().splitlines()
+            # Exactly 4 quadrant counts
+            self.assertEqual(len(lines), 4)
+            # Every count is non-negative
+            for line in lines:
+                self.assertGreaterEqual(int(line), 0)
+            # Sum equals N — every boid in exactly one quadrant
+            total = sum(int(x) for x in lines)
+            self.assertEqual(total, 30)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 
