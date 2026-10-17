@@ -1,0 +1,39 @@
+from dataclasses import dataclass
+from enum import Enum, auto
+
+
+class TT(Enum):
+    INT = auto(); FLOAT = auto(); IDENT = auto()
+    FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto()
+    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto()
+    IF = auto(); ELIF = auto(); ELSE = auto()
+    WHILE = auto(); FOR = auto(); IN = auto()
+    TRUE = auto(); FALSE = auto()
+    AND = auto(); OR = auto(); NOT = auto()
+    PLUS = auto(); MINUS = auto(); STAR = auto(); SLASH = auto(); PERCENT = auto()
+    EQ = auto(); NEQ = auto(); LT = auto(); LTE = auto(); GT = auto(); GTE = auto()
+    ASSIGN = auto(); ARROW = auto()
+    LPAREN = auto(); RPAREN = auto(); LBRACKET = auto(); RBRACKET = auto()
+    COLON = auto(); COMMA = auto(); DOT = auto(); COLONCOLON = auto()
+    NEWLINE = auto(); INDENT = auto(); DEDENT = auto(); EOF = auto()
+
+
+KEYWORDS = {
+    'func': TT.FUNC, 'let': TT.LET, 'mut': TT.MUT, 'return': TT.RETURN,
+    'struct': TT.STRUCT, 'component': TT.COMPONENT, 'system': TT.SYSTEM,
+    'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE,
+    'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,
+    'true': TT.TRUE, 'false': TT.FALSE,
+    'and': TT.AND, 'or': TT.OR, 'not': TT.NOT,
+}
+
+
+@dataclass
+class Token:
+    type: TT
+    value: object
+    line: int
+    col: int
+
+    def __repr__(self):
+        return f"Token({self.type.name}, {self.value!r}, {self.line}:{self.col})"

@@ -1,0 +1,33 @@
+# Example B: ECS-style physics simulation
+component Position:
+    x: i32
+    y: i32
+    z: i32
+
+component Velocity:
+    x: i32
+    y: i32
+    z: i32
+
+system physics_system(positions: ptr<Position>, velocities: ptr<Velocity>, count: i32) -> void:
+    for i in range(0, count):
+        positions[i].x = positions[i].x + velocities[i].x
+        positions[i].y = positions[i].y + velocities[i].y
+        positions[i].z = positions[i].z + velocities[i].z
+
+func main() -> void:
+    let arena = Arena(1048576)
+    let count: i32 = 100
+    let positions = arena.alloc::<Position>(count)
+    let velocities = arena.alloc::<Velocity>(count)
+
+    for i in range(0, count):
+        positions[i] = Position(x: 0, y: 0, z: 0)
+        velocities[i] = Velocity(x: 1, y: 2, z: 3)
+
+    for step in range(0, 60):
+        physics_system(positions, velocities, count)
+
+    print_i32(positions[0].x)
+    print_i32(positions[0].y)
+    print_i32(positions[0].z)

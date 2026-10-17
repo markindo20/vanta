@@ -1,0 +1,62 @@
+import os, sys, unittest
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from compiler.lexer import Lexer
+from compiler.parser import Parser, ParseError
+from compiler import ast_nodes as A
+
+
+def parse(src):
+    toks = Lexer(src).tokenize()
+    return Parser(toks).parse_program()
+
+
+class ParserTests(unittest.TestCase):
+    def test_function_decl(self):
+        prog = parse("func add(a: i32, b: i32) -> i32:\n    return a + b\n")
+        self.assertEqual(len(prog.decls), 1)
+        fn = prog.decls[0]
+        self.assertIsInstance(fn, A.FuncDecl)
+        self.assertEqual(fn.name, 'add')
+        self.assertEqual(len(fn.params), 2)
+
+    def test_struct_decl(self):
+        prog = parse("struct P:\n    x: i32\n    y: f32\n")
+        sd = prog.decls[0]
+        self.assertIsInstance(sd, A.StructDecl)
+        self.assertEqual(len(sd.fields), 2)
+
+    def test_operator_precedence(self):
+        prog = parse("func f() -> i32:\n    return 1 + 2 * 3\n")
+        ret = prog.decls[0].body[0]
+        self.assertIsInstance(ret.value, A.BinOp)
+        self.assertEqual(ret.value.op, '+')
+        self.assertEqual(ret.value.right.op, '*')
+
+    def test_if_else(self):
+        src = ("func f() -> i32:\n"
+               "    if a == 1:\n"
+               "        return 1\n"
+               "    elif a == 2:\n"
+               "        return 2\n"
+               "    else:\n"
+               "        return 3\n")
+        prog = parse(src)
+        stmt = prog.decls[0].body[0]
+        self.assertIsInstance(stmt, A.IfStmt)
+        self.assertEqual(len(stmt.elif_branches), 1)
+        self.assertIsNotNone(stmt.else_body)
+
+    def test_for_loop(self):
+        prog = parse("func f() -> void:\n    for i in range(0, 10):\n        print_i32(i)\n")
+        stmt = prog.decls[0].body[0]
+        self.assertIsInstance(stmt, A.ForRangeStmt)
+        self.assertEqual(stmt.var, 'i')
+
+    def test_syntax_error(self):
+        with self.assertRaises(ParseError):
+            parse("func f(:\n    return 1\n")
+
+
+if __name__ == '__main__':
+    unittest.main()
