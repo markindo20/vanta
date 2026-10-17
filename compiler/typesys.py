@@ -57,11 +57,15 @@ F32 = PrimType("f32")
 F64 = PrimType("f64")
 BOOL = PrimType("bool")
 VOID = PrimType("void")
+STR = PrimType("str")
 INT_LIT = IntLitType()
 FLOAT_LIT = FloatLitType()
 INFER = InferType()
 
-PRIM_TYPES = {"i32": I32, "u32": U32, "f32": F32, "f64": F64, "bool": BOOL, "void": VOID}
+PRIM_TYPES = {
+    "i32": I32, "u32": U32, "f32": F32, "f64": F64,
+    "bool": BOOL, "void": VOID, "str": STR,
+}
 
 
 def is_int(t): return t is I32 or t is U32

@@ -55,7 +55,6 @@ class Parser:
         tok = tok or self.peek()
         raise ParseError(msg, self.filename, A.Pos(tok.line, tok.col))
 
-    # ---------------- Top level ----------------
     def parse_program(self):
         decls = []
         while not self.check(TT.EOF):
@@ -148,7 +147,6 @@ class Parser:
             return A.TypeExpr('ptr', inner=inner, pos=A.Pos(t.line, t.col))
         return A.TypeExpr('named', name=t.value, pos=A.Pos(t.line, t.col))
 
-    # ---------------- Statements ----------------
     def parse_block(self):
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
@@ -247,7 +245,6 @@ class Parser:
     def parse_expr_or_assign(self):
         tok = self.peek()
         expr = self.parse_expr()
-
         if self.peek().type in COMPOUND_OPS:
             op_tok = self.advance()
             op = COMPOUND_OPS[op_tok.type]
@@ -258,7 +255,6 @@ class Parser:
                 A.BinOp(op, expr, val, A.Pos(op_tok.line, op_tok.col)),
                 A.Pos(tok.line, tok.col),
             )
-
         if self.check(TT.ASSIGN):
             self.advance()
             val = self.parse_expr()
@@ -267,7 +263,6 @@ class Parser:
         self.expect(TT.NEWLINE)
         return A.ExprStmt(expr, A.Pos(tok.line, tok.col))
 
-    # ---------------- Expressions ----------------
     def parse_expr(self, min_prec=0):
         left = self.parse_unary()
         while True:
@@ -340,6 +335,8 @@ class Parser:
             self.advance(); return A.IntLit(t.value, A.Pos(t.line, t.col))
         if t.type == TT.FLOAT:
             self.advance(); return A.FloatLit(t.value, A.Pos(t.line, t.col))
+        if t.type == TT.STRING:
+            self.advance(); return A.StringLit(t.value, A.Pos(t.line, t.col))
         if t.type == TT.TRUE:
             self.advance(); return A.BoolLit(True, A.Pos(t.line, t.col))
         if t.type == TT.FALSE:

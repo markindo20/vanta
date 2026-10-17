@@ -123,6 +123,12 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(v.value, A.ArrayLit)
         self.assertEqual(len(v.value.elements), 3)
 
+    def test_string_literal_parse(self):
+        prog = parse('func f() -> void:\n    let s = "hi"\n')
+        v = prog.decls[0].body[0]
+        self.assertIsInstance(v.value, A.StringLit)
+        self.assertEqual(v.value.value, "hi")
+
 
 if __name__ == '__main__':
     unittest.main()

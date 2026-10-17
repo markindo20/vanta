@@ -94,6 +94,11 @@ class IntegrationTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_strings_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'strings.vnt'),
+                            ['Hello, Vanta!', 'tab:\there', 'quote: "hi"',
+                             'true', 'false'])
+
 
 
 

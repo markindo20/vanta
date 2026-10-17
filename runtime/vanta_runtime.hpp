@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <cstddef>
 #include <array>
@@ -24,6 +25,10 @@ inline bool operator==(Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; }
 inline bool operator!=(Vec2 a, Vec2 b) { return !(a == b); }
 inline float dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
 inline float length(Vec2 a) { return std::sqrt(dot(a, a)); }
+inline Vec2 normalize(Vec2 a) {
+    float l = length(a);
+    return l > 0.0f ? a / l : Vec2(0, 0);
+}
 
 // ---------- Vec3 ----------
 struct Vec3 {
@@ -58,7 +63,6 @@ struct Quat {
     Quat(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
 };
 
-// Quat * Quat (Hamilton product)
 inline Quat operator*(Quat a, Quat b) {
     return Quat(
         a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -68,7 +72,6 @@ inline Quat operator*(Quat a, Quat b) {
     );
 }
 
-// Quat rotates Vec3 (assumes unit quaternion)
 inline Vec3 operator*(Quat q, Vec3 v) {
     Vec3 u(q.x, q.y, q.z);
     float s = q.w;
@@ -77,19 +80,20 @@ inline Vec3 operator*(Quat q, Vec3 v) {
     return v + 2.0f * (s * uv + uuv);
 }
 
-// Vec3 rotated by inverse of quat
 inline Vec3 operator*(Vec3 v, Quat q) {
     return Quat(-q.x, -q.y, -q.z, q.w) * v;
 }
 
+inline float dot(Quat a, Quat b) {
+    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+}
 inline float length(Quat q) {
-    return std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+    return std::sqrt(dot(q, q));
 }
 inline Quat normalize(Quat q) {
     float l = length(q);
     return l > 0.0f ? Quat(q.x/l, q.y/l, q.z/l, q.w/l) : Quat(0, 0, 0, 1);
 }
-inline Quat quat_identity() { return Quat(0, 0, 0, 1); }
 
 // ---------- Matrix4 (row-major) ----------
 struct Matrix4 {
@@ -100,7 +104,6 @@ struct Matrix4 {
     }
 };
 
-// Matrix4 * Vec3 (homogeneous, w = 1)
 inline Vec3 operator*(const Matrix4& M, Vec3 v) {
     return Vec3(
         M.m[0] * v.x + M.m[1] * v.y + M.m[2] * v.z + M.m[3],
@@ -109,7 +112,6 @@ inline Vec3 operator*(const Matrix4& M, Vec3 v) {
     );
 }
 
-// Matrix4 * Matrix4
 inline Matrix4 operator*(const Matrix4& A, const Matrix4& B) {
     Matrix4 R;
     for (int i = 0; i < 4; ++i) {
@@ -138,7 +140,6 @@ inline Matrix4 mat4_scale(float s) {
     return M;
 }
 
-// Build rotation matrix from quaternion (assumes normalized q)
 inline Matrix4 mat4_from_quat(Quat q) {
     Matrix4 M;
     float xx = q.x*q.x, yy = q.y*q.y, zz = q.z*q.z;
@@ -208,10 +209,18 @@ inline void print_u32(uint32_t v) { std::printf("%u\n", (unsigned)v); }
 inline void print_f32(float v) { std::printf("%f\n", (double)v); }
 inline void print_f64(double v) { std::printf("%lf\n", v); }
 inline void print_bool(bool v) { std::printf("%s\n", v ? "true" : "false"); }
+inline void print_str(const char* s) { std::printf("%s\n", s); }
 inline void print_newline() { std::printf("\n"); }
 inline float sqrt_f32(float v) { return std::sqrt(v); }
 inline double sqrt_f64(double v) { return std::sqrt(v); }
 inline float i32_to_f32(int32_t v) { return (float)v; }
 inline int32_t f32_to_i32(float v) { return (int32_t)v; }
+
+// ---------- String helpers ----------
+inline bool str_eq(const char* a, const char* b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    return std::strcmp(a, b) == 0;
+}
 
 }

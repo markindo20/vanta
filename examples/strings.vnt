@@ -1,0 +1,12 @@
+# String literals, escapes, and print_str
+
+func greet(name: str) -> void:
+    print_str(name)
+
+func main() -> void:
+    let greeting = "Hello, Vanta!"
+    greet(greeting)
+    print_str("tab:\there")
+    print_str("quote: \"hi\"")
+    print_bool(greeting == "Hello, Vanta!")
+    print_bool(greeting == "Goodbye")

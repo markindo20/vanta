@@ -63,10 +63,23 @@ class LexerTests(unittest.TestCase):
     def test_tab_rejected(self):
         with self.assertRaises(LexError):
             lex("func f():\n\treturn 1\n")
-            
+
     def test_const_keyword(self):
         toks = lex("const X = 1\n")
         self.assertEqual(toks[0].type, TT.CONST)
+
+    def test_string_literal(self):
+        toks = lex('"hello"\n')
+        self.assertEqual(toks[0].type, TT.STRING)
+        self.assertEqual(toks[0].value, 'hello')
+
+    def test_string_escapes(self):
+        toks = lex(r'"a\nb\tc\\d\"e"' + '\n')
+        self.assertEqual(toks[0].value, 'a\nb\tc\\d"e')
+
+    def test_unterminated_string(self):
+        with self.assertRaises(LexError):
+            lex('"hello\n')
 
 
 if __name__ == '__main__':

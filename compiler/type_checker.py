@@ -2,7 +2,7 @@ from . import ast_nodes as A
 from .typesys import (
     Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType,
     StructType,
-    I32, U32, F32, F64, BOOL, VOID, INT_LIT, FLOAT_LIT, INFER,
+    I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
 
@@ -31,7 +31,6 @@ class TypeChecker:
         self.return_values: list = []
         self._register_builtins()
 
-    # ---------------- registration ----------------
     def _register_builtins(self):
         self.structs["Vec2"] = StructType("Vec2", {"x": F32, "y": F32}, builtin=True)
         self.structs["Vec3"] = StructType("Vec3", {"x": F32, "y": F32, "z": F32}, builtin=True)
@@ -47,11 +46,15 @@ class TypeChecker:
         bf("print_f32", [("v", F32)], VOID)
         bf("print_f64", [("v", F64)], VOID)
         bf("print_bool", [("v", BOOL)], VOID)
+        bf("print_str", [("s", STR)], VOID)
         bf("sqrt_f32", [("v", F32)], F32)
         bf("sqrt_f64", [("v", F64)], F64)
         bf("i32_to_f32", [("v", I32)], F32)
         bf("f32_to_i32", [("v", F32)], I32)
         bf("assert", [("cond", BOOL)], VOID)
+        bf("translation", [("x", F32), ("y", F32), ("z", F32)], self.structs["Matrix4"])
+        bf("scale", [("s", F32)], self.structs["Matrix4"])
+        bf("from_quat", [("q", self.structs["Quat"])], self.structs["Matrix4"])
 
     def _resolve_type(self, te: A.TypeExpr) -> Type:
         if te.kind == 'ptr':
@@ -120,7 +123,7 @@ class TypeChecker:
         self.constants[c.name] = vt
 
     def _is_constexpr(self, expr) -> bool:
-        if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit)):
+        if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit, A.StringLit)):
             return True
         if isinstance(expr, A.Name):
             return True
@@ -130,7 +133,6 @@ class TypeChecker:
             return self._is_constexpr(expr.operand)
         return False
 
-    # ---------------- scopes ----------------
     def _push(self):
         self.scopes.append({})
 
@@ -151,7 +153,6 @@ class TypeChecker:
             return (self.constants[name], False)
         return None
 
-    # ---------------- check ----------------
     def check(self):
         for d in self.program.decls:
             if isinstance(d, A.FuncDecl):
@@ -212,7 +213,6 @@ class TypeChecker:
         for (v, t) in typed:
             self._coerce_value(v, t, base, v.pos, "inferred return value")
 
-    # ---------------- statements ----------------
     def _check_stmt(self, stmt):
         if isinstance(stmt, A.VarDecl):
             self._check_var_decl(stmt)
@@ -352,7 +352,6 @@ class TypeChecker:
         if ct is not BOOL:
             raise CheckError(f"condition must be bool, got {ct}", self.filename, pos)
 
-    # ---------------- expressions ----------------
     def _check_expr(self, expr) -> Type:
         if isinstance(expr, A.IntLit):
             expr.type = INT_LIT; return INT_LIT
@@ -360,6 +359,8 @@ class TypeChecker:
             expr.type = FLOAT_LIT; return FLOAT_LIT
         if isinstance(expr, A.BoolLit):
             expr.type = BOOL; return BOOL
+        if isinstance(expr, A.StringLit):
+            expr.type = STR; return STR
         if isinstance(expr, A.ArrayLit):
             return self._check_array_lit(expr)
         if isinstance(expr, A.Name):
@@ -415,7 +416,7 @@ class TypeChecker:
             raise CheckError("empty array literal is not supported; use an explicit type",
                              self.filename, expr.pos)
         types = [self._check_expr(e) for e in expr.elements]
-        expr.element_types = list(types)  # save raw types for later coercion
+        expr.element_types = list(types)
         concrete = [t for t in types if not (t is INT_LIT or t is FLOAT_LIT)]
         if concrete:
             base = concrete[0]
@@ -429,7 +430,6 @@ class TypeChecker:
                 base = I32
             else:
                 base = F32
-        # Default annotation (may be overridden by _coerce_value)
         for e in expr.elements:
             e.type = base
         t = ArrayType(base, len(expr.elements))
@@ -449,6 +449,10 @@ class TypeChecker:
                         and lt == rt and lt.name in ("Vec2", "Vec3")):
                     return BOOL
                 raise CheckError(f"cannot compare {lt} and {rt} with '{op}'", self.filename, expr.pos)
+            if lt is STR or rt is STR:
+                if op in ('==', '!=') and lt is STR and rt is STR:
+                    return BOOL
+                raise CheckError(f"cannot compare str with '{op}'", self.filename, expr.pos)
             if lt != rt:
                 raise CheckError(f"cannot compare {lt} and {rt}", self.filename, expr.pos)
             return BOOL
@@ -465,7 +469,6 @@ class TypeChecker:
             if isinstance(rt, StructType) and rt.name in ("Vec2", "Vec3"):
                 if is_float(lt) and op == '*':
                     return rt
-            # Math-type operations: Matrix4 and Quat
             if op == '*' and isinstance(lt, StructType) and isinstance(rt, StructType):
                 if lt.name == 'Matrix4' and rt.name == 'Matrix4':
                     return lt
@@ -536,7 +539,6 @@ class TypeChecker:
             return F32
         return t
 
-    # ---------------- calls ----------------
     def _check_call(self, call: A.Call) -> Type:
         f = call.func
         if isinstance(f, A.Name):
@@ -694,7 +696,7 @@ class TypeChecker:
                 if at is not st:
                     raise CheckError("cross expects Vec3", self.filename, call.pos)
                 call.type = st; return st
-            if method == "normalized" and st.name == "Vec3":
+            if method == "normalized":
                 if call.args:
                     raise CheckError("normalized takes no arguments", self.filename, call.pos)
                 call.type = st; return st
@@ -707,4 +709,11 @@ class TypeChecker:
                 if call.args:
                     raise CheckError("normalized takes no arguments", self.filename, call.pos)
                 call.type = st; return st
+            if method == "dot":
+                if len(call.args) != 1:
+                    raise CheckError("dot takes one argument", self.filename, call.pos)
+                at = self._check_expr(call.args[0])
+                if at is not st:
+                    raise CheckError("dot expects Quat", self.filename, call.pos)
+                call.type = F32; return F32
         raise CheckError(f"type {st.name} has no method '{method}'", self.filename, call.pos)

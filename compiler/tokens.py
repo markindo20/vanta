@@ -3,7 +3,7 @@ from enum import Enum, auto
 
 
 class TT(Enum):
-    INT = auto(); FLOAT = auto(); IDENT = auto()
+    INT = auto(); FLOAT = auto(); STRING = auto(); IDENT = auto()
     FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto(); CONST = auto()
     STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto()
     IF = auto(); ELIF = auto(); ELSE = auto()

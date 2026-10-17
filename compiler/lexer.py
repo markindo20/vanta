@@ -78,6 +78,8 @@ class Lexer:
                 while self.pos < len(self.source) and self._peek() != '\n':
                     self._adv()
                 continue
+            if ch == '"':
+                self._lex_string(); continue
             if ch.isdigit():
                 self._lex_number(); continue
             if ch.isalpha() or ch == '_':
@@ -111,6 +113,37 @@ class Lexer:
         while self._peek().isalnum() or self._peek() == '_':
             name += self._adv()
         self._emit(KEYWORDS.get(name, TT.IDENT), name, line, col)
+
+    def _lex_string(self):
+        line, col = self.line, self.col
+        self._adv()  # opening "
+        buf = []
+        while True:
+            c = self._peek()
+            if c == '':
+                self._err("unterminated string literal", line, col)
+            if c == '\n':
+                self._err("unterminated string literal", line, col)
+            if c == '"':
+                self._adv()
+                break
+            if c == '\\':
+                self._adv()
+                esc = self._peek()
+                if esc == '':
+                    self._err("unterminated escape sequence", line, col)
+                self._adv()
+                if esc == 'n': buf.append('\n')
+                elif esc == 't': buf.append('\t')
+                elif esc == 'r': buf.append('\r')
+                elif esc == '\\': buf.append('\\')
+                elif esc == '"': buf.append('"')
+                elif esc == '0': buf.append('\0')
+                else: self._err(f"unknown escape sequence '\\{esc}'", line, col)
+            else:
+                buf.append(c)
+                self._adv()
+        self._emit(TT.STRING, ''.join(buf), line, col)
 
     def _lex_op(self):
         line, col = self.line, self.col

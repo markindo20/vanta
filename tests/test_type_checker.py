@@ -189,6 +189,56 @@ class TypeCheckerTests(unittest.TestCase):
         c_decl = prog.decls[0].body[2]
         self.assertEqual(c_decl.var_type.name, 'Matrix4')
 
+    def test_str_inference(self):
+        from compiler.typesys import STR
+        prog, tc = run('func f() -> void:\n    let s = "hi"\n')
+        v = prog.decls[0].body[0]
+        self.assertEqual(v.var_type, STR)
+
+    def test_print_str_ok(self):
+        run('func f() -> void:\n    print_str("hi")\n')
+
+    def test_str_eq(self):
+        from compiler.typesys import BOOL
+        prog, tc = run('func f() -> void:\n    let b = "a" == "b"\n')
+        b_decl = prog.decls[0].body[0]
+        self.assertEqual(b_decl.var_type, BOOL)
+
+    def test_str_ordering_rejected(self):
+        with self.assertRaises(CheckError):
+            run('func f() -> void:\n    let b = "a" < "b"\n')
+
+    def test_str_const(self):
+        from compiler.typesys import STR
+        prog, tc = run('const GREETING = "hello"\n')
+        self.assertEqual(tc.constants['GREETING'], STR)
+
+    def test_vec2_normalized(self):
+        prog, tc = run("func f() -> void:\n    let v = Vec2(3.0, 4.0)\n    let n = v.normalized()\n")
+        n_decl = prog.decls[0].body[1]
+        self.assertEqual(n_decl.var_type.name, 'Vec2')
+
+    def test_quat_dot(self):
+        from compiler.typesys import F32
+        prog, tc = run("func f() -> void:\n    let a = Quat(0.0, 0.0, 0.0, 1.0)\n    let b = Quat(0.0, 0.0, 0.0, 1.0)\n    let d = a.dot(b)\n")
+        d_decl = prog.decls[0].body[2]
+        self.assertEqual(d_decl.var_type, F32)
+
+    def test_translation_builtin(self):
+        prog, tc = run("func f() -> void:\n    let m = translation(1.0, 2.0, 3.0)\n")
+        m_decl = prog.decls[0].body[0]
+        self.assertEqual(m_decl.var_type.name, 'Matrix4')
+
+    def test_scale_builtin(self):
+        prog, tc = run("func f() -> void:\n    let m = scale(2.0)\n")
+        m_decl = prog.decls[0].body[0]
+        self.assertEqual(m_decl.var_type.name, 'Matrix4')
+
+    def test_from_quat_builtin(self):
+        prog, tc = run("func f() -> void:\n    let q = Quat(0.0, 0.0, 0.0, 1.0)\n    let m = from_quat(q)\n")
+        m_decl = prog.decls[0].body[1]
+        self.assertEqual(m_decl.var_type.name, 'Matrix4')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -88,6 +88,26 @@ class CodegenTests(unittest.TestCase):
         cpp = gen("func main() -> void:\n    let q = Quat(0.0, 0.0, 0.0, 1.0)\n    let r = q * q\n")
         self.assertIn('(v_q * v_q)', cpp)
 
+    def test_string_lit_emit(self):
+        cpp = gen('func main() -> void:\n    print_str("hi")\n')
+        self.assertIn('vanta::print_str("hi")', cpp)
+
+    def test_string_escape_emit(self):
+        cpp = gen(r'func main() -> void:' + '\n' + r'    print_str("a\nb")' + '\n')
+        self.assertIn('\\n', cpp)
+
+    def test_str_eq_emit(self):
+        cpp = gen('func main() -> void:\n    let b = "a" == "b"\n')
+        self.assertIn('vanta::str_eq', cpp)
+
+    def test_translation_emit(self):
+        cpp = gen("func main() -> void:\n    let m = translation(1.0, 2.0, 3.0)\n")
+        self.assertIn('vanta::mat4_translation(', cpp)
+
+    def test_vec2_normalized_emit(self):
+        cpp = gen("func main() -> void:\n    let v = Vec2(3.0, 4.0)\n    let n = v.normalized()\n")
+        self.assertIn('vanta::normalize(v_v)', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

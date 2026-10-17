@@ -138,6 +138,12 @@ class BoolLit:
 
 
 @dataclass
+class StringLit:
+    value: str
+    pos: Pos
+
+
+@dataclass
 class ArrayLit:
     elements: List[Any]
     pos: Pos
