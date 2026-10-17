@@ -129,6 +129,15 @@ class Parser:
 
     def parse_type(self):
         t = self.peek()
+        if t.type == TT.LBRACKET:
+            self.advance()
+            inner = self.parse_type()
+            self.expect(TT.COMMA)
+            size_tok = self.expect(TT.INT)
+            if size_tok.value <= 0:
+                self.error("array size must be a positive integer", size_tok)
+            self.expect(TT.RBRACKET)
+            return A.TypeExpr('array', inner=inner, size=size_tok.value, pos=A.Pos(t.line, t.col))
         if t.type != TT.IDENT:
             self.error("expected type name")
         self.advance()
@@ -335,6 +344,17 @@ class Parser:
             self.advance(); return A.BoolLit(True, A.Pos(t.line, t.col))
         if t.type == TT.FALSE:
             self.advance(); return A.BoolLit(False, A.Pos(t.line, t.col))
+        if t.type == TT.LBRACKET:
+            self.advance()
+            elements = []
+            if not self.check(TT.RBRACKET):
+                while True:
+                    elements.append(self.parse_expr())
+                    if self.match(TT.COMMA):
+                        continue
+                    break
+            self.expect(TT.RBRACKET)
+            return A.ArrayLit(elements, A.Pos(t.line, t.col))
         if t.type == TT.IDENT:
             self.advance()
             name_pos = A.Pos(t.line, t.col)

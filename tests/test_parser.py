@@ -110,6 +110,19 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt.expr, A.Call)
         self.assertEqual(stmt.expr.func.name, 'assert')
 
+    def test_array_type_annotation(self):
+        prog = parse("func f() -> void:\n    let xs: [i32, 4] = [1, 2, 3, 4]\n")
+        v = prog.decls[0].body[0]
+        self.assertIsNotNone(v.type_ann)
+        self.assertEqual(v.type_ann.kind, 'array')
+        self.assertEqual(v.type_ann.size, 4)
+
+    def test_array_literal_parse(self):
+        prog = parse("func f() -> void:\n    let xs = [10, 20, 30]\n")
+        v = prog.decls[0].body[0]
+        self.assertIsInstance(v.value, A.ArrayLit)
+        self.assertEqual(len(v.value.elements), 3)
+
 
 if __name__ == '__main__':
     unittest.main()

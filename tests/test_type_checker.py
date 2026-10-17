@@ -133,6 +133,62 @@ class TypeCheckerTests(unittest.TestCase):
     def test_matrix4_vec3(self):
         run("func f() -> void:\n    let m = Matrix4()\n    let v = Vec3(1.0, 2.0, 3.0)\n    let r = m * v\n")
 
+    def test_array_inference(self):
+        from compiler.typesys import I32, ArrayType
+        prog, tc = run("func f() -> void:\n    let xs = [1, 2, 3, 4]\n")
+        v = prog.decls[0].body[0]
+        self.assertEqual(v.var_type, ArrayType(I32, 4))
+
+    def test_array_f32_coercion(self):
+        from compiler.typesys import F32, ArrayType
+        prog, tc = run("func f() -> void:\n    let xs: [f32, 3] = [1, 2, 3]\n")
+        v = prog.decls[0].body[0]
+        self.assertEqual(v.var_type, ArrayType(F32, 3))
+
+    def test_array_size_mismatch(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let xs: [i32, 3] = [1, 2, 3, 4]\n")
+
+    def test_array_index_assign_mutable(self):
+        run("func f() -> void:\n    mut xs = [1, 2, 3]\n    xs[0] = 5\n")
+
+    def test_array_index_assign_immutable(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let xs = [1, 2, 3]\n    xs[0] = 5\n")
+
+    def test_array_compound_assign_element(self):
+        run("func f() -> void:\n    mut xs = [1, 2, 3]\n    xs[0] += 10\n")
+
+    def test_len_array(self):
+        from compiler.typesys import I32
+        prog, tc = run("func f() -> void:\n    let xs = [1, 2, 3]\n    let n = len(xs)\n")
+        n_decl = prog.decls[0].body[1]
+        self.assertEqual(n_decl.var_type, I32)
+
+    def test_len_non_array(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let n = len(5)\n")
+
+    def test_empty_array_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let xs = []\n")
+
+    def test_quat_vec3_mul(self):
+        from compiler.typesys import F32
+        prog, tc = run("func f() -> void:\n    let q = Quat(0.0, 0.0, 0.0, 1.0)\n    let v = Vec3(1.0, 0.0, 0.0)\n    let r = q * v\n")
+        r_decl = prog.decls[0].body[2]
+        self.assertEqual(r_decl.var_type.name, 'Vec3')
+
+    def test_quat_quat_mul(self):
+        prog, tc = run("func f() -> void:\n    let a = Quat(0.0, 0.0, 0.0, 1.0)\n    let b = Quat(0.0, 0.0, 0.0, 1.0)\n    let c = a * b\n")
+        c_decl = prog.decls[0].body[2]
+        self.assertEqual(c_decl.var_type.name, 'Quat')
+
+    def test_matrix4_matrix4_mul(self):
+        prog, tc = run("func f() -> void:\n    let a = Matrix4()\n    let b = Matrix4()\n    let c = a * b\n")
+        c_decl = prog.decls[0].body[2]
+        self.assertEqual(c_decl.var_type.name, 'Matrix4')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -4,10 +4,11 @@
 #include <cstdio>
 #include <cmath>
 #include <cstddef>
+#include <array>
 
 namespace vanta {
 
-// ---------- Math types (compact, allocation-free) ----------
+// ---------- Vec2 ----------
 struct Vec2 {
     float x, y;
     Vec2() : x(0), y(0) {}
@@ -24,6 +25,7 @@ inline bool operator!=(Vec2 a, Vec2 b) { return !(a == b); }
 inline float dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
 inline float length(Vec2 a) { return std::sqrt(dot(a, a)); }
 
+// ---------- Vec3 ----------
 struct Vec3 {
     float x, y, z;
     Vec3() : x(0), y(0), z(0) {}
@@ -49,27 +51,109 @@ inline Vec3 normalize(Vec3 a) {
     return l > 0.0f ? a / l : Vec3(0, 0, 0);
 }
 
+// ---------- Quat ----------
 struct Quat {
     float x, y, z, w;
     Quat() : x(0), y(0), z(0), w(1) {}
     Quat(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
 };
 
+// Quat * Quat (Hamilton product)
+inline Quat operator*(Quat a, Quat b) {
+    return Quat(
+        a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    );
+}
+
+// Quat rotates Vec3 (assumes unit quaternion)
+inline Vec3 operator*(Quat q, Vec3 v) {
+    Vec3 u(q.x, q.y, q.z);
+    float s = q.w;
+    Vec3 uv = cross(u, v);
+    Vec3 uuv = cross(u, uv);
+    return v + 2.0f * (s * uv + uuv);
+}
+
+// Vec3 rotated by inverse of quat
+inline Vec3 operator*(Vec3 v, Quat q) {
+    return Quat(-q.x, -q.y, -q.z, q.w) * v;
+}
+
+inline float length(Quat q) {
+    return std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+}
+inline Quat normalize(Quat q) {
+    float l = length(q);
+    return l > 0.0f ? Quat(q.x/l, q.y/l, q.z/l, q.w/l) : Quat(0, 0, 0, 1);
+}
+inline Quat quat_identity() { return Quat(0, 0, 0, 1); }
+
+// ---------- Matrix4 (row-major) ----------
 struct Matrix4 {
-    float m[16];  // row-major: m[row*4 + col]
+    float m[16];
     Matrix4() {
         for (int i = 0; i < 16; ++i) m[i] = 0.0f;
         m[0] = m[5] = m[10] = m[15] = 1.0f;
     }
 };
 
-// Matrix4 * Vec3 (treats Vec3 as homogeneous (x, y, z, 1))
+// Matrix4 * Vec3 (homogeneous, w = 1)
 inline Vec3 operator*(const Matrix4& M, Vec3 v) {
     return Vec3(
         M.m[0] * v.x + M.m[1] * v.y + M.m[2] * v.z + M.m[3],
         M.m[4] * v.x + M.m[5] * v.y + M.m[6] * v.z + M.m[7],
         M.m[8] * v.x + M.m[9] * v.y + M.m[10] * v.z + M.m[11]
     );
+}
+
+// Matrix4 * Matrix4
+inline Matrix4 operator*(const Matrix4& A, const Matrix4& B) {
+    Matrix4 R;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            float s = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                s += A.m[i*4+k] * B.m[k*4+j];
+            }
+            R.m[i*4+j] = s;
+        }
+    }
+    return R;
+}
+
+inline Matrix4 mat4_translation(float x, float y, float z) {
+    Matrix4 M;
+    M.m[3] = x;
+    M.m[7] = y;
+    M.m[11] = z;
+    return M;
+}
+
+inline Matrix4 mat4_scale(float s) {
+    Matrix4 M;
+    M.m[0] = M.m[5] = M.m[10] = s;
+    return M;
+}
+
+// Build rotation matrix from quaternion (assumes normalized q)
+inline Matrix4 mat4_from_quat(Quat q) {
+    Matrix4 M;
+    float xx = q.x*q.x, yy = q.y*q.y, zz = q.z*q.z;
+    float xy = q.x*q.y, xz = q.x*q.z, yz = q.y*q.z;
+    float wx = q.w*q.x, wy = q.w*q.y, wz = q.w*q.z;
+    M.m[0] = 1 - 2*(yy + zz);
+    M.m[1] = 2*(xy - wz);
+    M.m[2] = 2*(xz + wy);
+    M.m[4] = 2*(xy + wz);
+    M.m[5] = 1 - 2*(xx + zz);
+    M.m[6] = 2*(yz - wx);
+    M.m[8] = 2*(xz - wy);
+    M.m[9] = 2*(yz + wx);
+    M.m[10] = 1 - 2*(xx + yy);
+    return M;
 }
 
 // ---------- Arena allocator ----------

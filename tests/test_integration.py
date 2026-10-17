@@ -68,6 +68,12 @@ class IntegrationTests(unittest.TestCase):
                             ['9.810000', '100', '0.500000', '49', '15',
                              'true', 'false', '10.000000', '20.000000', '30.000000'])
 
+    def test_arrays_and_math_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'arrays_and_math.vnt'),
+                            ['4', '100', '10', '40', '101',
+                             '1.000000', '2.000000', '3.000000',
+                             '1.000000', '2.000000'])
+
     def test_assert_failure(self):
         with tempfile.NamedTemporaryFile('w', suffix='.vnt', delete=False, encoding='utf-8') as f:
             f.write("func main() -> void:\n    assert(1 == 2)\n")

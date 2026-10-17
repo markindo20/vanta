@@ -75,6 +75,19 @@ class CodegenTests(unittest.TestCase):
                   "func main() -> void:\n    print_i32(add(1, 2))\n")
         self.assertIn('int32_t fn_add(', cpp)
 
+    def test_array_emit(self):
+        cpp = gen("func main() -> void:\n    let xs = [1, 2, 3]\n    print_i32(xs[0])\n")
+        self.assertIn('std::array<int32_t, 3>{1, 2, 3}', cpp)
+        self.assertIn('v_xs[0]', cpp)
+
+    def test_len_emit(self):
+        cpp = gen("func main() -> void:\n    let xs = [1, 2, 3]\n    let n = len(xs)\n")
+        self.assertIn('.size()', cpp)
+
+    def test_quat_mul_emit(self):
+        cpp = gen("func main() -> void:\n    let q = Quat(0.0, 0.0, 0.0, 1.0)\n    let r = q * q\n")
+        self.assertIn('(v_q * v_q)', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

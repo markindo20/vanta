@@ -29,9 +29,14 @@ class PtrType(Type):
 
 
 @dataclass(frozen=True)
+class ArrayType(Type):
+    inner: Type
+    size: int
+    def __repr__(self): return f"[{self.inner}, {self.size}]"
+
+
+@dataclass(frozen=True)
 class InferType(Type):
-    """Placeholder for an inferred function return type.
-    Never appears at codegen time (check() always resolves it)."""
     def __repr__(self): return "<infer>"
 
 

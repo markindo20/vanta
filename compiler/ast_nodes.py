@@ -18,6 +18,7 @@ class TypeExpr:
     kind: str
     name: Optional[str] = None
     inner: Optional['TypeExpr'] = None
+    size: Optional[int] = None
     pos: Optional[Pos] = None
 
 
@@ -133,6 +134,12 @@ class FloatLit:
 @dataclass
 class BoolLit:
     value: bool
+    pos: Pos
+
+
+@dataclass
+class ArrayLit:
+    elements: List[Any]
     pos: Pos
 
 

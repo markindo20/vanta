@@ -1,6 +1,7 @@
 from . import ast_nodes as A
 from .typesys import (
-    Type, PrimType, IntLitType, FloatLitType, PtrType, InferType, StructType,
+    Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType,
+    StructType,
     I32, U32, F32, F64, BOOL, VOID, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
@@ -55,6 +56,10 @@ class TypeChecker:
     def _resolve_type(self, te: A.TypeExpr) -> Type:
         if te.kind == 'ptr':
             return PtrType(self._resolve_type(te.inner))
+        if te.kind == 'array':
+            if te.size is None or te.size <= 0:
+                raise CheckError("array size must be a positive integer", self.filename, te.pos)
+            return ArrayType(self._resolve_type(te.inner), te.size)
         n = te.name
         if n in PRIM_TYPES:
             return PRIM_TYPES[n]
@@ -118,7 +123,7 @@ class TypeChecker:
         if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit)):
             return True
         if isinstance(expr, A.Name):
-            return True  # _check_expr confirmed it's a constant
+            return True
         if isinstance(expr, A.BinOp):
             return self._is_constexpr(expr.left) and self._is_constexpr(expr.right)
         if isinstance(expr, A.UnaryOp):
@@ -187,8 +192,7 @@ class TypeChecker:
             sig.ret = VOID
             return
         types = [t for (_, t) in typed]
-        concrete = [t for t in types if t is not INT_LIT and t is not FLOAT_LIT]
-        lits = [t for t in types if t is INT_LIT or t is FLOAT_LIT]
+        concrete = [t for t in types if not (t is INT_LIT or t is FLOAT_LIT)]
         if concrete:
             base = concrete[0]
             for t in concrete[1:]:
@@ -197,7 +201,7 @@ class TypeChecker:
                         f"function '{fn.name}': inconsistent return types {base} and {t}",
                         self.filename, fn.pos)
         else:
-            if all(t is INT_LIT for t in lits):
+            if all(t is INT_LIT for t in types):
                 base = I32
             else:
                 base = F32
@@ -273,8 +277,18 @@ class TypeChecker:
                 return isinstance(bt, PtrType)
             return False
         if isinstance(expr, A.Index):
-            bt = self._check_expr(expr.obj)
-            return isinstance(bt, PtrType)
+            ot = self._check_expr(expr.obj)
+            if isinstance(ot, PtrType):
+                return True
+            if isinstance(ot, ArrayType):
+                base = expr.obj
+                while isinstance(base, A.Index):
+                    base = base.obj
+                if isinstance(base, A.Name):
+                    ent = self._lookup(base.name)
+                    return ent is not None and ent[1]
+                return False
+            return False
         return False
 
     def _check_return(self, r: A.ReturnStmt):
@@ -346,6 +360,8 @@ class TypeChecker:
             expr.type = FLOAT_LIT; return FLOAT_LIT
         if isinstance(expr, A.BoolLit):
             expr.type = BOOL; return BOOL
+        if isinstance(expr, A.ArrayLit):
+            return self._check_array_lit(expr)
         if isinstance(expr, A.Name):
             ent = self._lookup(expr.name)
             if ent is None:
@@ -383,13 +399,42 @@ class TypeChecker:
         if isinstance(expr, A.Index):
             ot = self._check_expr(expr.obj)
             it = self._check_expr(expr.index)
-            if not isinstance(ot, PtrType):
-                raise CheckError(f"cannot index non-pointer type {ot}", self.filename, expr.pos)
             self._coerce_value(expr.index, it, I32, expr.pos, "index")
-            expr.type = ot.inner
-            return ot.inner
+            if isinstance(ot, PtrType):
+                expr.type = ot.inner
+                return ot.inner
+            if isinstance(ot, ArrayType):
+                expr.type = ot.inner
+                return ot.inner
+            raise CheckError(f"cannot index non-pointer/non-array type {ot}", self.filename, expr.pos)
         raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename,
                          getattr(expr, 'pos', A.Pos(0, 0)))
+
+    def _check_array_lit(self, expr: A.ArrayLit) -> Type:
+        if not expr.elements:
+            raise CheckError("empty array literal is not supported; use an explicit type",
+                             self.filename, expr.pos)
+        types = [self._check_expr(e) for e in expr.elements]
+        expr.element_types = list(types)  # save raw types for later coercion
+        concrete = [t for t in types if not (t is INT_LIT or t is FLOAT_LIT)]
+        if concrete:
+            base = concrete[0]
+            for t in concrete[1:]:
+                if t != base:
+                    raise CheckError(
+                        f"array literal has mixed element types {base} and {t}",
+                        self.filename, expr.pos)
+        else:
+            if all(t is INT_LIT for t in types):
+                base = I32
+            else:
+                base = F32
+        # Default annotation (may be overridden by _coerce_value)
+        for e in expr.elements:
+            e.type = base
+        t = ArrayType(base, len(expr.elements))
+        expr.type = t
+        return t
 
     def _check_binop(self, expr: A.BinOp, lt, rt) -> Type:
         op = expr.op
@@ -420,9 +465,18 @@ class TypeChecker:
             if isinstance(rt, StructType) and rt.name in ("Vec2", "Vec3"):
                 if is_float(lt) and op == '*':
                     return rt
-            if (op == '*' and isinstance(lt, StructType) and lt.name == 'Matrix4'
-                    and isinstance(rt, StructType) and rt.name == 'Vec3'):
-                return rt
+            # Math-type operations: Matrix4 and Quat
+            if op == '*' and isinstance(lt, StructType) and isinstance(rt, StructType):
+                if lt.name == 'Matrix4' and rt.name == 'Matrix4':
+                    return lt
+                if lt.name == 'Matrix4' and rt.name == 'Vec3':
+                    return rt
+                if lt.name == 'Quat' and rt.name == 'Quat':
+                    return lt
+                if lt.name == 'Quat' and rt.name == 'Vec3':
+                    return rt
+                if lt.name == 'Vec3' and rt.name == 'Quat':
+                    return lt
             raise CheckError(f"invalid operands for '{op}': {lt}, {rt}", self.filename, expr.pos)
         raise CheckError(f"unknown operator '{op}'", self.filename, expr.pos)
 
@@ -456,6 +510,21 @@ class TypeChecker:
         if actual is FLOAT_LIT and is_float(expected):
             expr.type = expected
             return
+        if isinstance(actual, ArrayType) and isinstance(expected, ArrayType):
+            if actual.size != expected.size:
+                raise CheckError(
+                    f"{ctx}: array size mismatch ({actual.size} vs {expected.size})",
+                    self.filename, pos)
+            if actual.inner is expected.inner:
+                return
+            if isinstance(expr, A.ArrayLit) and hasattr(expr, 'element_types'):
+                for i, e in enumerate(expr.elements):
+                    raw = expr.element_types[i]
+                    self._coerce_value(e, raw, expected.inner, pos, f"array element {i}")
+                expr.type = expected
+                return
+            raise CheckError(f"{ctx}: cannot convert {actual} to {expected}",
+                             self.filename, pos)
         raise CheckError(f"{ctx}: cannot assign {actual} to {expected}", self.filename, pos)
 
     def _default_type(self, t: Type, expr) -> Type:
@@ -472,6 +541,8 @@ class TypeChecker:
         f = call.func
         if isinstance(f, A.Name):
             name = f.name
+            if name == 'len':
+                return self._check_len(call)
             if name in self.structs:
                 st = self.structs[name]
                 if st.builtin:
@@ -486,6 +557,15 @@ class TypeChecker:
                 return self._check_method(ot, f.field, call)
             raise CheckError(f"type {ot} has no methods", self.filename, call.pos)
         raise CheckError("cannot call expression", self.filename, call.pos)
+
+    def _check_len(self, call: A.Call) -> Type:
+        if len(call.args) != 1:
+            raise CheckError("len takes one argument", self.filename, call.pos)
+        at = self._check_expr(call.args[0])
+        if not isinstance(at, ArrayType):
+            raise CheckError(f"len expects an array, got {at}", self.filename, call.pos)
+        call.type = I32
+        return I32
 
     def _check_builtin_ctor(self, st: StructType, call: A.Call) -> Type:
         n = st.name
@@ -615,6 +695,15 @@ class TypeChecker:
                     raise CheckError("cross expects Vec3", self.filename, call.pos)
                 call.type = st; return st
             if method == "normalized" and st.name == "Vec3":
+                if call.args:
+                    raise CheckError("normalized takes no arguments", self.filename, call.pos)
+                call.type = st; return st
+        if st.name == "Quat":
+            if method == "length":
+                if call.args:
+                    raise CheckError("length takes no arguments", self.filename, call.pos)
+                call.type = F32; return F32
+            if method == "normalized":
                 if call.args:
                     raise CheckError("normalized takes no arguments", self.filename, call.pos)
                 call.type = st; return st
