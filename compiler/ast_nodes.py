@@ -47,6 +47,14 @@ class StructDecl:
 
 
 @dataclass
+class ConstDecl:
+    name: str
+    type_ann: Optional[TypeExpr]
+    value: Any
+    pos: Pos
+
+
+@dataclass
 class VarDecl:
     name: str
     type_ann: Optional[TypeExpr]
@@ -99,6 +107,7 @@ class ForRangeStmt:
     var: str
     start: Any
     end: Any
+    step: Optional[Any]
     body: List[Any]
     pos: Pos
 

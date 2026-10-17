@@ -1,0 +1,41 @@
+# tier1_demo.vnt — demonstrates all Tier 1 features
+
+const GRAVITY: f32 = 9.81
+const MAX_STEPS: i32 = 100
+const HALF = 0.5
+
+# Return-type inference (no -> i32)
+func square(x: i32):
+    return x * x
+
+func main() -> void:
+    # Constants
+    print_f32(GRAVITY)
+    print_i32(MAX_STEPS)
+    print_f32(HALF)
+
+    # Return-type inference
+    print_i32(square(7))
+
+    # Assertion (passes, so no output)
+    assert(square(3) == 9)
+
+    # 3-arg range: countdown 5, 4, 3, 2, 1
+    mut total = 0
+    for i in range(5, 0, -1):
+        total += i
+    print_i32(total)
+
+    # Vector equality
+    let v1 = Vec3(1.0, 2.0, 3.0)
+    let v2 = Vec3(1.0, 2.0, 3.0)
+    print_bool(v1 == v2)
+    print_bool(v1 != v2)
+
+    # Matrix4 * Vec3 (identity matrix)
+    let m = Matrix4()
+    let v = Vec3(10.0, 20.0, 30.0)
+    let r = m * v
+    print_f32(r.x)
+    print_f32(r.y)
+    print_f32(r.z)

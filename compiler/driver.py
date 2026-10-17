@@ -10,6 +10,7 @@ from .lexer import Lexer, LexError
 from .parser import Parser, ParseError
 from .type_checker import TypeChecker, CheckError
 from .codegen_cpp import CodeGen
+from .ast_nodes import FuncDecl
 
 
 RUNTIME_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'runtime')
@@ -42,7 +43,6 @@ def _compiler_cmd(name, path, src, out, release):
                  '/O2' if release else '/Od', '/I', RUNTIME_DIR,
                  src, f'/Fe:{out}']
         return [path] + flags
-    # gcc / clang
     flags = ['-std=c++17', '-Wall', '-Wextra',
              '-O3' if release else '-O0', '-g' if not release else '-g0',
              '-I', RUNTIME_DIR, src, '-o', out]
@@ -73,23 +73,14 @@ def _report_error(exc):
 
 def cmd_check(args):
     try:
-        _frontend_only(args.source)
+        program, _ = _frontend_only(args.source)
     except (LexError, ParseError, CheckError) as e:
         _report_error(e)
         return 1
+    if not program.decls:
+        sys.stderr.write(f"warning: {args.source} contains no declarations\n")
     print(f"OK: {args.source} type-checks")
     return 0
-
-
-def _require_main(program):
-    for d in program.decls:
-        if isinstance(d, __import__('compiler.ast_nodes', fromlist=['FuncDecl']).FuncDecl):
-            pass
-    from .ast_nodes import FuncDecl
-    for d in program.decls:
-        if isinstance(d, FuncDecl) and d.name == 'main':
-            return True
-    return False
 
 
 def cmd_build(args):
@@ -99,7 +90,6 @@ def cmd_build(args):
         _report_error(e)
         return 1
 
-    from .ast_nodes import FuncDecl
     if not any(isinstance(d, FuncDecl) and d.name == 'main' for d in program.decls):
         sys.stderr.write(f"error: program has no 'func main() -> void' entry point\n")
         return 1
@@ -149,7 +139,6 @@ def cmd_run(args):
     except (LexError, ParseError, CheckError) as e:
         _report_error(e)
         return 1
-    from .ast_nodes import FuncDecl
     if not any(isinstance(d, FuncDecl) and d.name == 'main' for d in program.decls):
         sys.stderr.write("error: program has no main\n")
         return 1

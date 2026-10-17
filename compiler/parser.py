@@ -74,7 +74,20 @@ class Parser:
             return self.parse_struct(False)
         if t.type == TT.COMPONENT:
             return self.parse_struct(True)
+        if t.type == TT.CONST:
+            return self.parse_const()
         self.error(f"expected top-level declaration, got {t.type.name}")
+
+    def parse_const(self):
+        tok = self.advance()
+        name = self.expect(TT.IDENT).value
+        ann = None
+        if self.match(TT.COLON):
+            ann = self.parse_type()
+        self.expect(TT.ASSIGN)
+        val = self.parse_expr()
+        self.expect(TT.NEWLINE)
+        return A.ConstDecl(name, ann, val, A.Pos(tok.line, tok.col))
 
     def parse_func(self, is_system):
         tok = self.advance()
@@ -214,20 +227,18 @@ class Parser:
         start = self.parse_expr()
         self.expect(TT.COMMA)
         end = self.parse_expr()
+        step = None
+        if self.match(TT.COMMA):
+            step = self.parse_expr()
         self.expect(TT.RPAREN)
         self.expect(TT.COLON)
         body = self.parse_block()
-        return A.ForRangeStmt(var, start, end, body, A.Pos(tok.line, tok.col))
+        return A.ForRangeStmt(var, start, end, step, body, A.Pos(tok.line, tok.col))
 
     def parse_expr_or_assign(self):
         tok = self.peek()
         expr = self.parse_expr()
 
-        # Compound assignment desugars: `x += v` becomes `x = x + v`.
-        # NOTE: the target expression is evaluated twice at runtime. Safe for
-        # simple lvalues like `a`, `a.b`, `a[i]` (no side effects). Not safe
-        # if the target involves a function call, but such targets are
-        # rejected by the type checker's _is_assignable anyway.
         if self.peek().type in COMPOUND_OPS:
             op_tok = self.advance()
             op = COMPOUND_OPS[op_tok.type]

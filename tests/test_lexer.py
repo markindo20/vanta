@@ -63,6 +63,10 @@ class LexerTests(unittest.TestCase):
     def test_tab_rejected(self):
         with self.assertRaises(LexError):
             lex("func f():\n\treturn 1\n")
+            
+    def test_const_keyword(self):
+        toks = lex("const X = 1\n")
+        self.assertEqual(toks[0].type, TT.CONST)
 
 
 if __name__ == '__main__':

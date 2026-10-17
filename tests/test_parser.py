@@ -84,6 +84,32 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParseError):
             parse("func f(:\n    return 1\n")
 
+    def test_const_decl(self):
+        prog = parse("const GRAVITY: f32 = 9.8\n")
+        cd = prog.decls[0]
+        self.assertIsInstance(cd, A.ConstDecl)
+        self.assertEqual(cd.name, 'GRAVITY')
+        self.assertIsNotNone(cd.type_ann)
+
+    def test_const_no_type(self):
+        prog = parse("const MAX = 100\n")
+        cd = prog.decls[0]
+        self.assertIsInstance(cd, A.ConstDecl)
+        self.assertIsNone(cd.type_ann)
+
+    def test_range_3arg(self):
+        prog = parse("func f() -> void:\n    for i in range(10, 0, -1):\n        print_i32(i)\n")
+        stmt = prog.decls[0].body[0]
+        self.assertIsInstance(stmt, A.ForRangeStmt)
+        self.assertIsNotNone(stmt.step)
+
+    def test_assert_parses_as_call(self):
+        prog = parse("func f() -> void:\n    assert(x == 1)\n")
+        stmt = prog.decls[0].body[0]
+        self.assertIsInstance(stmt, A.ExprStmt)
+        self.assertIsInstance(stmt.expr, A.Call)
+        self.assertEqual(stmt.expr.func.name, 'assert')
+
 
 if __name__ == '__main__':
     unittest.main()

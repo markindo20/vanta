@@ -56,6 +56,25 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('break;', cpp)
         self.assertIn('continue;', cpp)
 
+    def test_const_emitted(self):
+        cpp = gen("const X: i32 = 5\nfunc main() -> void:\n    print_i32(X)\n")
+        self.assertIn('constexpr int32_t v_X = 5', cpp)
+        self.assertIn('print_i32(v_X)', cpp)
+
+    def test_assert_emitted(self):
+        cpp = gen("func main() -> void:\n    assert(1 == 1)\n")
+        self.assertIn('vanta::assert_impl(', cpp)
+
+    def test_range_3arg_codegen(self):
+        cpp = gen("func main() -> void:\n    for i in range(10, 0, -1):\n        print_i32(i)\n")
+        self.assertIn('__step_1', cpp)
+        self.assertIn('__end_1', cpp)
+
+    def test_inferred_return_codegen(self):
+        cpp = gen("func add(a: i32, b: i32):\n    return a + b\n"
+                  "func main() -> void:\n    print_i32(add(1, 2))\n")
+        self.assertIn('int32_t fn_add(', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

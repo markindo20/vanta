@@ -76,6 +76,63 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaises(CheckError):
             run("func f() -> void:\n    mut x: i32 = 1\n    x += 1.5\n")
 
+    def test_const_inference(self):
+        prog, tc = run("const X = 5\n")
+        self.assertEqual(tc.constants['X'], __import__('compiler.typesys', fromlist=['I32']).I32)
+
+    def test_const_typed(self):
+        from compiler.typesys import F32
+        prog, tc = run("const G: f32 = 9.8\n")
+        self.assertEqual(tc.constants['G'], F32)
+
+    def test_const_not_assignable(self):
+        with self.assertRaises(CheckError):
+            run("const X = 5\nfunc f() -> void:\n    X = 10\n")
+
+    def test_const_duplicate(self):
+        with self.assertRaises(CheckError):
+            run("const X = 1\nconst X = 2\n")
+
+    def test_const_non_constexpr(self):
+        with self.assertRaises(CheckError):
+            run("func g() -> i32:\n    return 1\nconst X = g()\n")
+
+    def test_return_inference_i32(self):
+        from compiler.typesys import I32
+        prog, tc = run("func add(a: i32, b: i32):\n    return a + b\n")
+        self.assertEqual(tc.functions['add'].ret, I32)
+
+    def test_return_inference_void(self):
+        from compiler.typesys import VOID
+        prog, tc = run("func f():\n    print_i32(1)\n")
+        self.assertEqual(tc.functions['f'].ret, VOID)
+
+    def test_return_inference_mixed_error(self):
+        # Mixed LITERAL returns are allowed (1 coerces to F32 because 1.5 is
+        # FLOAT_LIT, and float wins). This test exercises the case where both
+        # returns are already CONCRETE and disagree.
+        with self.assertRaises(CheckError):
+            run("func f(x: bool, a: i32, b: f32):\n    if x:\n        return a\n    return b\n")
+
+    def test_range_step_zero(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    for i in range(0, 10, 0):\n        print_i32(i)\n")
+
+    def test_assert_bool_ok(self):
+        run("func f() -> void:\n    assert(1 == 1)\n")
+
+    def test_assert_nonbool(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    assert(1)\n")
+
+    def test_vec3_eq(self):
+        from compiler.typesys import BOOL
+        prog, tc = run("func f() -> void:\n    let a = Vec3(1.0, 2.0, 3.0)\n    let b = Vec3(1.0, 2.0, 3.0)\n    let c = a == b\n")
+        # Just check it type-checks (BOOL is the type of c)
+
+    def test_matrix4_vec3(self):
+        run("func f() -> void:\n    let m = Matrix4()\n    let v = Vec3(1.0, 2.0, 3.0)\n    let r = m * v\n")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -15,8 +15,12 @@ struct Vec2 {
 };
 inline Vec2 operator+(Vec2 a, Vec2 b) { return Vec2(a.x + b.x, a.y + b.y); }
 inline Vec2 operator-(Vec2 a, Vec2 b) { return Vec2(a.x - b.x, a.y - b.y); }
+inline Vec2 operator*(Vec2 a, Vec2 b) { return Vec2(a.x * b.x, a.y * b.y); }
 inline Vec2 operator*(Vec2 a, float s) { return Vec2(a.x * s, a.y * s); }
 inline Vec2 operator*(float s, Vec2 a) { return a * s; }
+inline Vec2 operator/(Vec2 a, float s) { return Vec2(a.x / s, a.y / s); }
+inline bool operator==(Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; }
+inline bool operator!=(Vec2 a, Vec2 b) { return !(a == b); }
 inline float dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
 inline float length(Vec2 a) { return std::sqrt(dot(a, a)); }
 
@@ -27,9 +31,12 @@ struct Vec3 {
 };
 inline Vec3 operator+(Vec3 a, Vec3 b) { return Vec3(a.x + b.x, a.y + b.y, a.z + b.z); }
 inline Vec3 operator-(Vec3 a, Vec3 b) { return Vec3(a.x - b.x, a.y - b.y, a.z - b.z); }
+inline Vec3 operator*(Vec3 a, Vec3 b) { return Vec3(a.x * b.x, a.y * b.y, a.z * b.z); }
 inline Vec3 operator*(Vec3 a, float s) { return Vec3(a.x * s, a.y * s, a.z * s); }
 inline Vec3 operator*(float s, Vec3 a) { return a * s; }
 inline Vec3 operator/(Vec3 a, float s) { return Vec3(a.x / s, a.y / s, a.z / s); }
+inline bool operator==(Vec3 a, Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+inline bool operator!=(Vec3 a, Vec3 b) { return !(a == b); }
 inline float dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 inline Vec3 cross(Vec3 a, Vec3 b) {
     return Vec3(a.y * b.z - a.z * b.y,
@@ -49,12 +56,21 @@ struct Quat {
 };
 
 struct Matrix4 {
-    float m[16];
+    float m[16];  // row-major: m[row*4 + col]
     Matrix4() {
         for (int i = 0; i < 16; ++i) m[i] = 0.0f;
         m[0] = m[5] = m[10] = m[15] = 1.0f;
     }
 };
+
+// Matrix4 * Vec3 (treats Vec3 as homogeneous (x, y, z, 1))
+inline Vec3 operator*(const Matrix4& M, Vec3 v) {
+    return Vec3(
+        M.m[0] * v.x + M.m[1] * v.y + M.m[2] * v.z + M.m[3],
+        M.m[4] * v.x + M.m[5] * v.y + M.m[6] * v.z + M.m[7],
+        M.m[8] * v.x + M.m[9] * v.y + M.m[10] * v.z + M.m[11]
+    );
+}
 
 // ---------- Arena allocator ----------
 class Arena {
@@ -93,6 +109,14 @@ private:
     uint32_t size_;
     uint32_t offset_;
 };
+
+// ---------- Assertions ----------
+inline void assert_impl(bool cond, int32_t line) {
+    if (!cond) {
+        std::fprintf(stderr, "vanta: assertion failed at line %d\n", (int)line);
+        std::exit(1);
+    }
+}
 
 // ---------- Built-in IO / math ----------
 inline void print_i32(int32_t v) { std::printf("%d\n", (int)v); }

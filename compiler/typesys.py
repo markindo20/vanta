@@ -28,6 +28,13 @@ class PtrType(Type):
     def __repr__(self): return f"ptr<{self.inner}>"
 
 
+@dataclass(frozen=True)
+class InferType(Type):
+    """Placeholder for an inferred function return type.
+    Never appears at codegen time (check() always resolves it)."""
+    def __repr__(self): return "<infer>"
+
+
 @dataclass(eq=False)
 class StructType(Type):
     name: str
@@ -47,6 +54,7 @@ BOOL = PrimType("bool")
 VOID = PrimType("void")
 INT_LIT = IntLitType()
 FLOAT_LIT = FloatLitType()
+INFER = InferType()
 
 PRIM_TYPES = {"i32": I32, "u32": U32, "f32": F32, "f64": F64, "bool": BOOL, "void": VOID}
 

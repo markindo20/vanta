@@ -1,7 +1,7 @@
 from . import ast_nodes as A
 from .typesys import (
-    Type, PrimType, IntLitType, FloatLitType, PtrType, StructType,
-    I32, U32, F32, F64, BOOL, VOID, INT_LIT, FLOAT_LIT,
+    Type, PrimType, IntLitType, FloatLitType, PtrType, InferType, StructType,
+    I32, U32, F32, F64, BOOL, VOID, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
 
@@ -23,9 +23,11 @@ class TypeChecker:
         self.filename = filename
         self.structs: dict[str, StructType] = {}
         self.functions: dict[str, FuncSig] = {}
+        self.constants: dict[str, Type] = {}
         self.scopes = []
         self.current_ret: Type = VOID
         self.loop_depth = 0
+        self.return_values: list = []
         self._register_builtins()
 
     # ---------------- registration ----------------
@@ -48,6 +50,7 @@ class TypeChecker:
         bf("sqrt_f64", [("v", F64)], F64)
         bf("i32_to_f32", [("v", I32)], F32)
         bf("f32_to_i32", [("v", F32)], I32)
+        bf("assert", [("cond", BOOL)], VOID)
 
     def _resolve_type(self, te: A.TypeExpr) -> Type:
         if te.kind == 'ptr':
@@ -62,24 +65,65 @@ class TypeChecker:
     def register(self):
         for d in self.program.decls:
             if isinstance(d, A.StructDecl):
-                if d.name in self.structs:
-                    raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
-                fields = {}
-                for (fname, ftype, fpos) in d.fields:
-                    if fname in fields:
-                        raise CheckError(f"duplicate field '{fname}'", self.filename, fpos)
-                    fields[fname] = self._resolve_type(ftype)
-                self.structs[d.name] = StructType(d.name, fields, builtin=False)
+                self._register_struct(d)
             elif isinstance(d, A.FuncDecl):
-                if d.name in self.functions:
-                    raise CheckError(f"duplicate function '{d.name}'", self.filename, d.pos)
-                if d.name in self.structs:
-                    raise CheckError(f"function name '{d.name}' collides with type", self.filename, d.pos)
-                params = []
-                for p in d.params:
-                    params.append((p.name, self._resolve_type(p.type)))
-                ret = self._resolve_type(d.ret) if d.ret else VOID
-                self.functions[d.name] = FuncSig(d.name, params, ret)
+                self._register_func(d)
+            elif isinstance(d, A.ConstDecl):
+                self._register_const(d)
+
+    def _register_struct(self, d):
+        if d.name in self.structs:
+            raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
+        fields = {}
+        for (fname, ftype, fpos) in d.fields:
+            if fname in fields:
+                raise CheckError(f"duplicate field '{fname}'", self.filename, fpos)
+            fields[fname] = self._resolve_type(ftype)
+        self.structs[d.name] = StructType(d.name, fields, builtin=False)
+
+    def _register_func(self, d):
+        if d.name in self.functions:
+            raise CheckError(f"duplicate function '{d.name}'", self.filename, d.pos)
+        if d.name in self.structs:
+            raise CheckError(f"function name '{d.name}' collides with type", self.filename, d.pos)
+        params = []
+        for p in d.params:
+            params.append((p.name, self._resolve_type(p.type)))
+        ret = self._resolve_type(d.ret) if d.ret is not None else INFER
+        self.functions[d.name] = FuncSig(d.name, params, ret)
+
+    def _register_const(self, c):
+        if c.name in self.constants:
+            raise CheckError(f"duplicate constant '{c.name}'", self.filename, c.pos)
+        if c.name in self.structs:
+            raise CheckError(f"constant '{c.name}' collides with type", self.filename, c.pos)
+        if c.name in self.functions:
+            raise CheckError(f"constant '{c.name}' collides with function", self.filename, c.pos)
+        vt = self._check_expr(c.value)
+        if not self._is_constexpr(c.value):
+            raise CheckError(
+                f"constant initializer must be a compile-time expression",
+                self.filename, c.pos)
+        if c.type_ann is not None:
+            declared = self._resolve_type(c.type_ann)
+            self._coerce_value(c.value, vt, declared, c.pos, "constant initializer")
+            vt = declared
+        else:
+            vt = self._default_type(vt, c.value)
+        if vt is VOID:
+            raise CheckError("constant cannot be void", self.filename, c.pos)
+        self.constants[c.name] = vt
+
+    def _is_constexpr(self, expr) -> bool:
+        if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit)):
+            return True
+        if isinstance(expr, A.Name):
+            return True  # _check_expr confirmed it's a constant
+        if isinstance(expr, A.BinOp):
+            return self._is_constexpr(expr.left) and self._is_constexpr(expr.right)
+        if isinstance(expr, A.UnaryOp):
+            return self._is_constexpr(expr.operand)
+        return False
 
     # ---------------- scopes ----------------
     def _push(self):
@@ -98,6 +142,8 @@ class TypeChecker:
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
+        if name in self.constants:
+            return (self.constants[name], False)
         return None
 
     # ---------------- check ----------------
@@ -108,16 +154,59 @@ class TypeChecker:
 
     def _check_func(self, fn: A.FuncDecl):
         sig = self.functions[fn.name]
+        prev_ret = self.current_ret
+        prev_rv = self.return_values
         self.current_ret = sig.ret
+        self.return_values = []
         self._push()
-        for (pname, ptype) in sig.params:
-            if ptype is VOID:
-                raise CheckError(f"parameter '{pname}' cannot be void", self.filename, fn.pos)
-            self._declare(pname, ptype, mutable=False)
-        for stmt in fn.body:
-            self._check_stmt(stmt)
-        self._pop()
-        self.current_ret = VOID
+        try:
+            for (pname, ptype) in sig.params:
+                if ptype is VOID:
+                    raise CheckError(f"parameter '{pname}' cannot be void", self.filename, fn.pos)
+                self._declare(pname, ptype, mutable=False)
+            for stmt in fn.body:
+                self._check_stmt(stmt)
+            if isinstance(sig.ret, InferType):
+                self._resolve_inferred_return(sig, fn)
+        finally:
+            self._pop()
+            self.current_ret = prev_ret
+            self.return_values = prev_rv
+
+    def _resolve_inferred_return(self, sig, fn):
+        has_bare = any(v is None for (v, _) in self.return_values)
+        typed = [(v, t) for (v, t) in self.return_values if v is not None]
+        if not self.return_values:
+            sig.ret = VOID
+            return
+        if has_bare and typed:
+            raise CheckError(
+                f"function '{fn.name}': mixed bare 'return' and 'return value'",
+                self.filename, fn.pos)
+        if has_bare:
+            sig.ret = VOID
+            return
+        types = [t for (_, t) in typed]
+        concrete = [t for t in types if t is not INT_LIT and t is not FLOAT_LIT]
+        lits = [t for t in types if t is INT_LIT or t is FLOAT_LIT]
+        if concrete:
+            base = concrete[0]
+            for t in concrete[1:]:
+                if t != base:
+                    raise CheckError(
+                        f"function '{fn.name}': inconsistent return types {base} and {t}",
+                        self.filename, fn.pos)
+        else:
+            if all(t is INT_LIT for t in lits):
+                base = I32
+            else:
+                base = F32
+        if isinstance(base, StructType) and base.name == "Arena":
+            raise CheckError(f"function '{fn.name}': cannot return an Arena",
+                             self.filename, fn.pos)
+        sig.ret = base
+        for (v, t) in typed:
+            self._coerce_value(v, t, base, v.pos, "inferred return value")
 
     # ---------------- statements ----------------
     def _check_stmt(self, stmt):
@@ -190,14 +279,18 @@ class TypeChecker:
 
     def _check_return(self, r: A.ReturnStmt):
         if r.value is None:
-            if self.current_ret is not VOID:
+            if not isinstance(self.current_ret, InferType) and self.current_ret is not VOID:
                 raise CheckError("return without value in non-void function", self.filename, r.pos)
+            self.return_values.append((None, VOID))
             return
         vt = self._check_expr(r.value)
-        if self.current_ret is VOID:
-            raise CheckError("cannot return a value from a void function", self.filename, r.pos)
         if isinstance(vt, StructType) and vt.name == "Arena":
             raise CheckError("cannot return an Arena", self.filename, r.pos)
+        if isinstance(self.current_ret, InferType):
+            self.return_values.append((r.value, vt))
+            return
+        if self.current_ret is VOID:
+            raise CheckError("cannot return a value from a void function", self.filename, r.pos)
         self._coerce_value(r.value, vt, self.current_ret, r.pos, "return value")
 
     def _check_if(self, i: A.IfStmt):
@@ -225,6 +318,11 @@ class TypeChecker:
         et = self._check_expr(f.end)
         self._coerce_value(f.start, st, I32, f.pos, "range start")
         self._coerce_value(f.end, et, I32, f.pos, "range end")
+        if f.step is not None:
+            sst = self._check_expr(f.step)
+            self._coerce_value(f.step, sst, I32, f.pos, "range step")
+            if isinstance(f.step, A.IntLit) and f.step.value == 0:
+                raise CheckError("range step cannot be 0", self.filename, f.pos)
         self._push()
         self.scopes[-1][f.var] = (I32, False)
         self.loop_depth += 1
@@ -302,7 +400,8 @@ class TypeChecker:
             return BOOL
         if op in ('==', '!=', '<', '<=', '>', '>='):
             if isinstance(lt, StructType) or isinstance(rt, StructType):
-                if op in ('==', '!=') and isinstance(lt, StructType) and lt == rt and lt.name in ("Vec2", "Vec3"):
+                if (op in ('==', '!=') and isinstance(lt, StructType)
+                        and lt == rt and lt.name in ("Vec2", "Vec3")):
                     return BOOL
                 raise CheckError(f"cannot compare {lt} and {rt} with '{op}'", self.filename, expr.pos)
             if lt != rt:
@@ -321,6 +420,9 @@ class TypeChecker:
             if isinstance(rt, StructType) and rt.name in ("Vec2", "Vec3"):
                 if is_float(lt) and op == '*':
                     return rt
+            if (op == '*' and isinstance(lt, StructType) and lt.name == 'Matrix4'
+                    and isinstance(rt, StructType) and rt.name == 'Vec3'):
+                return rt
             raise CheckError(f"invalid operands for '{op}': {lt}, {rt}", self.filename, expr.pos)
         raise CheckError(f"unknown operator '{op}'", self.filename, expr.pos)
 
@@ -353,9 +455,6 @@ class TypeChecker:
             return
         if actual is FLOAT_LIT and is_float(expected):
             expr.type = expected
-            return
-        if actual is FLOAT_LIT and expected is F64:
-            expr.type = F64
             return
         raise CheckError(f"{ctx}: cannot assign {actual} to {expected}", self.filename, pos)
 
@@ -460,6 +559,11 @@ class TypeChecker:
 
     def _check_func_call(self, name: str, call: A.Call) -> Type:
         sig = self.functions[name]
+        if isinstance(sig.ret, InferType):
+            raise CheckError(
+                f"call to '{name}' before its return type is inferred; "
+                f"add explicit '-> T' or move its declaration before this caller",
+                self.filename, call.pos)
         if call.arg_names and any(x is not None for x in call.arg_names):
             raise CheckError(f"function '{name}' does not accept named arguments", self.filename, call.pos)
         if len(call.args) != len(sig.params):
