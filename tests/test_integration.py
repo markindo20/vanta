@@ -396,7 +396,9 @@ class IntegrationTests(unittest.TestCase):
     def test_lists_example(self):
         self._build_and_run(os.path.join(EXAMPLES, 'lists.vnt'),
                             ['5', '0.000000', '1.000000', '2.000000', '3.000000',
-                             '4.000000', '4.000000', '4'])
+                             '4.000000', '4.000000', '4', '9.000000',
+                             '9.000000', '3.000000', '2.000000', '1.000000',
+                             '0.000000', '4'])
 
     def test_list_grow_and_iterate(self):
         # Pushing past the initial capacity exercises arena-backed growth.
@@ -499,6 +501,137 @@ class IntegrationTests(unittest.TestCase):
                 f.write(src)
             self._build_and_run_expect_error(
                 path, 'vanta: pop from empty list at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_insert_remove(self):
+        # insert shifts the rest right (index len is push); remove shifts
+        # left and returns the element.
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(3)\n"
+            "    xs.push(1)\n"
+            "    xs.push(2)\n"
+            "    xs.insert(0, 9)\n"
+            "    xs.insert(2, 8)\n"
+            "    xs.insert(len(xs), 7)\n"
+            "    print_i32(len(xs))\n"
+            "    for i in range(0, len(xs)):\n"
+            "        print_i32(xs.at(i))\n"
+            "    print_i32(xs.remove(0))\n"
+            "    print_i32(xs.remove(len(xs) - 1))\n"
+            "    print_i32(xs.remove(1))\n"
+            "    print_i32(len(xs))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'insert.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['6', '9', '3', '8', '1', '2', '7',
+                                       '9', '7', '8', '3'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_sort_comparator(self):
+        # The comparator returns negative / zero / positive, so the same
+        # list sorts ascending or descending.
+        src = (
+            "func cmp(a: i32, b: i32) -> i32:\n"
+            "    return a - b\n"
+            "\n"
+            "func desc(a: i32, b: i32) -> i32:\n"
+            "    return b - a\n"
+            "\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(3)\n"
+            "    xs.push(1)\n"
+            "    xs.push(2)\n"
+            "    xs.sort(cmp)\n"
+            "    for i in range(0, len(xs)):\n"
+            "        print_i32(xs.at(i))\n"
+            "    xs.sort(desc)\n"
+            "    for i in range(0, len(xs)):\n"
+            "        print_i32(xs.at(i))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'sort.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['1', '2', '3', '3', '2', '1'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_sort_stable(self):
+        # Merge sort is stable: equal keys keep their relative order.
+        src = (
+            "struct Item:\n"
+            "    key: i32\n"
+            "    tag: str\n"
+            "\n"
+            "func by_key(a: Item, b: Item) -> i32:\n"
+            "    return a.key - b.key\n"
+            "\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<Item>()\n"
+            "    xs.push(Item(key: 2, tag: \"a\"))\n"
+            "    xs.push(Item(key: 1, tag: \"b\"))\n"
+            "    xs.push(Item(key: 2, tag: \"c\"))\n"
+            "    xs.push(Item(key: 1, tag: \"d\"))\n"
+            "    xs.sort(by_key)\n"
+            "    for i in range(0, len(xs)):\n"
+            "        print_str(xs.at(i).tag)\n"
+            "    let first = xs.remove(0)\n"
+            "    print_str(first.tag)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'stable.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['b', 'd', 'a', 'c', 'b'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_insert_oob_fails(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(1)\n"
+            "    xs.push(2)\n"
+            "    xs.insert(3, 9)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'insert_oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: insert index 3 out of bounds (size 2) at line 6')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_remove_oob_fails(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.remove(0)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'remove_oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: remove index 0 out of bounds (size 0) at line 4')
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

@@ -922,6 +922,113 @@ class TypeCheckerTests(unittest.TestCase):
                 "    let xs = a.list::<i32>()\n"
                 "    print_i32(xs.len())\n")
 
+    def test_list_insert_remove_sort(self):
+        run("struct Item:\n"
+            "    key: i32\n"
+            "\n"
+            "func by_key(a: Item, b: Item) -> i32:\n"
+            "    return a.key - b.key\n"
+            "\n"
+            "func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<Item>()\n"
+            "    xs.insert(0, Item(key: 1))\n"
+            "    let it = xs.remove(0)\n"
+            "    xs.push(it)\n"
+            "    xs.sort(by_key)\n")
+
+    def test_list_insert_arity(self):
+        with self.assertRaisesRegex(CheckError, "'insert' expects an index and a value"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.insert(0)\n")
+
+    def test_list_insert_index_type(self):
+        with self.assertRaisesRegex(CheckError, "index: cannot assign f32 to i32"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    let k: f32 = 0.0\n"
+                "    xs.insert(k, 1)\n")
+
+    def test_list_insert_element_type(self):
+        with self.assertRaisesRegex(CheckError, "list element: cannot assign f32 to i32"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    let v: f32 = 1.5\n"
+                "    xs.insert(0, v)\n")
+
+    def test_list_insert_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'insert' does not accept named arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.insert(i: 0, v: 1)\n")
+
+    def test_list_remove_arity(self):
+        with self.assertRaisesRegex(CheckError, "'remove' expects one index"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.remove(0, 1)\n")
+
+    def test_list_remove_is_element_typed(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<f32>()\n"
+            "    xs.push(1.5)\n"
+            "    print_f32(xs.remove(0))\n")
+
+    def test_list_sort_arity(self):
+        with self.assertRaisesRegex(CheckError, "'sort' expects one comparator"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.sort(1, 2)\n")
+
+    def test_list_sort_needs_comparator(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                r"'sort' expects a comparator func\(i32, i32\) -> i32, got i32"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.sort(42)\n")
+
+    def test_list_sort_comparator_signature(self):
+        with self.assertRaisesRegex(CheckError, r"got func\(i32, i32\) -> bool"):
+            run("func less(a: i32, b: i32) -> bool:\n"
+                "    return a < b\n"
+                "func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.sort(less)\n")
+
+    def test_list_sort_comparator_element_types(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                r"func\(Item, Item\) -> i32, got func\(i32, i32\) -> i32"):
+            run("struct Item:\n"
+                "    key: i32\n"
+                "func by_key(a: i32, b: i32) -> i32:\n"
+                "    return a - b\n"
+                "func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<Item>()\n"
+                "    xs.sort(by_key)\n")
+
+    def test_list_new_members_value_use_rejected(self):
+        for member, msg in (('insert', r"'insert' must be called: xs\.insert\(i, v\)"),
+                            ('remove', r"'remove' must be called: xs\.remove\(i\)"),
+                            ('sort', r"'sort' must be called: xs\.sort\(cmp\)")):
+            with self.assertRaisesRegex(CheckError, msg):
+                run("func f() -> void:\n"
+                    "    let a = Arena(4096)\n"
+                    "    let xs = a.list::<i32>()\n"
+                    f"    let f = xs.{member}\n")
+
     def test_list_unknown_method(self):
         with self.assertRaisesRegex(CheckError, "List has no method 'nope'"):
             run("func f() -> void:\n"

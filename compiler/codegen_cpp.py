@@ -199,6 +199,15 @@ class CodeGen:
         for ed in [d for d in self.program.decls if isinstance(d, A.EnumDecl)]:
             self._gen_enum(ed)
 
+        # Struct tags come before the function-pointer aliases: an alias may
+        # mention a struct by value (a comparator func(Item, Item) -> i32),
+        # and the struct definitions come after the aliases because a struct
+        # field may hold a function value.
+        structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
+        for sd in structs:
+            self.emit(f'struct {sd.name};')
+        self.emit('')
+
         # Function-pointer aliases, innermost first.
         if self.tc.func_types:
             for ft in self._ordered_func_types():
@@ -213,10 +222,6 @@ class CodeGen:
         if consts:
             self.emit('')
 
-        structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
-        for sd in structs:
-            self.emit(f'struct {sd.name};')
-        self.emit('')
         for sd in structs:
             self._gen_struct(sd)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
@@ -580,6 +585,15 @@ class CodeGen:
                 if m == 'pop':
                     line = c.pos.line if c.pos else 0
                     return f'vanta::list_pop({base}, {line})'
+                if m == 'insert':
+                    line = c.pos.line if c.pos else 0
+                    return (f'vanta::list_insert({base}, {self._expr(c.args[0])}, '
+                            f'{self._expr(c.args[1])}, {line})')
+                if m == 'remove':
+                    line = c.pos.line if c.pos else 0
+                    return f'vanta::list_remove({base}, {self._expr(c.args[0])}, {line})'
+                if m == 'sort':
+                    return f'vanta::list_sort({base}, {self._expr(c.args[0])})'
             if isinstance(ot, StructType) and ot.name in ('Vec2', 'Vec3'):
                 if m == 'dot':
                     return f'vanta::dot({base}, {self._expr(c.args[0])})'

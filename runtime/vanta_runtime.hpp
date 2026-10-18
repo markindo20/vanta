@@ -288,6 +288,72 @@ inline T list_pop(List<T> xs, int32_t line) {
 }
 
 template <typename T>
+inline void list_insert(List<T> xs, int32_t index, T value, int32_t line) {
+    if (index < 0 || index > xs.h->len) {
+        std::fprintf(stderr,
+                     "vanta: insert index %d out of bounds (size %d) at line %d\n",
+                     (int)index, (int)xs.h->len, (int)line);
+        std::exit(1);
+    }
+    if (xs.h->len == xs.h->cap) list_reserve<T>(xs, xs.h->len + 1);
+    for (int32_t i = xs.h->len; i > index; i--) xs.h->data[i] = xs.h->data[i - 1];
+    xs.h->data[index] = value;
+    xs.h->len += 1;
+}
+
+template <typename T>
+inline T list_remove(List<T> xs, int32_t index, int32_t line) {
+    if (index < 0 || index >= xs.h->len) {
+        std::fprintf(stderr,
+                     "vanta: remove index %d out of bounds (size %d) at line %d\n",
+                     (int)index, (int)xs.h->len, (int)line);
+        std::exit(1);
+    }
+    T value = xs.h->data[index];
+    for (int32_t i = index; i + 1 < xs.h->len; i++) {
+        xs.h->data[i] = xs.h->data[i + 1];
+    }
+    xs.h->len -= 1;
+    return value;
+}
+
+// list_sort is a stable, O(n log n) merge sort driven by the caller's
+// comparator: a function value func(T, T) -> i32 returning negative, zero,
+// or positive for less-than, equal, greater-than. Equal elements keep their
+// relative order. The scratch block comes from the list's own arena and is
+// left behind, exactly like a growth allocation.
+template <typename T, typename Cmp>
+inline void list_merge(T* data, T* scratch, int32_t lo, int32_t mid, int32_t hi,
+                       Cmp cmp) {
+    int32_t i = lo, j = mid, k = lo;
+    while (i < mid && j < hi) {
+        // Ties take the left run — that is what makes the sort stable.
+        if (cmp(data[j], data[i]) < 0) scratch[k++] = data[j++];
+        else scratch[k++] = data[i++];
+    }
+    while (i < mid) scratch[k++] = data[i++];
+    while (j < hi) scratch[k++] = data[j++];
+    for (int32_t x = lo; x < hi; x++) data[x] = scratch[x];
+}
+
+template <typename T, typename Cmp>
+inline void list_msort(T* data, T* scratch, int32_t lo, int32_t hi, Cmp cmp) {
+    if (hi - lo < 2) return;
+    int32_t mid = lo + (hi - lo) / 2;
+    list_msort<T, Cmp>(data, scratch, lo, mid, cmp);
+    list_msort<T, Cmp>(data, scratch, mid, hi, cmp);
+    list_merge<T, Cmp>(data, scratch, lo, mid, hi, cmp);
+}
+
+template <typename T, typename Cmp>
+inline void list_sort(List<T> xs, Cmp cmp) {
+    if (xs.h->len < 2) return;
+    Arena* arena = xs.h->arena;
+    T* scratch = arena->alloc<T>(xs.h->len);
+    list_msort<T, Cmp>(xs.h->data, scratch, 0, xs.h->len, cmp);
+}
+
+template <typename T>
 inline T list_at_checked(List<T> xs, int32_t index, int32_t line) {
     if (index < 0 || index >= xs.h->len) index_fail(index, xs.h->len, line);
     return xs.h->data[index];

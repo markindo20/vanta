@@ -626,6 +626,15 @@ class TypeChecker:
             if isinstance(ot, ListType) and expr.field == 'pop':
                 raise CheckError("'pop' must be called: xs.pop()",
                                  self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'insert':
+                raise CheckError("'insert' must be called: xs.insert(i, v)",
+                                 self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'remove':
+                raise CheckError("'remove' must be called: xs.remove(i)",
+                                 self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'sort':
+                raise CheckError("'sort' must be called: xs.sort(cmp)",
+                                 self.filename, expr.pos)
             if isinstance(ot, ListType) and expr.field == 'len':
                 raise CheckError("'len' is not a field of a List; write len(xs)",
                                  self.filename, expr.pos)
@@ -968,6 +977,59 @@ class TypeChecker:
                                  self.filename, call.pos)
             call.type = lt.inner
             return lt.inner
+        if method == 'insert':
+            if call.type_args:
+                raise CheckError("'insert' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.arg_names and any(x is not None for x in call.arg_names):
+                raise CheckError("'insert' does not accept named arguments",
+                                 self.filename, call.pos)
+            if len(call.args) != 2:
+                raise CheckError(
+                    f"'insert' expects an index and a value, got {len(call.args)}",
+                    self.filename, call.pos)
+            it = self._check_expr(call.args[0])
+            self._coerce_value(call.args[0], it, I32, call.pos, "index")
+            vt = self._check_expr(call.args[1])
+            if isinstance(vt, StructType) and vt.name == "Arena":
+                raise CheckError("cannot store Arena in a List (it is non-copyable)",
+                                 self.filename, call.pos)
+            self._coerce_value(call.args[1], vt, lt.inner, call.pos, "list element")
+            call.type = VOID
+            return VOID
+        if method == 'remove':
+            if call.type_args:
+                raise CheckError("'remove' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.arg_names and any(x is not None for x in call.arg_names):
+                raise CheckError("'remove' does not accept named arguments",
+                                 self.filename, call.pos)
+            if len(call.args) != 1:
+                raise CheckError(f"'remove' expects one index, got {len(call.args)}",
+                                 self.filename, call.pos)
+            it = self._check_expr(call.args[0])
+            self._coerce_value(call.args[0], it, I32, call.pos, "index")
+            call.type = lt.inner
+            return lt.inner
+        if method == 'sort':
+            if call.type_args:
+                raise CheckError("'sort' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.arg_names and any(x is not None for x in call.arg_names):
+                raise CheckError("'sort' does not accept named arguments",
+                                 self.filename, call.pos)
+            if len(call.args) != 1:
+                raise CheckError(f"'sort' expects one comparator, got {len(call.args)}",
+                                 self.filename, call.pos)
+            ct = self._default_type(self._check_expr(call.args[0]), call.args[0])
+            want = self._func_type((lt.inner, lt.inner), I32)
+            if ct != want:
+                raise CheckError(
+                    f"'sort' expects a comparator "
+                    f"func({lt.inner}, {lt.inner}) -> i32, got {ct}",
+                    self.filename, call.pos)
+            call.type = VOID
+            return VOID
         if method == 'len':
             raise CheckError("'len' is not a List method; write len(xs)",
                              self.filename, call.pos)

@@ -1,4 +1,6 @@
-# Dynamic lists: grow from an Arena, pass across calls, checked access, pop.
+# Dynamic lists: grow from an Arena, pass across calls, checked access,
+# insert/remove, and comparator-driven sorting.
+
 struct Particle:
     x: f32
     vx: f32
@@ -7,6 +9,14 @@ func integrate(ps: List<Particle>):
     for i in range(0, len(ps)):
         let p = ps.at(i)
         ps.at(i) = Particle(x: p.x + p.vx, vx: p.vx)
+
+# A comparator returns negative (a first), zero (a tie), or positive (b first).
+func by_x_desc(a: Particle, b: Particle) -> i32:
+    if a.x > b.x:
+        return -1
+    if a.x < b.x:
+        return 1
+    return 0
 
 func main() -> void:
     let arena = Arena(4096)
@@ -19,4 +29,17 @@ func main() -> void:
         print_f32(ps.at(i).x)       # 0.000000 ... 4.000000
     let last = ps.pop()
     print_f32(last.x)               # 4.000000
+    print_i32(len(ps))              # 4
+
+    # insert shifts the rest right (index len is push); remove shifts the
+    # rest left and returns the element.
+    ps.insert(0, Particle(x: 9.0, vx: 0.0))
+    print_f32(ps.at(0).x)           # 9.000000
+    let first = ps.remove(0)
+    print_f32(first.x)              # 9.000000
+
+    # sort is stable: elements the comparator calls equal keep their order.
+    ps.sort(by_x_desc)
+    for i in range(0, len(ps)):
+        print_f32(ps.at(i).x)       # 3.000000 ... 0.000000
     print_i32(len(ps))              # 4
