@@ -61,6 +61,9 @@ distinct semantics.
 - the `Arena` bump allocator
 - `List<T>` with `list_new` / `list_push` / `list_pop` / `list_at_checked[_ref]`
   — the arena-backed growable lists behind `arena.list::<T>()`
+- `StrBuilder` with `strb_append_*` / `strb_to_str` / `strb_clear` — arena-backed
+  string building behind `arena.str_builder()`; `to_str()` copies, so results
+  are stable
 - `at_checked` / `at_checked_ref` (plus `index_fail`) — the bounds-checked
   access behind `xs.at(i)`; a bad index reports the array size and the
   access's source line
@@ -98,7 +101,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 313 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 341 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

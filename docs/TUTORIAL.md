@@ -164,6 +164,34 @@ hello, player (hp 7)
 hi, player
 ```
 
+The pool is fine for a value or two, but assembling a line piece by piece
+with `str_concat` in a loop allocates an intermediate string every time. For
+that, build into an arena-backed `StrBuilder` and take the result once:
+
+```vanta
+func main() -> void:
+    let arena = Arena(4096)
+    let b = arena.str_builder()
+    b.append_str("hp ")
+    b.append_i32(42)
+    b.append_str(" / 100")
+    print_str(b.to_str())     # hp 42 / 100
+    print_i32(len(b))         # 11
+    b.clear()                 # reuse the buffer
+    b.append_str("ready")
+    print_str(b.to_str())     # ready
+```
+
+```
+hp 42 / 100
+11
+ready
+```
+
+`to_str()` copies the current contents into a fresh arena block, so the
+string it returns stays valid and unchanged when you keep appending or call
+`clear()`.
+
 ## Function values
 
 Functions are values with type `func(P1, P2) -> R`. They can be stored in
@@ -295,4 +323,4 @@ garbage.
   `physics.vnt` to `boids.vnt` and `grid.vnt`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (313 tests).
+- `python -m unittest discover -s tests` — run the test suite (341 tests).

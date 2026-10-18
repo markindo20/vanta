@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.9.0)
+# Vanta Language Reference (v0.10.0)
 
-This is the reference for the language as implemented at tag `v0.9.0`. Every
+This is the reference for the language as implemented at tag `v0.10.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -39,6 +39,7 @@ Assigning to a `let` binding is a compile-time error.
 | `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
+| `StrBuilder` | arena-backed string builder; append pieces, then `to_str()` (see [String building](#string-building-strbuilder-v0100)) |
 
 Integer literals default to `i32`; float literals default to `f32`.
 
@@ -315,6 +316,43 @@ compile errors. `arena.reset()` invalidates every list made from that arena,
 because the storage lives there. There is no `insert`, `remove`, or `sort`
 yet; iterate with `for i in range(0, len(xs))`.
 
+## String building: `StrBuilder` (v0.10.0)
+
+The string pool is fine for one-off values, but building a string piece by
+piece with `str_concat` in a loop burns pool memory on every intermediate
+result. A `StrBuilder` is the arena-backed answer: one growing buffer, many
+appends, and no pool involvement.
+
+```vanta
+let arena = Arena(4096)
+let b = arena.str_builder()
+b.append_str("hp ")
+b.append_i32(42)
+b.append_str(" / ")
+b.append_f32(1.5)
+print_str(b.to_str())     # hp 42 / 1.500000
+print_i32(len(b))         # 16
+```
+
+- `append_str(s)` appends a `str`; `append_i32` / `append_u32` / `append_f32`
+  / `append_f64` / `append_bool` format a value exactly like the matching
+  `print_*` function.
+- `len(b)` returns the byte count appended so far as `i32`.
+- `to_str()` returns the current contents as a `str` — **copied into a fresh
+  arena block**, so the result is stable: later appends, growth, and `clear()`
+  do not change it.
+- `clear()` resets the builder to empty; the buffer is reused.
+
+Like `List<T>`, a `StrBuilder` is a handle: copies alias the same buffer, and
+appends work through a plain `let` — `mut` only controls rebinding. A helper
+function can take a `StrBuilder` parameter and append to the caller's builder.
+The buffer grows by doubling from 32 bytes, allocating from the arena;
+`arena.reset()` invalidates the builder and every string taken from it.
+
+**When to use which:** `str_concat` / `to_str_*` for isolated values
+(pool-backed); `StrBuilder` for assembling lines, logs, and HUD text,
+especially per-frame — build with `clear()`, print with `to_str()`.
+
 ## Function values (v0.6.0)
 
 Functions are values. A function type is written `func(P1, P2) -> R`; omit the
@@ -400,7 +438,9 @@ rejected. `str` values may be `const`.
 
 There is no string indexing, and indexing a `str` is not supported. Concatenation
 (`str_concat`), length (`str_len`), and conversions are covered under
-[Strings and the string pool](#strings-and-the-string-pool-v026).
+[Strings and the string pool](#strings-and-the-string-pool-v026); for building
+many pieces into one string, see
+[String building](#string-building-strbuilder-v0100).
 
 ## Vector and matrix types
 
@@ -566,6 +606,10 @@ print_fmt("{} has {} chars", label, str_len(label))
   `vanta: string pool exhausted (65536 bytes); call str_pool_reset()` and exits
   with code 1. It does not silently corrupt memory.
 - `to_str_bool` returns a literal and allocates nothing.
+- Building incrementally? `str_concat` in a loop allocates an intermediate
+  string per iteration. The arena-backed
+  [`StrBuilder`](#string-building-strbuilder-v0100) appends into one growing
+  buffer instead and never touches the pool.
 
 There is no string indexing and no per-value ownership.
 
