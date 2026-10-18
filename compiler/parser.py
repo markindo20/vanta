@@ -311,20 +311,25 @@ class Parser:
         tok = self.advance()
         var = self.expect(TT.IDENT).value
         self.expect(TT.IN)
-        rng = self.expect(TT.IDENT)
-        if rng.value != 'range':
-            self.error("expected 'range' after 'in'", rng)
-        self.expect(TT.LPAREN)
-        start = self.parse_expr()
-        self.expect(TT.COMMA)
-        end = self.parse_expr()
-        step = None
-        if self.match(TT.COMMA):
-            step = self.parse_expr()
-        self.expect(TT.RPAREN)
+        if (self.check(TT.IDENT) and self.peek().value == 'range'
+                and self.peek(1).type == TT.LPAREN):
+            self.advance()  # 'range'
+            self.expect(TT.LPAREN)
+            start = self.parse_expr()
+            self.expect(TT.COMMA)
+            end = self.parse_expr()
+            step = None
+            if self.match(TT.COMMA):
+                step = self.parse_expr()
+            self.expect(TT.RPAREN)
+            self.expect(TT.COLON)
+            body = self.parse_block()
+            return A.ForRangeStmt(var, start, end, step, body, A.Pos(tok.line, tok.col))
+        # for x in <expr>: iterate a List or array element by element.
+        iterable = self.parse_expr()
         self.expect(TT.COLON)
         body = self.parse_block()
-        return A.ForRangeStmt(var, start, end, step, body, A.Pos(tok.line, tok.col))
+        return A.ForEachStmt(var, iterable, body, A.Pos(tok.line, tok.col))
 
     def parse_match(self):
         tok = self.advance()

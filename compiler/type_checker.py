@@ -2,8 +2,9 @@ from . import ast_nodes as A
 from .typesys import (
     Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType,
     InferType, StructType, EnumType, FuncType,
-    I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
-    PRIM_TYPES, is_int, is_float, is_numeric,
+    I8, U8, I16, U16, I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
+    PRIM_TYPES, NARROW_RANGES, is_int, is_float, is_numeric, is_narrow,
+    eq_blocker,
 )
 from .formats import parse_format
 
@@ -14,15 +15,6 @@ def _contains_func_type(t) -> bool:
         return True
     if isinstance(t, (PtrType, ArrayType, ListType)):
         return _contains_func_type(t.inner)
-    return False
-
-
-def _contains_enum_type(t) -> bool:
-    """True when t is an enum type or wraps one (pointer/array/list)."""
-    if isinstance(t, EnumType):
-        return True
-    if isinstance(t, (PtrType, ArrayType, ListType)):
-        return _contains_enum_type(t.inner)
     return False
 
 
@@ -258,11 +250,6 @@ class TypeChecker:
                     f"extern function '{fd.name}' cannot return a function type yet; "
                     f"wrap it in a C shim that calls it",
                     self.filename, fd.pos)
-            if _contains_enum_type(ret) or any(_contains_enum_type(t) for (_, t) in params):
-                raise CheckError(
-                    f"extern function '{fd.name}' cannot use enum types yet; "
-                    f"pass enum_to_i32(...) instead",
-                    self.filename, fd.pos)
             self.functions[fd.name] = FuncSig(fd.name, params, ret, is_extern=True)
 
     def _is_constexpr(self, expr) -> bool:
@@ -375,6 +362,8 @@ class TypeChecker:
             self._check_while(stmt)
         elif isinstance(stmt, A.ForRangeStmt):
             self._check_for(stmt)
+        elif isinstance(stmt, A.ForEachStmt):
+            self._check_foreach(stmt)
         elif isinstance(stmt, A.MatchStmt):
             self._check_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
@@ -502,6 +491,24 @@ class TypeChecker:
             self.loop_depth -= 1
             self._pop()
 
+    def _check_foreach(self, f: A.ForEachStmt):
+        it = self._check_expr(f.iterable)
+        if isinstance(it, (ListType, ArrayType)):
+            elem = it.inner
+        else:
+            raise CheckError(
+                f"cannot iterate over {it}; for-each supports arrays and Lists",
+                self.filename, f.pos)
+        self._push()
+        self.scopes[-1][f.var] = (elem, False)
+        self.loop_depth += 1
+        try:
+            for s in f.body:
+                self._check_stmt(s)
+        finally:
+            self.loop_depth -= 1
+            self._pop()
+
     def _check_match(self, m: A.MatchStmt):
         vt = self._check_expr(m.value)
         if not isinstance(vt, EnumType):
@@ -559,7 +566,7 @@ class TypeChecker:
                 expr.type = ent[0]
                 return ent[0]
             if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32',
-                             'ptr_is_null'):
+                             'ptr_is_null', 'ptr_cast'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
@@ -587,6 +594,9 @@ class TypeChecker:
         if isinstance(expr, A.UnaryOp):
             t = self._check_expr(expr.operand)
             if expr.op == '-':
+                if is_narrow(t):
+                    # Reading a narrow value promotes it, so -u8 is an i32.
+                    expr.type = I32; return I32
                 if is_numeric(t):
                     expr.type = t; return t
                 if isinstance(t, StructType) and t.name in ("Vec2", "Vec3"):
@@ -688,6 +698,10 @@ class TypeChecker:
     def _check_binop(self, expr: A.BinOp, lt, rt) -> Type:
         op = expr.op
         lt, rt = self._coerce_binop_lits(expr, lt, rt)
+        # Reading a narrow integer promotes it to i32 (C's integer
+        # promotion); the C++ backend promotes the same way for free.
+        lt = I32 if is_narrow(lt) else lt
+        rt = I32 if is_narrow(rt) else rt
         if op in ('and', 'or'):
             if lt is not BOOL or rt is not BOOL:
                 raise CheckError(f"'{op}' requires bool operands", self.filename, expr.pos)
@@ -705,9 +719,20 @@ class TypeChecker:
                         self.filename, expr.pos)
                 raise CheckError(f"cannot compare {lt} and {rt} with '{op}'", self.filename, expr.pos)
             if isinstance(lt, StructType) or isinstance(rt, StructType):
-                if (op in ('==', '!=') and isinstance(lt, StructType)
-                        and lt == rt and lt.name in ("Vec2", "Vec3")):
-                    return BOOL
+                if op in ('==', '!=') and isinstance(lt, StructType) and lt == rt:
+                    if lt.name in ("Vec2", "Vec3"):
+                        return BOOL
+                    if lt.builtin:
+                        raise CheckError(f"cannot compare {lt} and {rt} with '{op}'",
+                                         self.filename, expr.pos)
+                    blocker = eq_blocker(lt)
+                    if blocker is None:
+                        return BOOL
+                    path, bt = blocker
+                    raise CheckError(
+                        f"cannot compare struct '{lt.name}' with '{op}': "
+                        f"field '{path}' ({bt}) has no equality",
+                        self.filename, expr.pos)
                 raise CheckError(f"cannot compare {lt} and {rt} with '{op}'", self.filename, expr.pos)
             if lt is STR or rt is STR:
                 if op in ('==', '!=') and lt is STR and rt is STR:
@@ -757,21 +782,43 @@ class TypeChecker:
             expr.left.type = F32; expr.right.type = F32
             return F32, F32
         if lt in (INT_LIT, FLOAT_LIT) and lit_ok(rt, lt):
+            self._check_literal_range(expr.left, rt)
             expr.left.type = rt
             return rt, rt
         if rt in (INT_LIT, FLOAT_LIT) and lit_ok(lt, rt):
+            self._check_literal_range(expr.right, lt)
             expr.right.type = lt
             return lt, lt
         return lt, rt
+
+    def _check_literal_range(self, expr, t, ctx=None):
+        """A literal written where a narrow integer is expected must fit;
+        computed values are still truncated silently."""
+        if not is_narrow(t) or not isinstance(expr, A.IntLit):
+            return
+        lo, hi = NARROW_RANGES[t]
+        if not (lo <= expr.value <= hi):
+            msg = f"value {expr.value} out of range for {t}"
+            if ctx:
+                msg = f"{ctx}: {msg}"
+            raise CheckError(msg, self.filename, expr.pos)
 
     def _coerce_value(self, expr, actual, expected, pos, ctx):
         if actual is expected or actual == expected:
             return
         if actual is INT_LIT and (is_int(expected) or is_float(expected)):
+            self._check_literal_range(expr, expected, ctx)
             expr.type = expected
             return
         if actual is FLOAT_LIT and is_float(expected):
             expr.type = expected
+            return
+        if is_narrow(expected) and is_int(actual):
+            # C-style truncation: assigning a wider integer to a narrow one
+            # keeps the low bits.
+            return
+        if is_narrow(actual) and (expected is I32 or expected is U32):
+            # Reading a narrow value promotes it to i32/u32 (value-preserving).
             return
         if isinstance(actual, ArrayType) and isinstance(expected, ArrayType):
             if actual.size != expected.size:
@@ -822,6 +869,8 @@ class TypeChecker:
                 return self._check_enum_to_i32(call)
             if name == 'ptr_is_null':
                 return self._check_ptr_is_null(call)
+            if name == 'ptr_cast':
+                return self._check_ptr_cast(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.structs:
@@ -933,6 +982,28 @@ class TypeChecker:
                              self.filename, call.pos)
         call.type = BOOL
         return BOOL
+
+    def _check_ptr_cast(self, call: A.Call) -> Type:
+        if not call.type_args or len(call.type_args) != 1:
+            raise CheckError("ptr_cast requires a type argument: ptr_cast::<T>(p)",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("ptr_cast does not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != 1:
+            raise CheckError(f"ptr_cast takes one argument, got {len(call.args)}",
+                             self.filename, call.pos)
+        inner = self._resolve_type(call.type_args[0])
+        if _contains_func_type(inner):
+            raise CheckError("ptr_cast cannot target a function type",
+                             self.filename, call.pos)
+        at = self._check_expr(call.args[0])
+        if not isinstance(at, PtrType):
+            raise CheckError(f"ptr_cast expects a pointer, got {at}",
+                             self.filename, call.pos)
+        t = PtrType(inner)
+        call.type = t
+        return t
 
     def _check_at(self, call: A.Call, arr: ArrayType) -> Type:
         if call.type_args:
@@ -1053,13 +1124,13 @@ class TypeChecker:
                 f"{name}: format string has {n_ph} placeholder(s) "
                 f"but {len(extra)} argument(s) were given",
                 self.filename, call.pos)
-        allowed = (I32, U32, F32, F64, BOOL, STR)
+        allowed = (I8, U8, I16, U16, I32, U32, F32, F64, BOOL, STR)
         for a in extra:
             at = self._default_type(self._check_expr(a), a)
             if not any(at is t for t in allowed):
                 raise CheckError(
                     f"{name}: cannot format a value of type {at} "
-                    f"(expected i32, u32, f32, f64, bool, or str)",
+                    f"(expected an integer, f32, f64, bool, or str)",
                     self.filename, call.pos)
         call.type = VOID
         return VOID

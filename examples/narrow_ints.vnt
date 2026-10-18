@@ -1,0 +1,85 @@
+# narrow_ints.vnt — i8/u8/i16/u16: exact-width storage, i32 arithmetic.
+#
+# A narrow integer keeps its exact width in memory: a u8 is one byte, which
+# is what C's uint8_t is, so struct fields and buffers can match a C layout
+# byte for byte. Reading one promotes it to i32; storing a wider integer
+# back keeps the low bits, exactly like a C cast:
+#
+#     mut p = Pixel(r: 250, ...)
+#     p.r = p.r + 10      # 260 does not fit: stores 4
+#
+# A *literal* written where a narrow type is expected must fit — that is
+# checked at compile time. Only computed values truncate.
+#
+# The C side of this example is in narrow_ints_lib.c. Build it once, then:
+#
+#     gcc -c examples/narrow_ints_lib.c -o build/narrow_ints_lib.o
+#     ar rcs build/libnarrow.a build/narrow_ints_lib.o
+#     python main.py run examples/narrow_ints.vnt --lib-dir build --link narrow
+
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    hits: u32
+
+extern "narrow demo" {
+    # C declares these as int8_t/uint8_t/int16_t/uint16_t.
+    func narrow_sum(a: i8, b: u8, c: i16, d: u16) -> i32
+    func narrow_low(x: u32) -> u8
+    func narrow_erase(p: ptr<i32>) -> ptr<void>
+    # These take a ptr<void> to a Pixel and read it through a mirror struct.
+    func narrow_pixel_sum(p: ptr<void>) -> i32
+    func narrow_pixel_hits(p: ptr<void>) -> u32
+}
+
+func main() -> void:
+    # Struct fields sit at their exact widths; reads promote to i32.
+    mut p = Pixel(r: 200, g: 100, b: 25, hits: 4000000000)
+    print_i32(p.r + p.g + p.b)
+    print_u32(p.hits)
+
+    # Storing a computed, too-wide value truncates to the low bits.
+    p.r = p.r + 100
+    print_i32(p.r)
+    p.r = 255
+    p.r = p.r + 1
+    print_i32(p.r)
+
+    # Signed and unsigned narrow values mix through i32.
+    let big: u16 = 60000
+    let small: i16 = -300
+    print_i32(big + small)
+
+    # Containers of narrow values work as you would expect.
+    let arena = Arena(4096)
+    let bytes = arena.list::<u8>()
+    bytes.push(65)
+    bytes.push(66)
+    let wide: i32 = 300
+    bytes.push(wide)
+    for b in bytes:
+        print_i32(b)
+
+    let buf = arena.alloc::<u8>(2)
+    buf[0] = 250
+    buf[0] = buf[0] + 10
+    print_i32(buf[0])
+
+    # The C side sees the exact widths: -1 + 255 - 2 + 3.
+    print_i32(narrow_sum(-1, 255, -2, 3))
+    print_i32(narrow_low(300))
+
+    # ptr<void> from C comes back typed with ptr_cast.
+    let cell = arena.alloc::<i32>(1)
+    cell[0] = 77
+    let erased = narrow_erase(cell)
+    let back = ptr_cast::<i32>(erased)
+    print_i32(back[0])
+
+    # The C side can read a Vanta struct when the fields line up byte for
+    # byte — which is exactly what exact-width fields buy you.
+    let rp = arena.alloc::<Pixel>(1)
+    rp[0] = Pixel(r: 200, g: 100, b: 25, hits: 4000000000)
+    print_i32(narrow_pixel_sum(rp))
+    print_u32(narrow_pixel_hits(rp))

@@ -1,0 +1,42 @@
+# enums_extern.vnt — enum types in extern signatures.
+#
+# An enum is an int32_t in memory, so an extern function can take and
+# return one directly. The generated C++ spells the parameter as the enum;
+# the C side may declare plain int, or its own enum with matching values —
+# C enums are int at the ABI level too. No enum_to_i32 wrapper needed.
+#
+# The C side is in enums_extern_lib.c. Build it once, then run:
+#
+#     gcc -c examples/enums_extern_lib.c -o build/enums_extern_lib.o
+#     ar rcs build/liblight.a build/enums_extern_lib.o
+#     python main.py run examples/enums_extern.vnt --lib-dir build --link light
+
+enum Light:
+    Off
+    Dim
+    Bright
+
+extern "light demo" {
+    func light_next(m: Light) -> Light
+    func light_steps_to(from: Light, to: Light) -> i32
+}
+
+func main() -> void:
+    mut m = Light.Off
+    print_bool(m == Light.Off)
+    m = light_next(m)
+    print_bool(m == Light.Dim)
+
+    # match works on what C returned, exactly like a native enum.
+    match m:
+        Light.Off:
+            print_str("off")
+        Light.Dim:
+            print_str("dim")
+        Light.Bright:
+            print_str("bright")
+
+    m = light_next(m)
+    m = light_next(m)
+    print_bool(m == Light.Off)
+    print_i32(light_steps_to(Light.Off, Light.Bright))

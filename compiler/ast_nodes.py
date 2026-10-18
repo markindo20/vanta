@@ -154,6 +154,14 @@ class ForRangeStmt:
 
 
 @dataclass
+class ForEachStmt:
+    var: str
+    iterable: Any
+    body: List[Any]
+    pos: Pos
+
+
+@dataclass
 class ExprStmt:
     expr: Any
     pos: Pos

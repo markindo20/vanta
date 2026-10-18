@@ -4,7 +4,8 @@ from .formats import parse_format
 from .typesys import (
     PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType, InferType,
     StructType, EnumType, FuncType,
-    I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
+    I8, U8, I16, U16, I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
+    is_narrow, eq_blocker,
 )
 
 
@@ -37,8 +38,10 @@ BUILTIN_FN = {
 }
 
 
-# printf conversion for each formattable Vanta type.
+# printf conversion for each formattable Vanta type. Narrow integers are
+# promoted to int by the C varargs rules, so %d is right for all of them.
 FMT_SPEC = {
+    'i8': '%d', 'u8': '%d', 'i16': '%d', 'u16': '%d',
     'i32': '%d', 'u32': '%u', 'f32': '%f', 'f64': '%lf',
     'bool': '%s', 'str': '%s',
 }
@@ -85,6 +88,10 @@ BUILTIN_MATH_CTOR = {
 
 
 def cpp_type(t):
+    if t is I8: return 'int8_t'
+    if t is U8: return 'uint8_t'
+    if t is I16: return 'int16_t'
+    if t is U16: return 'uint16_t'
     if t is I32: return 'int32_t'
     if t is U32: return 'uint32_t'
     if t is F32: return 'float'
@@ -187,6 +194,8 @@ class CodeGen:
             return f'vanta::List<{self._ctype_c(t.inner)}>'
         if isinstance(t, StructType) and not t.builtin:
             return f'vanta_user::{t.name}'
+        if isinstance(t, EnumType):
+            return f'vanta_user::{t.name}'
         return cpp_type(t)
 
     def _declarator_c(self, t, name: str) -> str:
@@ -227,13 +236,16 @@ class CodeGen:
         # Extern declarations (outside namespace)
         externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
         structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
+        enums = [d for d in self.program.decls if isinstance(d, A.EnumDecl)]
 
-        # Struct tags ahead of the extern block: an extern signature may
-        # mention a user struct (a callback carrying a ptr<State>, say), and
+        # Tags ahead of the extern block: an extern signature may mention a
+        # user struct or enum (a callback carrying a ptr<State>, say), and
         # the definitions live inside the namespace below.
-        if externs and structs:
+        if externs and (structs or enums):
             self.emit('namespace vanta_user {')
             self.indent += 1
+            for ed in enums:
+                self.emit(f'enum class {ed.name} : int32_t;')
             for sd in structs:
                 self.emit(f'struct {sd.name};')
             self.indent -= 1
@@ -276,6 +288,7 @@ class CodeGen:
 
         for sd in structs:
             self._gen_struct(sd)
+        self._gen_struct_eq(structs)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
@@ -328,6 +341,57 @@ class CodeGen:
         self.indent -= 1
         self.emit('};')
         self.emit('')
+
+    def _equality_fields(self, sd: A.StructDecl):
+        st = self.tc.structs[sd.name]
+        if st.builtin or eq_blocker(st) is not None:
+            return None
+        return st
+
+    def _gen_struct_eq(self, structs):
+        """Component-wise == and != for user structs whose fields all have
+        equality. Declarations come first so nested structs can refer to
+        each other's operators in any declaration order."""
+        eqs = [st for st in (self._equality_fields(sd) for sd in structs)
+               if st is not None]
+        if not eqs:
+            return
+        for st in eqs:
+            self.emit(f'inline bool operator==(const {st.name}& a, const {st.name}& b);')
+            self.emit(f'inline bool operator!=(const {st.name}& a, const {st.name}& b);')
+        self.emit('')
+        for st in eqs:
+            terms = [self._eq_expr(ft, f'a.v_{fn}', f'b.v_{fn}')
+                     for fn, ft in st.fields.items()]
+            body = ' && '.join(terms) if terms else 'true'
+            self.emit(f'inline bool operator==(const {st.name}& a, const {st.name}& b) {{')
+            self.indent += 1
+            self.emit(f'return {body};')
+            self.indent -= 1
+            self.emit('}')
+            self.emit(f'inline bool operator!=(const {st.name}& a, const {st.name}& b) '
+                      f'{{ return !(a == b); }}')
+            self.emit('')
+
+    def _eq_expr(self, t, lhs, rhs) -> str:
+        """A C++ expression comparing two values of type t with Vanta
+        semantics (str compares by content, arrays element-wise)."""
+        if t is STR:
+            return f'vanta::str_eq({lhs}, {rhs})'
+        if isinstance(t, ArrayType):
+            parts = [self._eq_expr(t.inner, f'{lhs}[{i}]', f'{rhs}[{i}]')
+                     for i in range(t.size)]
+            return '(' + ' && '.join(parts) + ')'
+        return f'({lhs} == {rhs})'
+
+    def _init_expr(self, e, target) -> str:
+        """An element of a braced initializer. C++ rejects narrowing inside
+        braces, so an integer expression headed for a narrow field or
+        element gets an explicit truncating cast."""
+        et = getattr(e, 'type', None)
+        if is_narrow(target) and isinstance(et, PrimType) and et is not target:
+            return f'static_cast<{self._ctype(target)}>({self._expr(e)})'
+        return self._expr(e)
 
     def _gen_func(self, fn: A.FuncDecl):
         sig = self._func_sig(fn)
@@ -396,6 +460,8 @@ class CodeGen:
             self.emit('}')
         elif isinstance(stmt, A.ForRangeStmt):
             self._gen_for(stmt)
+        elif isinstance(stmt, A.ForEachStmt):
+            self._gen_foreach(stmt)
         elif isinstance(stmt, A.MatchStmt):
             self._gen_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
@@ -428,6 +494,34 @@ class CodeGen:
             self.emit('}')
             self.indent -= 1
             self.emit('}')
+
+    def _gen_foreach(self, stmt):
+        it = getattr(stmt.iterable, 'type', None)
+        self.temp_counter += 1
+        n = self.temp_counter
+        self.emit('{')
+        self.indent += 1
+        elem = self._ctype(it.inner)
+        if isinstance(it, ListType):
+            # Bind the handle once; the loop re-reads the length like the C
+            # it compiles to (don't grow the list while iterating it).
+            self.emit(f'{self._ctype(it)} __it_{n} = {self._expr(stmt.iterable)};')
+            self.emit(f'for (int32_t __i_{n} = 0; __i_{n} < __it_{n}.h->len; '
+                      f'__i_{n} += 1) {{')
+            self.indent += 1
+            self.emit(f'{elem} v_{stmt.var} = __it_{n}.h->data[__i_{n}];')
+        else:
+            self.emit(f'const {self._ctype(it)}& __it_{n} = {self._expr(stmt.iterable)};')
+            self.emit(f'for (int32_t __i_{n} = 0; __i_{n} < {it.size}; '
+                      f'__i_{n} += 1) {{')
+            self.indent += 1
+            self.emit(f'{elem} v_{stmt.var} = __it_{n}[__i_{n}];')
+        for s in stmt.body:
+            self._gen_stmt(s)
+        self.indent -= 1
+        self.emit('}')
+        self.indent -= 1
+        self.emit('}')
 
     def _gen_match(self, stmt):
         # Bind the matched value once, then test the arms as an if/else
@@ -508,7 +602,7 @@ class CodeGen:
             t = e.type
             inner_t = self._ctype(t.inner)
             N = t.size
-            elems = ', '.join(self._expr(el) for el in e.elements)
+            elems = ', '.join(self._init_expr(el, t.inner) for el in e.elements)
             return f'std::array<{inner_t}, {N}>{{{elems}}}'
         if isinstance(e, A.Name):
             if getattr(e, 'is_func_ref', False):
@@ -592,6 +686,9 @@ class CodeGen:
             if name == 'assert':
                 line = c.pos.line if c.pos else 0
                 return f'vanta::assert_impl({self._expr(c.args[0])}, {line})'
+            if name == 'ptr_cast':
+                return (f'reinterpret_cast<{self._ctype(c.type)}>'
+                        f'({self._expr(c.args[0])})')
             if name in BUILTIN_MATH_CTOR:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{BUILTIN_MATH_CTOR[name]}({args})'
@@ -600,7 +697,8 @@ class CodeGen:
                 return f'vanta::{name}({args})'
             st = self.tc.structs.get(name)
             if st is not None and not st.builtin:
-                args = ', '.join(self._expr(a) for a in c.args)
+                args = ', '.join(self._init_expr(a, ft)
+                                 for a, ft in zip(c.args, st.fields.values()))
                 return f'{name}{{{args}}}'
             if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)
@@ -638,15 +736,17 @@ class CodeGen:
                 if m == 'str_builder':
                     return f'vanta::strb_new({base})'
             if isinstance(ot, ListType):
+                elem_t = self._ctype(ot.inner)
                 if m == 'push':
-                    return f'vanta::list_push({base}, {self._expr(c.args[0])})'
+                    return (f'vanta::list_push<{elem_t}>({base}, '
+                            f'{self._expr(c.args[0])})')
                 if m == 'pop':
                     line = c.pos.line if c.pos else 0
                     return f'vanta::list_pop({base}, {line})'
                 if m == 'insert':
                     line = c.pos.line if c.pos else 0
-                    return (f'vanta::list_insert({base}, {self._expr(c.args[0])}, '
-                            f'{self._expr(c.args[1])}, {line})')
+                    return (f'vanta::list_insert<{elem_t}>({base}, '
+                            f'{self._expr(c.args[0])}, {self._expr(c.args[1])}, {line})')
                 if m == 'remove':
                     line = c.pos.line if c.pos else 0
                     return f'vanta::list_remove({base}, {self._expr(c.args[0])}, {line})'

@@ -435,7 +435,7 @@ class CodegenTests(unittest.TestCase):
                   "    let xs = a.list::<i32>()\n"
                   "    xs.push(7)\n")
         self.assertIn('vanta::List<int32_t> v_xs = vanta::list_new<int32_t>(v_a);', cpp)
-        self.assertIn('vanta::list_push(v_xs, 7);', cpp)
+        self.assertIn('vanta::list_push<int32_t>(v_xs, 7);', cpp)
 
     def test_list_len_and_pop_emit(self):
         cpp = gen("func main() -> void:\n"
@@ -471,7 +471,7 @@ class CodegenTests(unittest.TestCase):
                   "    let ps = a.list::<P>()\n"
                   "    ps.push(P(x: 1))\n")
         self.assertIn('vanta::List<P> v_ps = vanta::list_new<P>(v_a);', cpp)
-        self.assertIn('vanta::list_push(v_ps, P{1});', cpp)
+        self.assertIn('vanta::list_push<P>(v_ps, P{1});', cpp)
 
     def test_list_param_emit(self):
         cpp = gen("func fill(xs: List<i32>):\n    xs.push(1)\n"
@@ -621,6 +621,127 @@ class CodegenTests(unittest.TestCase):
                   "    print_bool(ptr_is_null(maybe()))\n")
         self.assertIn('return nullptr;', cpp)
         self.assertNotIn('void*{}', cpp)
+
+    # ---------- narrow integers (v0.17.0) ----------
+
+    def test_narrow_types_emit(self):
+        cpp = gen("struct P:\n"
+                  "    a: i8\n"
+                  "    b: u8\n"
+                  "    c: i16\n"
+                  "    d: u16\n"
+                  "func f(x: u8) -> u16:\n"
+                  "    return 7\n")
+        self.assertIn('int8_t v_a;', cpp)
+        self.assertIn('uint8_t v_b;', cpp)
+        self.assertIn('int16_t v_c;', cpp)
+        self.assertIn('uint16_t v_d;', cpp)
+        self.assertIn('uint16_t fn_f(uint8_t v_x);', cpp)
+
+    def test_narrow_arithmetic_promotes_in_cpp(self):
+        cpp = gen("func f(a: u8, b: u8) -> i32:\n"
+                  "    return a * b\n")
+        self.assertIn('return (v_a * v_b);', cpp)
+
+    def test_narrow_struct_ctor_cast(self):
+        cpp = gen("struct P:\n"
+                  "    r: u8\n"
+                  "func main() -> void:\n"
+                  "    let z: i32 = 300\n"
+                  "    let p = P(r: z)\n")
+        self.assertIn('P{static_cast<uint8_t>(v_z)}', cpp)
+
+    def test_narrow_array_literal_cast(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let z: i32 = 7\n"
+                  "    let bytes: [u8, 2] = [z, 3]\n")
+        self.assertIn('std::array<uint8_t, 2>{static_cast<uint8_t>(v_z), 3}', cpp)
+
+    def test_narrow_fmt_spec(self):
+        cpp = gen("func f(a: u8) -> void:\n"
+                  "    print_fmt(\"a={}\", a)\n")
+        self.assertIn('"a=%d\\n"', cpp)
+
+    def test_narrow_list_push_template_arg(self):
+        cpp = gen("func f(x: i32) -> void:\n"
+                  "    let a = Arena(256)\n"
+                  "    let xs = a.list::<u8>()\n"
+                  "    xs.push(x)\n")
+        self.assertIn('vanta::list_push<uint8_t>(v_xs, v_x);', cpp)
+
+    # ---------- ptr_cast (v0.17.0) ----------
+
+    def test_ptr_cast_emit(self):
+        cpp = gen("func f(p: ptr<void>) -> void:\n"
+                  "    let q = ptr_cast::<f32>(p)\n"
+                  "    print_f32(q[0])\n")
+        self.assertIn('reinterpret_cast<float*>(v_p)', cpp)
+
+    def test_ptr_cast_struct_emit(self):
+        cpp = gen("struct P:\n"
+                  "    x: i32\n"
+                  "func f(p: ptr<void>) -> void:\n"
+                  "    let q = ptr_cast::<P>(p)\n"
+                  "    print_i32(q[0].x)\n")
+        self.assertIn('reinterpret_cast<P*>(v_p)', cpp)
+
+    # ---------- enums in extern (v0.17.0) ----------
+
+    def test_extern_enum_emit(self):
+        cpp = gen("enum Mode:\n"
+                  "    On\n"
+                  "    Off\n"
+                  "extern \"demo\" {\n"
+                  "    func set_mode(m: Mode) -> Mode\n"
+                  "}\n")
+        self.assertIn('enum class Mode : int32_t;', cpp)
+        self.assertIn('vanta_user::Mode set_mode(vanta_user::Mode v_m);', cpp)
+        self.assertIn('enum class Mode : int32_t { On = 0, Off = 1 };', cpp)
+
+    # ---------- struct equality (v0.17.0) ----------
+
+    def test_struct_eq_emit(self):
+        cpp = gen("struct Inner:\n"
+                  "    q: str\n"
+                  "struct P:\n"
+                  "    r: u8\n"
+                  "    names: [str, 2]\n"
+                  "    inner: Inner\n"
+                  "func main() -> void:\n"
+                  "    print_i32(1)\n")
+        self.assertIn('inline bool operator==(const P& a, const P& b);', cpp)
+        self.assertIn('inline bool operator!=(const P& a, const P& b);', cpp)
+        self.assertIn('return (a.v_r == b.v_r) && '
+                      '(vanta::str_eq(a.v_names[0], b.v_names[0]) && '
+                      'vanta::str_eq(a.v_names[1], b.v_names[1])) && '
+                      '(a.v_inner == b.v_inner);', cpp)
+        self.assertIn('inline bool operator!=(const P& a, const P& b) { return !(a == b); }', cpp)
+
+    def test_struct_eq_not_emitted_for_uncomparable(self):
+        cpp = gen("struct Q:\n"
+                  "    p: ptr<i32>\n"
+                  "func main() -> void:\n"
+                  "    print_i32(1)\n")
+        self.assertNotIn('operator==', cpp)
+
+    # ---------- for-each (v0.17.0) ----------
+
+    def test_foreach_list_emit(self):
+        cpp = gen("func f(xs: List<i32>) -> void:\n"
+                  "    for x in xs:\n"
+                  "        print_i32(x)\n")
+        self.assertIn('vanta::List<int32_t> __it_1 = v_xs;', cpp)
+        self.assertIn('for (int32_t __i_1 = 0; __i_1 < __it_1.h->len; __i_1 += 1) {', cpp)
+        self.assertIn('int32_t v_x = __it_1.h->data[__i_1];', cpp)
+
+    def test_foreach_array_emit(self):
+        cpp = gen("func f() -> void:\n"
+                  "    let xs = [1, 2, 3]\n"
+                  "    for x in xs:\n"
+                  "        print_i32(x)\n")
+        self.assertIn('const std::array<int32_t, 3>& __it_1 = v_xs;', cpp)
+        self.assertIn('for (int32_t __i_1 = 0; __i_1 < 3; __i_1 += 1) {', cpp)
+        self.assertIn('int32_t v_x = __it_1[__i_1];', cpp)
 
 
 if __name__ == '__main__':

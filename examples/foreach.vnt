@@ -1,0 +1,49 @@
+# foreach.vnt — for x in xs: iterate a List or an array element by element.
+#
+# The loop variable is a fresh read-only copy of each element — assign to
+# it and the compiler stops you, because the copy would be the only thing
+# that changed. Use an index range with xs[i] / xs.at(i) when you need to
+# write back into the collection. The loop re-reads a List's length every
+# iteration, so do not grow a list while iterating it.
+#
+# Ranges still work exactly as before: for i in range(0, n): ...
+
+struct Item:
+    name: str
+    cost: u16
+
+func main() -> void:
+    let arena = Arena(4096)
+
+    # A List of values.
+    let xs = arena.list::<i32>()
+    xs.push(3)
+    xs.push(1)
+    xs.push(4)
+    mut total = 0
+    for x in xs:
+        total = total + x
+    print_i32(total)
+
+    # Arrays, including one written inline.
+    let primes = [2, 3, 5, 7]
+    for p in primes:
+        print_i32(p)
+    for v in [10, 20]:
+        print_i32(v)
+
+    # break and continue mean the same as in range loops.
+    for x in xs:
+        if x == 1:
+            continue
+        if x == 4:
+            break
+        print_i32(x)
+
+    # Elements can be structs (or strings): the loop variable gets the
+    # element type, so fields and methods work as usual.
+    let items = arena.list::<Item>()
+    items.push(Item(name: "torch", cost: 12))
+    items.push(Item(name: "rope", cost: 5))
+    for it in items:
+        print_fmt("{}={}", it.name, it.cost)

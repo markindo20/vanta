@@ -1,0 +1,37 @@
+# struct_eq.vnt — == and != on structs, field by field.
+#
+# Two values of the same struct type are equal when every field is equal:
+# numbers compare by value, str by content, arrays element by element, and
+# nested structs recursively. A field with no equality — a pointer, a
+# function value, a List — is rejected at compile time with the field
+# named, so == can never silently compare something it should not.
+
+struct Point:
+    x: i32
+    y: i32
+
+struct Sprite:
+    name: str
+    pos: Point
+    tint: [f32, 3]
+
+func main() -> void:
+    let a = Point(x: 2, y: 5)
+    let b = Point(x: 2, y: 5)
+    let c = Point(x: 2, y: 6)
+    print_bool(a == b)
+    print_bool(a != c)
+
+    # The str compares by content, and the nested Point and [f32, 3] tint
+    # compare the same way they would stand-alone.
+    let s1 = Sprite(name: "hero", pos: a, tint: [1.0, 0.5, 0.25])
+    let s2 = Sprite(name: "hero", pos: b, tint: [1.0, 0.5, 0.25])
+    let s3 = Sprite(name: "hero", pos: b, tint: [1.0, 0.5, 0.5])
+    print_bool(s1 == s2)
+    print_bool(s1 == s3)
+
+    # The result is a plain bool: keep it, branch on it, negate it.
+    mut same = false
+    if a == b and s1 != s3:
+        same = true
+    print_bool(same)

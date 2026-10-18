@@ -1,0 +1,22 @@
+# ptr_cast.vnt — reinterpret a pointer's element type.
+#
+# ptr_cast::<T>(p) turns any pointer into ptr<T>, keeping the address. It
+# is unchecked, like C's reinterpret_cast: the language trusts you not to
+# read past what is actually there. Two uses: view the same memory as a
+# different type, and get a typed pointer back out of the ptr<void> a C
+# function handed you.
+
+func main() -> void:
+    let arena = Arena(256)
+
+    # Write the bit pattern of pi into an i32 cell, then read the same
+    # four bytes as an f32.
+    let words = arena.alloc::<i32>(1)
+    words[0] = 1078530011              # 0x40490FDB is f32 pi
+    let f = ptr_cast::<f32>(words)
+    print_f32(f[0])
+
+    # Erase the type to ptr<void> and bring it back: the address survives.
+    let erased = ptr_cast::<void>(words)
+    let back = ptr_cast::<i32>(erased)
+    print_i32(back[0])

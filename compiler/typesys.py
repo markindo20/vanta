@@ -78,6 +78,10 @@ class FuncType(Type):
         return f"func({inner}) -> {self.ret}"
 
 
+I8 = PrimType("i8")
+U8 = PrimType("u8")
+I16 = PrimType("i16")
+U16 = PrimType("u16")
 I32 = PrimType("i32")
 U32 = PrimType("u32")
 F32 = PrimType("f32")
@@ -90,11 +94,37 @@ FLOAT_LIT = FloatLitType()
 INFER = InferType()
 
 PRIM_TYPES = {
+    "i8": I8, "u8": U8, "i16": I16, "u16": U16,
     "i32": I32, "u32": U32, "f32": F32, "f64": F64,
     "bool": BOOL, "void": VOID, "str": STR,
 }
 
+# Narrow integers: stored with their exact width, promoted to i32 when read.
+NARROW_RANGES = {
+    I8: (-128, 127), U8: (0, 255), I16: (-32768, 32767), U16: (0, 65535),
+}
 
-def is_int(t): return t is I32 or t is U32
+
+def is_narrow(t): return t in NARROW_RANGES
+def is_int(t): return t is I32 or t is U32 or is_narrow(t)
 def is_float(t): return t is F32 or t is F64
 def is_numeric(t): return is_int(t) or is_float(t)
+
+
+def eq_blocker(t, path=""):
+    """Walk t looking for a value that '==' cannot compare. Returns a
+    (path, type) pair naming the first blocker, or None when t has equality.
+    Only Vec2 and Vec3 have equality among the builtin structs."""
+    if isinstance(t, PrimType) or isinstance(t, EnumType):
+        return None
+    if isinstance(t, StructType):
+        if t.builtin:
+            return None if t.name in ("Vec2", "Vec3") else (path, t)
+        for fname, ftype in t.fields.items():
+            sub = eq_blocker(ftype, f"{path}.{fname}" if path else fname)
+            if sub is not None:
+                return sub
+        return None
+    if isinstance(t, ArrayType):
+        return eq_blocker(t.inner, f"{path}[N]")
+    return (path, t)

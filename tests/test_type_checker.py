@@ -1465,21 +1465,29 @@ class TypeCheckerTests(unittest.TestCase):
                 "func main() -> void:\n"
                 "    let f = enum_to_i32\n")
 
-    def test_enum_in_extern_rejected(self):
-        with self.assertRaisesRegex(CheckError, "extern function 'set_mode' cannot use enum types yet"):
-            run("enum Mode:\n"
-                "    On\n"
-                "extern \"c\" {\n"
-                "    func set_mode(m: Mode) -> void\n"
-                "}\n")
+    def test_enum_in_extern_ok(self):
+        run("enum Mode:\n"
+            "    On\n"
+            "    Off\n"
+            "extern \"c\" {\n"
+            "    func set_mode(m: Mode) -> Mode\n"
+            "    func watch(m: ptr<Mode>) -> void\n"
+            "    func all(xs: List<Mode>) -> void\n"
+            "}\n")
 
-    def test_enum_in_extern_list_rejected(self):
-        with self.assertRaisesRegex(CheckError, "cannot use enum types yet"):
-            run("enum Mode:\n"
-                "    On\n"
-                "extern \"c\" {\n"
-                "    func f(xs: List<Mode>) -> void\n"
-                "}\n")
+    def test_enum_in_extern_match_ok(self):
+        run("enum Mode:\n"
+            "    On\n"
+            "    Off\n"
+            "extern \"c\" {\n"
+            "    func get_mode() -> Mode\n"
+            "}\n"
+            "func main() -> void:\n"
+            "    match get_mode():\n"
+            "        Mode.On:\n"
+            "            print_str(\"on\")\n"
+            "        Mode.Off:\n"
+            "            print_str(\"off\")\n")
 
     def test_enum_to_i32_extern_ok(self):
         run("enum Mode:\n"
@@ -1757,6 +1765,257 @@ class TypeCheckerTests(unittest.TestCase):
                 "func main() -> void:\n"
                 "    let p = mk()\n"
                 "    p = mk()\n")
+
+    # ---------- narrow integers (v0.17.0) ----------
+
+    def test_narrow_literals_ok(self):
+        run("struct P:\n"
+            "    a: i8\n"
+            "    b: u8\n"
+            "    c: i16\n"
+            "    d: u16\n"
+            "func main() -> void:\n"
+            "    let p = P(a: -128, b: 255, c: -32768, d: 65535)\n"
+            "    print_i32(p.a + p.b + p.c + p.d)\n")
+
+    def test_narrow_literal_out_of_range_u8(self):
+        with self.assertRaisesRegex(CheckError, "initializer: value 300 out of range for u8"):
+            run("func f() -> void:\n    let x: u8 = 300\n")
+
+    def test_narrow_literal_negative_unsigned(self):
+        with self.assertRaisesRegex(CheckError, "initializer: value -1 out of range for u8"):
+            run("func f() -> void:\n    let x: u8 = -1\n")
+
+    def test_narrow_literal_out_of_range_i8(self):
+        with self.assertRaisesRegex(CheckError, "initializer: value -129 out of range for i8"):
+            run("func f() -> void:\n    let x: i8 = -129\n")
+
+    def test_narrow_literal_out_of_range_u16(self):
+        with self.assertRaisesRegex(CheckError, "initializer: value 65536 out of range for u16"):
+            run("func f() -> void:\n    let x: u16 = 65536\n")
+
+    def test_narrow_binop_literal_out_of_range(self):
+        with self.assertRaisesRegex(CheckError, "value 300 out of range for u8"):
+            run("func f() -> void:\n"
+                "    let a: u8 = 1\n"
+                "    if a == 300:\n"
+                "        print_i32(1)\n")
+
+    def test_narrow_float_literal_rejected(self):
+        with self.assertRaisesRegex(CheckError, "initializer: cannot assign <float-lit> to u8"):
+            run("func f() -> void:\n    let x: u8 = 5.0\n")
+
+    def test_narrow_truncating_store_ok(self):
+        run("func f(x: i32, y: u32) -> void:\n"
+            "    mut a: u8 = x\n"
+            "    a = x\n"
+            "    let b: i16 = y\n"
+            "    let c: u16 = a\n"
+            "    print_i32(a)\n"
+            "    print_i32(b)\n"
+            "    print_i32(c)\n")
+
+    def test_narrow_promotes_to_i32(self):
+        run("func f(a: u8, b: i16, c: u16) -> void:\n"
+            "    let s: i32 = a + b\n"
+            "    let w: u32 = c\n"
+            "    let n: i32 = -a\n"
+            "    print_i32(s)\n"
+            "    print_u32(w)\n"
+            "    print_i32(n)\n"
+            "    print_fmt(\"{} {} {}\", a, b, c)\n")
+
+    def test_narrow_mixed_with_i32_ok(self):
+        run("func f(a: u8, b: i32) -> void:\n"
+            "    let s = a + b\n"
+            "    if a < b:\n"
+            "        print_i32(s)\n")
+
+    def test_narrow_index_and_range_ok(self):
+        run("func f(p: ptr<i32>, i: u8, c: u16) -> void:\n"
+            "    print_i32(p[i])\n"
+            "    for k in range(c, 3):\n"
+            "        print_i32(k)\n")
+
+    def test_narrow_const_ok(self):
+        run("const MAX: u8 = 200\n"
+            "func f() -> void:\n"
+            "    let x: u8 = MAX\n"
+            "    print_i32(x)\n")
+
+    def test_narrow_in_list_ok(self):
+        run("func f(x: i32) -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let xs = a.list::<u8>()\n"
+            "    xs.push(x)\n"
+            "    xs.push(4)\n"
+            "    print_i32(xs.at(0))\n")
+
+    # ---------- ptr_cast (v0.17.0) ----------
+
+    def test_ptr_cast_ok(self):
+        run("struct P:\n"
+            "    x: i32\n"
+            "func f(p: ptr<void>, q: ptr<i32>) -> void:\n"
+            "    let a = ptr_cast::<i32>(p)\n"
+            "    let b = ptr_cast::<P>(p)\n"
+            "    let c = ptr_cast::<void>(q)\n"
+            "    print_i32(a[0])\n"
+            "    print_i32(b[0].x)\n")
+
+    def test_ptr_cast_requires_type_argument(self):
+        with self.assertRaisesRegex(CheckError,
+                r"ptr_cast requires a type argument: ptr_cast::<T>\(p\)"):
+            run("func f(p: ptr<void>) -> void:\n    let q = ptr_cast(p)\n")
+
+    def test_ptr_cast_function_target_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_cast cannot target a function type"):
+            run("func f(p: ptr<void>) -> void:\n"
+                "    let q = ptr_cast::<func(i32) -> i32>(p)\n")
+
+    def test_ptr_cast_non_pointer_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_cast expects a pointer, got i32"):
+            run("func f(x: i32) -> void:\n    let q = ptr_cast::<i32>(x)\n")
+
+    def test_ptr_cast_arity(self):
+        with self.assertRaisesRegex(CheckError, "ptr_cast takes one argument, got 2"):
+            run("func f(p: ptr<void>) -> void:\n    let q = ptr_cast::<i32>(p, p)\n")
+
+    def test_ptr_cast_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_cast does not accept named arguments"):
+            run("func f(p: ptr<void>) -> void:\n    let q = ptr_cast::<i32>(x: p)\n")
+
+    def test_ptr_cast_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_cast' as a value"):
+            run("func f() -> void:\n    let q = ptr_cast\n")
+
+    # ---------- for-each (v0.17.0) ----------
+
+    def test_foreach_list_ok(self):
+        run("func f(xs: List<i32>) -> void:\n"
+            "    for x in xs:\n"
+            "        print_i32(x * 2)\n")
+
+    def test_foreach_array_ok(self):
+        run("func f() -> void:\n"
+            "    let grid = [1, 2, 3]\n"
+            "    for v in grid:\n"
+            "        print_i32(v)\n"
+            "    for v in [4, 5]:\n"
+            "        print_i32(v)\n")
+
+    def test_foreach_element_type(self):
+        run("struct P:\n"
+            "    x: i32\n"
+            "func f(xs: List<P>, names: [str, 2]) -> void:\n"
+            "    for p in xs:\n"
+            "        print_i32(p.x)\n"
+            "    for s in names:\n"
+            "        print_str(s)\n")
+
+    def test_foreach_non_iterable_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                r"cannot iterate over i32; for-each supports arrays and Lists"):
+            run("func f(x: i32) -> void:\n"
+                "    for v in x:\n"
+                "        print_i32(v)\n")
+
+    def test_foreach_pointer_rejected(self):
+        with self.assertRaisesRegex(CheckError, r"cannot iterate over ptr<i32>"):
+            run("func f(p: ptr<i32>) -> void:\n"
+                "    for v in p:\n"
+                "        print_i32(v)\n")
+
+    def test_foreach_loop_var_immutable(self):
+        with self.assertRaisesRegex(CheckError, "invalid assignment target"):
+            run("func f(xs: List<i32>) -> void:\n"
+                "    for v in xs:\n"
+                "        v = 1\n")
+
+    def test_foreach_break_continue_ok(self):
+        run("func f(xs: List<i32>) -> void:\n"
+            "    for v in xs:\n"
+            "        if v == 1:\n"
+            "            continue\n"
+            "        if v == 9:\n"
+            "            break\n"
+            "        print_i32(v)\n")
+
+    # ---------- struct equality (v0.17.0) ----------
+
+    def test_struct_eq_ok(self):
+        run("enum M:\n"
+            "    A\n"
+            "    B\n"
+            "struct Inner:\n"
+            "    q: str\n"
+            "    v: Vec2\n"
+            "struct S:\n"
+            "    n: i32\n"
+            "    m: M\n"
+            "    flags: [bool, 2]\n"
+            "    inner: Inner\n"
+            "func f(a: S, b: S) -> void:\n"
+            "    if a == b:\n"
+            "        print_str(\"same\")\n"
+            "    if a != b:\n"
+            "        print_str(\"diff\")\n")
+
+    def test_struct_eq_ptr_field_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                r"cannot compare struct 'Q' with '==': field 'p' \(ptr<i32>\) has no equality"):
+            run("struct Q:\n"
+                "    p: ptr<i32>\n"
+                "func f(a: Q, b: Q) -> void:\n"
+                "    if a == b:\n"
+                "        print_i32(1)\n")
+
+    def test_struct_eq_func_field_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                r"cannot compare struct 'Q' with '!=': field 'cb' \(func\(i32\) -> i32\) has no equality"):
+            run("struct Q:\n"
+                "    cb: func(i32) -> i32\n"
+                "func f(a: Q, b: Q) -> void:\n"
+                "    if a != b:\n"
+                "        print_i32(1)\n")
+
+    def test_struct_eq_list_field_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                r"cannot compare struct 'Q' with '==': field 'xs' \(List<i32>\) has no equality"):
+            run("struct Q:\n"
+                "    xs: List<i32>\n"
+                "func f(a: Q, b: Q) -> void:\n"
+                "    if a == b:\n"
+                "        print_i32(1)\n")
+
+    def test_struct_eq_nested_blocker_path(self):
+        with self.assertRaisesRegex(CheckError,
+                r"field 'inner\.p' \(ptr<i32>\) has no equality"):
+            run("struct Inner:\n"
+                "    p: ptr<i32>\n"
+                "struct Outer:\n"
+                "    name: str\n"
+                "    inner: Inner\n"
+                "func f(a: Outer, b: Outer) -> void:\n"
+                "    if a == b:\n"
+                "        print_i32(1)\n")
+
+    def test_struct_eq_array_blocker_path(self):
+        with self.assertRaisesRegex(CheckError,
+                r"field 'cells\[N\]' \(ptr<i32>\) has no equality"):
+            run("struct S:\n"
+                "    cells: [ptr<i32>, 3]\n"
+                "func f(a: S, b: S) -> void:\n"
+                "    if a == b:\n"
+                "        print_i32(1)\n")
+
+    def test_struct_eq_quat_still_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot compare Quat and Quat with '=='"):
+            run("func f() -> void:\n"
+                "    let a = Quat()\n"
+                "    let b = Quat()\n"
+                "    if a == b:\n"
+                "        print_i32(1)\n")
 
 
 if __name__ == '__main__':

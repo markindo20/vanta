@@ -1271,6 +1271,94 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    # ---------- v0.17.0: narrow ints, enum extern, ptr_cast, for-each -----
+
+    def _build_c_fixture(self, tmp, *sources):
+        """Compile C sources from examples/ into libfixture.a in tmp and
+        return the library name for _compiler_cmd. Skips when a C toolchain
+        or ar is missing, or when the C++ compiler is MSVC (which cannot
+        link a GNU archive)."""
+        ar = shutil.which('ar')
+        if ar is None:
+            self.skipTest('ar not available (needed to archive the C fixture)')
+        cc = shutil.which('gcc') or shutil.which('clang') or shutil.which('cc')
+        if cc is None:
+            self.skipTest('no C compiler available for the fixture')
+        name, _path = find_cxx_compiler()
+        if _is_msvc(name):
+            self.skipTest('fixture is a GNU archive (libfixture.a); '
+                          'MSVC would need a .lib fixture')
+        objs = []
+        for src in sources:
+            obj = os.path.join(tmp, os.path.basename(src) + '.o')
+            p = subprocess.run([cc, '-c', os.path.join(EXAMPLES, src), '-o', obj],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            objs.append(obj)
+        lib = os.path.join(tmp, 'libfixture.a')
+        p = subprocess.run([ar, 'rcs', lib] + objs, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+        return 'fixture'
+
+    def _build_example_linked(self, example, tmp, libs):
+        name, path = find_cxx_compiler()
+        prog, tc = _frontend_only(os.path.join(EXAMPLES, example))
+        cpp = os.path.join(tmp, 'main.cpp')
+        _emit_source(prog, tc, cpp)
+        exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+        from compiler.driver import _compiler_cmd
+        cmd = _compiler_cmd(name, path, cpp, exe, release=True,
+                            lib_dirs=[tmp], libs=libs)
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+        return exe
+
+    def test_narrow_ints_example(self):
+        # Exact-width storage, C-ABI parameters, and struct layout: the C
+        # fixture declares int8_t/uint8_t/int16_t/uint16_t parameters, and
+        # reads a Vanta Pixel through a mirror struct — the widths have to
+        # line up byte for byte for the sums to come out right.
+        tmp = tempfile.mkdtemp(prefix='vanta_narrow_')
+        try:
+            lib = self._build_c_fixture(tmp, 'narrow_ints_lib.c')
+            exe = self._build_example_linked('narrow_ints.vnt', tmp, [lib])
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['325', '4000000000', '44', '0', '59700',
+                              '65', '66', '44', '4', '255', '44', '77',
+                              '325', '4000000000'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_enums_extern_example(self):
+        # C takes and returns the enum as a plain int32_t; the Vanta side
+        # declares it as Light. The C symbol has a plain-int signature, so
+        # this also pins the enum ABI.
+        tmp = tempfile.mkdtemp(prefix='vanta_enumext_')
+        try:
+            lib = self._build_c_fixture(tmp, 'enums_extern_lib.c')
+            exe = self._build_example_linked('enums_extern.vnt', tmp, [lib])
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', 'dim', 'true', '2'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_ptr_cast_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'ptr_cast.vnt'),
+                            ['3.141593', '1078530011'])
+
+    def test_foreach_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'foreach.vnt'),
+                            ['8', '2', '3', '5', '7', '10', '20', '3',
+                             'torch=12', 'rope=5'])
+
+    def test_struct_eq_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'struct_eq.vnt'),
+                            ['true', 'true', 'true', 'false', 'true'])
+
 
 if __name__ == '__main__':
     unittest.main()
