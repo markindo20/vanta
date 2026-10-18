@@ -104,9 +104,12 @@ compiler, set the `CXX` environment variable.
 
 ## Documentation
 
+- [`docs/TUTORIAL.md`](docs/TUTORIAL.md) — hands-on introduction, ends with a small project
 - [`docs/LANGUAGE_REFERENCE.md`](docs/LANGUAGE_REFERENCE.md) — syntax and semantics
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the compiler is put together
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
+
+New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 
 ## Status
 
