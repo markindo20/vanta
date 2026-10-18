@@ -223,4 +223,18 @@ inline bool str_eq(const char* a, const char* b) {
     return std::strcmp(a, b) == 0;
 }
 
+// ---------- Pseudo-random (xorshift32) ----------
+// Deterministic by default so programs are reproducible across runs.
+// Call rand_seed(...) to pick a different stream.
+inline uint32_t& rand_state() {
+    static uint32_t s = 0x12345678u;
+    return s;
+}
+inline void rand_seed(uint32_t seed) { rand_state() = seed ? seed : 0x12345678u; }
+inline float rand_f32() {
+    uint32_t& s = rand_state();
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    return (float)(s & 0xFFFFFFu) / (float)0x1000000u;
+}
+
 }

@@ -128,5 +128,28 @@ class IntegrationTests(unittest.TestCase):
 
 
 
+    def test_rand_builtins(self):
+        # Same seed must reproduce the same stream; a different seed must not.
+        src = (
+            "func main() -> void:\n"
+            "    rand_seed(1)\n"
+            "    let a = rand_f32()\n"
+            "    rand_seed(1)\n"
+            "    let b = rand_f32()\n"
+            "    print_bool(a == b)\n"
+            "    rand_seed(2)\n"
+            "    let c = rand_f32()\n"
+            "    print_bool(a == c)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_rand_')
+        try:
+            path = os.path.join(tmp, 'rand.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['true', 'false'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()

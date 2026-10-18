@@ -51,6 +51,8 @@ class TypeChecker:
         bf("sqrt_f64", [("v", F64)], F64)
         bf("i32_to_f32", [("v", I32)], F32)
         bf("f32_to_i32", [("v", F32)], I32)
+        bf("rand_f32", [], F32)
+        bf("rand_seed", [("seed", I32)], VOID)
         bf("assert", [("cond", BOOL)], VOID)
         bf("translation", [("x", F32), ("y", F32), ("z", F32)], self.structs["Matrix4"])
         bf("scale", [("s", F32)], self.structs["Matrix4"])

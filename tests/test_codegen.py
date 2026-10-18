@@ -109,5 +109,11 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('vanta::normalize(v_v)', cpp)
 
 
+    def test_rand_emit(self):
+        cpp = gen("func main() -> void:\n    let r = rand_f32()\n    rand_seed(7)\n")
+        self.assertIn('vanta::rand_f32()', cpp)
+        self.assertIn('vanta::rand_seed(7)', cpp)
+
+
 if __name__ == '__main__':
     unittest.main()

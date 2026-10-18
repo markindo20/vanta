@@ -240,5 +240,29 @@ class TypeCheckerTests(unittest.TestCase):
         self.assertEqual(m_decl.var_type.name, 'Matrix4')
 
 
+    def test_rand_f32_builtin(self):
+        from compiler.typesys import F32
+        prog, tc = run("func f() -> void:\n    let r = rand_f32()\n")
+        r_decl = prog.decls[0].body[0]
+        self.assertEqual(r_decl.var_type, F32)
+
+    def test_rand_seed_builtin(self):
+        run("func f() -> void:\n    rand_seed(1234)\n")
+
+    def test_rand_seed_i32_variable(self):
+        from compiler.typesys import I32
+        prog, tc = run("func f() -> void:\n    mut s: i32 = 7\n    rand_seed(s)\n")
+        s_decl = prog.decls[0].body[0]
+        self.assertEqual(s_decl.var_type, I32)
+
+    def test_rand_seed_bad_arg(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    rand_seed(1.5)\n")
+
+    def test_rand_f32_arity(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let r = rand_f32(1)\n")
+
+
 if __name__ == '__main__':
     unittest.main()
