@@ -470,6 +470,101 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_str_builder_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'str_builder.vnt'),
+                            ['score 1250, hp 87.500000', '24', 'player: 100 hp',
+                             'player: 100 hp', 'rebuilt'])
+
+    def test_strbuilder_build_line(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    b.append_str(\"hp \")\n"
+            "    b.append_i32(42)\n"
+            "    b.append_str(\" / \")\n"
+            "    b.append_f32(1.5)\n"
+            "    print_str(b.to_str())\n"
+            "    print_i32(len(b))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_strb_')
+        try:
+            path = os.path.join(tmp, 'line.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['hp 42 / 1.500000', '16'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_strbuilder_growth(self):
+        # Appends crossing the initial capacity grow the arena buffer.
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(65536)\n"
+            "    let b = a.str_builder()\n"
+            "    for i in range(0, 30):\n"
+            "        b.append_i32(i)\n"
+            "    print_i32(len(b))\n"
+            "    print_str(b.to_str())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_strb_')
+        try:
+            path = os.path.join(tmp, 'grow.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, [
+                '50', '01234567891011121314151617181920212223242526272829'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_strbuilder_to_str_snapshot(self):
+        # to_str() copies into a fresh arena block: the result survives
+        # later appends, growth, and clear().
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    b.append_str(\"abc\")\n"
+            "    let s = b.to_str()\n"
+            "    b.clear()\n"
+            "    print_str(s)\n"
+            "    print_i32(len(b))\n"
+            "    b.append_str(\"xyz\")\n"
+            "    print_str(b.to_str())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_strb_')
+        try:
+            path = os.path.join(tmp, 'snapshot.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['abc', '0', 'xyz'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_strbuilder_helper_appends(self):
+        # A StrBuilder is a handle: helpers append to the caller's builder.
+        src = (
+            "func key(b: StrBuilder, k: str, v: i32):\n"
+            "    b.append_str(k)\n"
+            "    b.append_str(\"=\")\n"
+            "    b.append_i32(v)\n"
+            "    b.append_str(\";\")\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    key(b, \"hp\", 100)\n"
+            "    key(b, \"mp\", 30)\n"
+            "    print_str(b.to_str())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_strb_')
+        try:
+            path = os.path.join(tmp, 'helper.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['hp=100;mp=30;'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_function_value_runtime(self):
         # Nested function types, arena-stored function pointers, and copies
         # of function values executed for real.

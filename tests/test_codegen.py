@@ -380,6 +380,48 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('void fn_fill(vanta::List<int32_t> v_xs)', cpp)
         self.assertIn('fn_fill(v_xs);', cpp)
 
+    def test_strbuilder_create_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let b = a.str_builder()\n")
+        self.assertIn('vanta::StrBuilder v_b = vanta::strb_new(v_a);', cpp)
+
+    def test_strbuilder_append_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let b = a.str_builder()\n"
+                  "    b.append_str(\"x=\")\n"
+                  "    b.append_i32(41)\n"
+                  "    b.append_bool(false)\n")
+        self.assertIn('vanta::strb_append_str(v_b, "x=");', cpp)
+        self.assertIn('vanta::strb_append_i32(v_b, 41);', cpp)
+        self.assertIn('vanta::strb_append_bool(v_b, false);', cpp)
+
+    def test_strbuilder_to_str_and_clear_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let b = a.str_builder()\n"
+                  "    print_str(b.to_str())\n"
+                  "    b.clear()\n")
+        self.assertIn('vanta::print_str(vanta::strb_to_str(v_b));', cpp)
+        self.assertIn('vanta::strb_clear(v_b);', cpp)
+
+    def test_strbuilder_len_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let b = a.str_builder()\n"
+                  "    print_i32(len(b))\n")
+        self.assertIn('vanta::print_i32(int32_t((v_b).h->len));', cpp)
+
+    def test_strbuilder_param_emit(self):
+        cpp = gen("func note(b: StrBuilder):\n    b.append_str(\"n\")\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let b = a.str_builder()\n"
+                  "    note(b)\n")
+        self.assertIn('void fn_note(vanta::StrBuilder v_b)', cpp)
+        self.assertIn('fn_note(v_b);', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

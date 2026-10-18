@@ -51,6 +51,7 @@ class TypeChecker:
         self.structs["Quat"] = StructType("Quat", {"x": F32, "y": F32, "z": F32, "w": F32}, builtin=True)
         self.structs["Matrix4"] = StructType("Matrix4", {}, builtin=True)
         self.structs["Arena"] = StructType("Arena", {}, builtin=True)
+        self.structs["StrBuilder"] = StructType("StrBuilder", {}, builtin=True)
 
         def bf(name, params, ret):
             self.functions[name] = FuncSig(name, params, ret, is_extern=True)
@@ -537,6 +538,11 @@ class TypeChecker:
             if isinstance(ot, ListType) and expr.field == 'len':
                 raise CheckError("'len' is not a field of a List; write len(xs)",
                                  self.filename, expr.pos)
+            if isinstance(ot, StructType) and ot.name == 'StrBuilder' and expr.field in (
+                    'append_str', 'append_i32', 'append_u32', 'append_f32',
+                    'append_f64', 'append_bool', 'to_str', 'clear'):
+                raise CheckError(f"'{expr.field}' must be called: b.{expr.field}(...)",
+                                 self.filename, expr.pos)
             raise CheckError(f"type {ot} has no field '{expr.field}'", self.filename, expr.pos)
         if isinstance(expr, A.Index):
             ot = self._check_expr(expr.obj)
@@ -761,8 +767,10 @@ class TypeChecker:
         if len(call.args) != 1:
             raise CheckError("len takes one argument", self.filename, call.pos)
         at = self._check_expr(call.args[0])
-        if not isinstance(at, (ArrayType, ListType)):
-            raise CheckError(f"len expects an array or a List, got {at}", self.filename, call.pos)
+        if not isinstance(at, (ArrayType, ListType)) and not (
+                isinstance(at, StructType) and at.name == "StrBuilder"):
+            raise CheckError(f"len expects an array, a List, or a StrBuilder, got {at}",
+                             self.filename, call.pos)
         call.type = I32
         return I32
 
@@ -862,6 +870,10 @@ class TypeChecker:
                 raise CheckError("Arena does not accept named arguments", self.filename, call.pos)
             at = self._check_expr(call.args[0])
             self._coerce_value(call.args[0], at, I32, call.pos, "Arena size")
+        elif n == "StrBuilder":
+            raise CheckError(
+                "a StrBuilder is created from an Arena: arena.str_builder()",
+                self.filename, call.pos)
         call.type = st
         return st
 
@@ -961,6 +973,16 @@ class TypeChecker:
                 t = self._make_list_type(inner, call.pos)
                 call.type = t
                 return t
+            if method == "str_builder":
+                if call.type_args:
+                    raise CheckError("str_builder() does not accept type arguments",
+                                     self.filename, call.pos)
+                if call.args:
+                    raise CheckError("str_builder() takes no arguments",
+                                     self.filename, call.pos)
+                t = self.structs["StrBuilder"]
+                call.type = t
+                return t
             raise CheckError(f"Arena has no method '{method}'", self.filename, call.pos)
         if st.name in ("Vec2", "Vec3"):
             if method == "dot":
@@ -1001,4 +1023,49 @@ class TypeChecker:
                 if at is not st:
                     raise CheckError("dot expects Quat", self.filename, call.pos)
                 call.type = F32; return F32
+        if st.name == "StrBuilder":
+            return self._check_strbuilder_method(method, call)
         raise CheckError(f"type {st.name} has no method '{method}'", self.filename, call.pos)
+
+    def _check_strbuilder_method(self, method: str, call: A.Call) -> Type:
+        appends = {
+            "append_str": STR,
+            "append_i32": I32,
+            "append_u32": U32,
+            "append_f32": F32,
+            "append_f64": F64,
+            "append_bool": BOOL,
+        }
+        if method in appends:
+            if call.type_args:
+                raise CheckError(f"'{method}' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.arg_names and any(x is not None for x in call.arg_names):
+                raise CheckError(f"'{method}' does not accept named arguments",
+                                 self.filename, call.pos)
+            if len(call.args) != 1:
+                raise CheckError(f"'{method}' expects one value, got {len(call.args)}",
+                                 self.filename, call.pos)
+            at = self._check_expr(call.args[0])
+            self._coerce_value(call.args[0], at, appends[method], call.pos, "append value")
+            call.type = VOID
+            return VOID
+        if method == "to_str":
+            if call.type_args:
+                raise CheckError("'to_str' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.args:
+                raise CheckError(f"'to_str' takes no arguments, got {len(call.args)}",
+                                 self.filename, call.pos)
+            call.type = STR
+            return STR
+        if method == "clear":
+            if call.type_args:
+                raise CheckError("'clear' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.args:
+                raise CheckError(f"'clear' takes no arguments, got {len(call.args)}",
+                                 self.filename, call.pos)
+            call.type = VOID
+            return VOID
+        raise CheckError(f"StrBuilder has no method '{method}'", self.filename, call.pos)

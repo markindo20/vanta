@@ -462,7 +462,9 @@ class CodeGen:
         if isinstance(f, A.Name):
             name = f.name
             if name == 'len':
-                if isinstance(getattr(c.args[0], 'type', None), ListType):
+                t = getattr(c.args[0], 'type', None)
+                if isinstance(t, ListType) or (
+                        isinstance(t, StructType) and t.name == 'StrBuilder'):
                     return f'int32_t(({self._expr(c.args[0])}).h->len)'
                 return f'int32_t(({self._expr(c.args[0])}).size())'
             if name in ('print_fmt', 'write_fmt'):
@@ -513,6 +515,8 @@ class CodeGen:
                     ta = c.type_args[0]
                     inner = self.tc._resolve_type(ta)
                     return f'vanta::list_new<{self._ctype(inner)}>({base})'
+                if m == 'str_builder':
+                    return f'vanta::strb_new({base})'
             if isinstance(ot, ListType):
                 if m == 'push':
                     return f'vanta::list_push({base}, {self._expr(c.args[0])})'
@@ -535,6 +539,23 @@ class CodeGen:
                     return f'vanta::normalize({base})'
                 if m == 'dot':
                     return f'vanta::dot({base}, {self._expr(c.args[0])})'
+            if isinstance(ot, StructType) and ot.name == 'StrBuilder':
+                if m == 'append_str':
+                    return f'vanta::strb_append_str({base}, {self._expr(c.args[0])})'
+                if m == 'append_i32':
+                    return f'vanta::strb_append_i32({base}, {self._expr(c.args[0])})'
+                if m == 'append_u32':
+                    return f'vanta::strb_append_u32({base}, {self._expr(c.args[0])})'
+                if m == 'append_f32':
+                    return f'vanta::strb_append_f32({base}, {self._expr(c.args[0])})'
+                if m == 'append_f64':
+                    return f'vanta::strb_append_f64({base}, {self._expr(c.args[0])})'
+                if m == 'append_bool':
+                    return f'vanta::strb_append_bool({base}, {self._expr(c.args[0])})'
+                if m == 'to_str':
+                    return f'vanta::strb_to_str({base})'
+                if m == 'clear':
+                    return f'vanta::strb_clear({base})'
         # Indirect call through a function value: a variable, a struct field,
         # an indexed element, or the result of another call.
         args = ', '.join(self._expr(a) for a in c.args)

@@ -2,6 +2,24 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.10.0 — 2026-10-18
+
+- Added `StrBuilder`, an arena-backed string builder: `arena.str_builder()`
+  creates one growing buffer, `append_str` / `append_i32` / `append_u32` /
+  `append_f32` / `append_f64` / `append_bool` append (formatted exactly like
+  the matching `print_*`), `len(b)` reads the byte count, `clear()` resets it
+  for reuse, and `to_str()` returns the current contents as a `str` — copied
+  into a fresh arena block, so the result stays stable across later appends,
+  growth, and `clear()`. Growth doubles from 32 bytes, and the fixed string
+  pool is never touched.
+- Like `List<T>`, a builder is a handle: copies alias the same buffer, appends
+  work through a plain `let`, and helpers can take a `StrBuilder` parameter
+  and append to the caller's builder. `arena.reset()` invalidates the builder
+  and the strings taken from it.
+- New example `examples/str_builder.vnt`: building a line once, reusing the
+  buffer with `clear()`, and a helper that appends through its parameter;
+  plus 28 tests (341 total).
+
 ## v0.9.0 — 2026-10-18
 
 - Added dynamic lists: `List<T>`, a growable array backed by an `Arena`.

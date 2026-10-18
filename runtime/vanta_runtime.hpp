@@ -299,6 +299,96 @@ inline T& list_at_checked_ref(List<T> xs, int32_t index, int32_t line) {
     return xs.h->data[index];
 }
 
+// ---------- String builder (StrBuilder) ----------
+// A StrBuilder is a handle onto one growing, NUL-terminated byte buffer in
+// an Arena. Append pieces without touching the fixed string pool, then call
+// to_str() for the result. to_str() copies the current contents into a
+// fresh arena block, so the returned str stays stable — nothing is ever
+// freed, and arena.reset() invalidates everything in that arena. Like
+// List<T>, a builder is an indirection: appends work through a plain `let`.
+struct StrBuilder {
+    struct Hdr {
+        char* data;
+        int32_t len;
+        int32_t cap;
+        Arena* arena;
+    };
+    Hdr* h;
+};
+
+inline StrBuilder strb_new(Arena& arena) {
+    StrBuilder b;
+    b.h = arena.alloc<StrBuilder::Hdr>(1);
+    b.h->cap = 32;
+    b.h->data = arena.alloc<char>(32);
+    b.h->data[0] = '\0';
+    b.h->len = 0;
+    b.h->arena = &arena;
+    return b;
+}
+
+inline void strb_reserve(StrBuilder b, int32_t need) {
+    if (need <= b.h->cap) return;
+    int32_t cap = b.h->cap;
+    while (cap < need) cap = (cap > 1073741824) ? need : cap * 2;
+    Arena* arena = b.h->arena;
+    char* fresh = arena->alloc<char>(cap);
+    std::memcpy(fresh, b.h->data, (size_t)b.h->len + 1);
+    b.h->data = fresh;
+    b.h->cap = cap;
+}
+
+inline void strb_append_n(StrBuilder b, const char* s, int32_t n) {
+    strb_reserve(b, b.h->len + n + 1);
+    std::memcpy(b.h->data + b.h->len, s, (size_t)n);
+    b.h->len += n;
+    b.h->data[b.h->len] = '\0';
+}
+
+inline void strb_append_str(StrBuilder b, const char* s) {
+    strb_append_n(b, s, (int32_t)std::strlen(s));
+}
+
+inline void strb_append_i32(StrBuilder b, int32_t v) {
+    char tmp[24];
+    int n = std::snprintf(tmp, sizeof tmp, "%d", (int)v);
+    strb_append_n(b, tmp, n);
+}
+
+inline void strb_append_u32(StrBuilder b, uint32_t v) {
+    char tmp[24];
+    int n = std::snprintf(tmp, sizeof tmp, "%u", (unsigned)v);
+    strb_append_n(b, tmp, n);
+}
+
+inline void strb_append_f32(StrBuilder b, float v) {
+    char tmp[64];
+    int n = std::snprintf(tmp, sizeof tmp, "%f", (double)v);
+    strb_append_n(b, tmp, n);
+}
+
+inline void strb_append_f64(StrBuilder b, double v) {
+    char tmp[512];
+    int n = std::snprintf(tmp, sizeof tmp, "%lf", v);
+    strb_append_n(b, tmp, n);
+}
+
+inline void strb_append_bool(StrBuilder b, bool v) {
+    strb_append_str(b, v ? "true" : "false");
+}
+
+inline void strb_clear(StrBuilder b) {
+    b.h->len = 0;
+    b.h->data[0] = '\0';
+}
+
+inline const char* strb_to_str(StrBuilder b) {
+    char* out = b.h->arena->alloc<char>(b.h->len + 1);
+    std::memcpy(out, b.h->data, (size_t)b.h->len);
+    out[b.h->len] = '\0';
+    return out;
+}
+
 // ---------- Built-in IO / math ----------
 inline void print_i32(int32_t v) { std::printf("%d\n", (int)v); }
 inline void print_u32(uint32_t v) { std::printf("%u\n", (unsigned)v); }

@@ -944,7 +944,7 @@ class TypeCheckerTests(unittest.TestCase):
                 "    let f = xs.at\n")
 
     def test_len_of_non_list(self):
-        with self.assertRaisesRegex(CheckError, "len expects an array or a List"):
+        with self.assertRaisesRegex(CheckError, "len expects an array, a List, or a StrBuilder"):
             run("func f() -> void:\n"
                 "    print_i32(len(1))\n")
 
@@ -988,6 +988,129 @@ class TypeCheckerTests(unittest.TestCase):
             "    let gs = a.list::<func(i32) -> i32>()\n"
             "    gs.push(inc)\n"
             "    print_i32(gs.at(0)(41))\n")
+
+    def test_strbuilder_create_and_type(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let b: StrBuilder = a.str_builder()\n"
+            "    print_i32(len(b))\n")
+
+    def test_strbuilder_takes_no_arguments(self):
+        with self.assertRaisesRegex(CheckError, "takes no arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let b = a.str_builder(16)\n")
+
+    def test_strbuilder_type_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "does not accept type arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let b = a.str_builder::<i32>()\n")
+
+    def test_strbuilder_ctor_hint(self):
+        with self.assertRaisesRegex(CheckError, "a StrBuilder is created from an Arena"):
+            run("func f() -> void:\n"
+                "    let b = StrBuilder()\n")
+
+    def test_strbuilder_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use type 'StrBuilder' as a value"):
+            run("func f() -> void:\n"
+                "    let x = StrBuilder\n")
+
+    def test_strbuilder_duplicate_type_rejected(self):
+        with self.assertRaisesRegex(CheckError, "duplicate type 'StrBuilder'"):
+            run("struct StrBuilder:\n    x: i32\n")
+
+    def test_strbuilder_append_and_to_str(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    b.append_str(\"hp \")\n"
+            "    b.append_i32(42)\n"
+            "    b.append_u32(7)\n"
+            "    b.append_f32(1.5)\n"
+            "    b.append_f64(2.5)\n"
+            "    b.append_bool(true)\n"
+            "    print_str(b.to_str())\n")
+
+    def test_strbuilder_append_wrong_type(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.append_i32(\"nope\")\n")
+
+    def test_strbuilder_append_arity(self):
+        with self.assertRaisesRegex(CheckError, "'append_str' expects one value"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.append_str(\"a\", \"b\")\n")
+
+    def test_strbuilder_append_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'append_i32' does not accept named arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.append_i32(v: 1)\n")
+
+    def test_strbuilder_append_type_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'append_i32' does not accept type arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.append_i32::<i32>(1)\n")
+
+    def test_strbuilder_to_str_no_args(self):
+        with self.assertRaisesRegex(CheckError, "'to_str' takes no arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    print_str(b.to_str(1))\n")
+
+    def test_strbuilder_clear_no_args(self):
+        with self.assertRaisesRegex(CheckError, "'clear' takes no arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.clear(1)\n")
+
+    def test_strbuilder_unknown_method(self):
+        with self.assertRaisesRegex(CheckError, "StrBuilder has no method 'nope'"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    b.nope()\n")
+
+    def test_strbuilder_method_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'append_str' must be called"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    let g = b.append_str\n")
+
+    def test_strbuilder_unknown_field(self):
+        with self.assertRaisesRegex(CheckError, "no field 'huh'"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let b = a.str_builder()\n"
+                "    print_i32(b.huh)\n")
+
+    def test_strbuilder_as_function_param(self):
+        run("func note(b: StrBuilder):\n"
+            "    b.append_str(\"note\")\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    note(b)\n"
+            "    print_str(b.to_str())\n")
+
+    def test_strbuilder_len(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = a.str_builder()\n"
+            "    b.append_str(\"abc\")\n"
+            "    print_i32(len(b))\n")
 
 
 if __name__ == '__main__':

@@ -1,0 +1,27 @@
+# String building: one arena-backed buffer, many appends, stable to_str().
+func status_line(b: StrBuilder, hp: i32, name: str):
+    b.clear()
+    b.append_str(name)
+    b.append_str(": ")
+    b.append_i32(hp)
+    b.append_str(" hp")
+
+func main() -> void:
+    let arena = Arena(4096)
+    let b = arena.str_builder()
+    b.append_str("score ")
+    b.append_i32(1250)
+    b.append_str(", hp ")
+    b.append_f32(87.5)
+    print_str(b.to_str())          # score 1250, hp 87.500000
+    print_i32(len(b))              # 24
+
+    status_line(b, 100, "player")
+    print_str(b.to_str())          # player: 100 hp
+
+    # to_str() copies: the string survives later appends and clear().
+    let saved = b.to_str()
+    b.clear()
+    b.append_str("rebuilt")
+    print_str(saved)               # player: 100 hp
+    print_str(b.to_str())          # rebuilt
