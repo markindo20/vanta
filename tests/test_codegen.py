@@ -307,6 +307,26 @@ class CodegenTests(unittest.TestCase):
                   "    xs.at(1) += 2\n")
         self.assertIn('vanta::at_checked_ref(v_xs, 1, 3) = (vanta::at_checked(v_xs, 1, 3) + 2);', cpp)
 
+    def test_trig_builtins_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    print_f32(sin_f32(0.5))\n"
+                  "    print_f32(cos_f32(0.5))\n"
+                  "    print_f32(tan_f32(0.5))\n"
+                  "    print_f32(atan2_f32(1.0, 2.0))\n"
+                  "    print_f64(sin_f64(0.5))\n")
+        self.assertIn('vanta::print_f32(vanta::sin_f32(0.5f))', cpp)
+        self.assertIn('vanta::print_f32(vanta::cos_f32(0.5f))', cpp)
+        self.assertIn('vanta::print_f32(vanta::tan_f32(0.5f))', cpp)
+        self.assertIn('vanta::print_f32(vanta::atan2_f32(1.0f, 2.0f))', cpp)
+        self.assertIn('vanta::print_f64(vanta::sin_f64(0.5))', cpp)
+
+    def test_trig_builtin_function_value_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let g: func(f32) -> f32 = sin_f32\n"
+                  "    print_f32(g(0.0))\n")
+        self.assertIn('using FnPtr0 = float(*)(float);', cpp)
+        self.assertIn('FnPtr0 v_g = vanta::sin_f32;', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

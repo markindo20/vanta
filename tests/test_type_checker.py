@@ -772,6 +772,30 @@ class TypeCheckerTests(unittest.TestCase):
                 "    let o = Op(at: inc)\n"
                 "    o.at(1) = 2\n")
 
+    def test_trig_builtins(self):
+        run("func f() -> void:\n"
+            "    print_f32(sin_f32(0.0))\n"
+            "    print_f32(cos_f32(0.0))\n"
+            "    print_f32(tan_f32(0.0))\n"
+            "    print_f32(atan2_f32(1.0, 1.0))\n"
+            "    print_f64(sin_f64(0.0))\n"
+            "    print_f64(cos_f64(0.0))\n"
+            "    print_f64(tan_f64(0.0))\n"
+            "    print_f64(atan2_f64(1.0, 1.0))\n")
+
+    def test_trig_builtin_bad_type(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    print_f32(sin_f32(true))\n")
+
+    def test_trig_builtin_arity_error(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    print_f32(sin_f32())\n")
+
+    def test_trig_builtin_as_value(self):
+        run("func f() -> void:\n"
+            "    let g: func(f32) -> f32 = sin_f32\n"
+            "    print_f32(g(1.5707964))\n")
+
 
 if __name__ == '__main__':
     unittest.main()

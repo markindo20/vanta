@@ -34,3 +34,10 @@ func main() -> void:
     let m2 = m * m
     let r3 = m2 * v
     print_f32(r3.y)
+
+    # Trig: a 45-degree unit vector, and its heading back via atan2.
+    let angle = 0.7853982            # pi/4 as f32
+    let dir = Vec2(cos_f32(angle), sin_f32(angle))
+    print_f32(dir.x)
+    print_f32(dir.y)
+    print_f32(atan2_f32(dir.y, dir.x))

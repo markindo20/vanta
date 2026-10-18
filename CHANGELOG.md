@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.8.0 — 2026-10-18
+
+- Added trigonometry: `sin`, `cos`, and `tan` for `f32` and `f64`, plus
+  `atan2_f32`/`atan2_f64` — the angle of the vector `(x, y)`, the usual
+  "heading toward a point" operation. Angles are radians, and the f32/f64
+  pairs follow the existing `sqrt_f32`/`sqrt_f64` naming. They are callable
+  like any builtin and usable as function values.
+- Extended `examples/arrays_and_math.vnt` with a 45-degree unit vector and
+  its heading recovered through `atan2`, plus 7 tests (274 total).
+
 ## v0.7.0 — 2026-10-18
 
 - Added bounds-checked array access: `xs.at(i)` checks the index against the

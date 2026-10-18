@@ -90,7 +90,8 @@ class IntegrationTests(unittest.TestCase):
         self._build_and_run(os.path.join(EXAMPLES, 'arrays_and_math.vnt'),
                             ['4', '100', '10', '40', '101',
                              '1.000000', '2.000000', '3.000000',
-                             '1.000000', '2.000000'])
+                             '1.000000', '2.000000',
+                             '0.707107', '0.707107', '0.785398'])
 
     def test_assert_failure(self):
         with tempfile.NamedTemporaryFile('w', suffix='.vnt', delete=False, encoding='utf-8') as f:
@@ -336,6 +337,29 @@ class IntegrationTests(unittest.TestCase):
         # computed index and a nested checked read as the index.
         self._build_and_run(os.path.join(EXAMPLES, 'bounds.vnt'),
                             ['66', '1', '25', '16', '25'])
+
+    def test_trig_runtime(self):
+        # sin/cos/tan/atan2 at known values, f32 and f64.
+        src = (
+            "func main() -> void:\n"
+            "    print_f32(sin_f32(0.0))\n"
+            "    print_f32(cos_f32(0.0))\n"
+            "    print_f32(sin_f32(1.5707964))\n"
+            "    print_f32(cos_f32(3.1415927))\n"
+            "    print_f32(tan_f32(0.0))\n"
+            "    print_f32(atan2_f32(1.0, 1.0))\n"
+            "    print_f64(atan2_f64(1.0, 1.0))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_trig_')
+        try:
+            path = os.path.join(tmp, 'trig.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['0.000000', '1.000000', '1.000000',
+                                       '-1.000000', '0.000000', '0.785398',
+                                       '0.785398'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_function_value_runtime(self):
         # Nested function types, arena-stored function pointers, and copies

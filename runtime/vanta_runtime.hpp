@@ -238,6 +238,14 @@ inline void print_str(const char* s) { std::printf("%s\n", s); }
 inline void print_newline() { std::printf("\n"); }
 inline float sqrt_f32(float v) { return std::sqrt(v); }
 inline double sqrt_f64(double v) { return std::sqrt(v); }
+inline float sin_f32(float v) { return std::sin(v); }
+inline double sin_f64(double v) { return std::sin(v); }
+inline float cos_f32(float v) { return std::cos(v); }
+inline double cos_f64(double v) { return std::cos(v); }
+inline float tan_f32(float v) { return std::tan(v); }
+inline double tan_f64(double v) { return std::tan(v); }
+inline float atan2_f32(float y, float x) { return std::atan2(y, x); }
+inline double atan2_f64(double y, double x) { return std::atan2(y, x); }
 inline float i32_to_f32(int32_t v) { return (float)v; }
 inline int32_t f32_to_i32(float v) { return (int32_t)v; }
 
