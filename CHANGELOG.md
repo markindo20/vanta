@@ -2,6 +2,43 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.2.6 — 2026-10-18
+
+- Added `print_fmt(fmt, args...)` and `write_fmt(fmt, args...)`. Placeholders are
+  `{}` and are resolved at compile time: the type checker counts them and checks
+  each argument's type, and the code generator turns each one into the matching
+  printf conversion. A literal/integer mismatched format is a compile error, not
+  a runtime surprise.
+- Format literals support `{{` and `}}` for literal braces, and `%` is escaped
+  automatically so a stray percent cannot corrupt the output.
+- Added a process-lifetime string pool with `str_concat`, `str_len`,
+  `to_str_i32`, `to_str_f32`, `to_str_bool`, and `str_pool_reset`. Exhaustion
+  fails loudly rather than corrupting memory.
+- Added `str_to_i32` and `str_to_f32`, without which command-line arguments
+  could not be used as numbers.
+- Added `examples/report.vnt`.
+- New `compiler/formats.py` holds the format parser shared by the checker and
+  the code generator.
+
+## v0.2.5 — 2026-10-18
+
+- Added `arg_count()` and `arg_str(i)`; the generated `main` now receives
+  `argc`/`argv` and hands them to the runtime
+- `python main.py run prog.vnt a b` now passes `a b` through to the program
+
+## v0.2.4 — 2026-10-18
+
+- Added `examples/life.vnt` — Conway's Game of Life on a 40x20 torus, drawn as a
+  character grid
+
+## v0.2.3 — 2026-10-18
+
+- Added `write_i32`, `write_u32`, `write_f32`, `write_f64`, `write_bool`, and
+  `write_str` — like their `print_*` counterparts but with no trailing newline
+- Registered `print_newline()`, which had been sitting unreachable in the runtime
+- Added `abs_i32`, `abs_f32`, `min_i32`, `max_i32`, `min_f32`, `max_f32`,
+  `floor_f32`, `ceil_f32`
+
 ## v0.2.2 — 2026-10-18
 
 - Added `rand_f32()` — xorshift32, returns `f32` in `[0, 1)`

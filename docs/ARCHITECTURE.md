@@ -18,9 +18,13 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`) and where the `Arena` non-copyable rule is enforced.
 6. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
-   `main` in `int main()`. Builtin calls are mapped through lookup tables
-   (`BUILTIN_PRINT`, `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions.
-7. `driver.py` — orchestrates the frontend and native compilation, detects
+   `main` in `int main(int argc, char** argv)`, passing the arguments to the
+   runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
+   `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions.
+7. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
+   type checker (which counts placeholders and checks argument types) and the
+   code generator (which turns them into printf conversions).
+8. `driver.py` — orchestrates the frontend and native compilation, detects
    `clang++`/`g++`/`cl` (honouring `$CXX`), and implements `check`/`build`/`run`.
 
 Note that `component` and `system` are parsed as flags on the struct and
@@ -34,10 +38,15 @@ distinct semantics.
 
 - `Vec2`, `Vec3`, `Quat`, `Matrix4` (row-major) with their operators
 - the `Arena` bump allocator
-- IO, `sqrt`, and integer/float conversion helpers
-- `str_eq` (`strcmp`-backed string equality)
+- IO, `sqrt`, `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
+- `write_*` variants of the `print_*` functions (no trailing newline)
+- `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
+- `str_eq` (`strcmp`-backed string equality), `str_len`, and `str_to_i32`/`str_to_f32`
+- a 64 KiB process-lifetime string pool backing `str_concat` and `to_str_*`
 - `rand_state` / `rand_seed` / `rand_f32` — xorshift32, fixed seed at startup
   so programs are reproducible unless explicitly seeded
+- `g_argc` / `g_argv`, populated by the generated `main`, exposed as
+  `arg_count` / `arg_str`
 
 ## Versioning
 
@@ -50,7 +59,7 @@ header. There is no second copy to keep in sync.
 All source-level errors carry `file:line:col`. The driver saves generated C++ on
 compilation failure to `build/vanta_failed.cpp`.
 
-## Ownership (v0.2.2)
+## Ownership (v0.2.6)
 
 The only rule enforced is that **`Arena` is non-copyable**: `let a2 = a1` (where
 `a1: Arena`), `return a1`, and passing an `Arena` as an argument are all
@@ -60,7 +69,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 115 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 143 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

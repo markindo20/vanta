@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.2.2)
+# Vanta — a game-oriented systems language (v0.2.6)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -27,6 +27,7 @@ Run it:
 ```powershell
 python main.py check examples/vector_math.vnt   # type-check only (fast, no C++)
 python main.py run   examples/vector_math.vnt   # compile and run
+python main.py run   examples/report.vnt 3      # args after the source are passed through
 python main.py build examples/vector_math.vnt --release
 python main.py --version
 ```
@@ -44,7 +45,7 @@ the generated C++. On C++ compilation failure the generated source is saved to
 | `compiler/` | Python frontend: lexer, parser, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (115 tests) |
+| `tests/` | `unittest` suite (143 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -58,6 +59,8 @@ the generated C++. On C++ compilation failure the generated source is saved to
 | `arrays_and_math.vnt` | Fixed-size arrays, `len`, `Quat`, `Matrix4` products |
 | `strings.vnt` | The `str` type, escapes, `print_str`, string equality |
 | `boids.vnt` | A flocking simulation: `ptr<Vec2>`, nested loops, `elif` chains |
+| `life.vnt` | Conway's Game of Life drawn as a character grid (`write_str`, `print_newline`) |
+| `report.vnt` | Formatted output and string building, with a command-line argument |
 
 ## Tests
 
@@ -77,7 +80,16 @@ compiler, set the `CXX` environment variable.
 
 ## Status
 
-Vanta is a prototype, not a finished language. Notable gaps: no imports or
-multi-file programs, no dynamic strings or string concatenation, no 2D arrays,
-no first-class functions, no bounds-checked indexing, and no borrow checker for
-`ptr<T>` (only the `Arena` non-copyable rule is enforced).
+Vanta is a prototype, not a finished language. Programs can now read
+command-line arguments and produce formatted output, but the remaining gaps are
+real:
+
+- no imports or multi-file programs
+- strings come from a fixed 64 KiB pool that is never freed; there is no
+  per-value ownership, and `str_pool_reset()` invalidates everything built from it
+- no 2D arrays (flatten by hand)
+- no first-class functions, so no callbacks or ECS dispatch
+- no bounds-checked indexing, and no borrow checker for `ptr<T>` (only the
+  `Arena` non-copyable rule is enforced)
+- no external libraries, windowing, or audio — you cannot link anything in, so
+  despite the description you cannot yet write a game with it

@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.2.2)
+# Vanta Language Reference (v0.2.6)
 
-This is the reference for the language as implemented at tag `v0.2.2`. Every
+This is the reference for the language as implemented at tag `v0.2.6`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -194,7 +194,9 @@ Supported escapes: `\t`, `\n`, `\"`, `\\`. `==` and `!=` compare string
 contents via `strcmp`, not pointers. Ordering comparisons (`<`) on `str` are
 rejected. `str` values may be `const`.
 
-There is **no string concatenation**, no `strlen`, and no string indexing.
+There is no string indexing, and indexing a `str` is not supported. Concatenation
+(`str_concat`), length (`str_len`), and conversions are covered under
+[Strings and the string pool](#strings-and-the-string-pool-v026).
 
 ## Vector and matrix types
 
@@ -241,12 +243,34 @@ let r = from_quat(q)
 | `print_f64` | `(f64) -> void` | prints 6 decimal places |
 | `print_bool` | `(bool) -> void` | prints `true` / `false` |
 | `print_str` | `(str) -> void` | prints with trailing newline |
+| `write_i32` | `(i32) -> void` | as `print_i32`, but no newline |
+| `write_u32` | `(u32) -> void` | no newline |
+| `write_f32` | `(f32) -> void` | no newline |
+| `write_f64` | `(f64) -> void` | no newline |
+| `write_bool` | `(bool) -> void` | no newline |
+| `write_str` | `(str) -> void` | no newline |
+| `print_newline` | `() -> void` | writes `\n` |
 | `sqrt_f32` | `(f32) -> f32` | |
 | `sqrt_f64` | `(f64) -> f64` | |
+| `abs_i32` | `(i32) -> i32` | |
+| `abs_f32` | `(f32) -> f32` | |
+| `min_i32`, `max_i32` | `(i32, i32) -> i32` | |
+| `min_f32`, `max_f32` | `(f32, f32) -> f32` | |
+| `floor_f32`, `ceil_f32` | `(f32) -> f32` | |
 | `i32_to_f32` | `(i32) -> f32` | |
 | `f32_to_i32` | `(f32) -> i32` | truncates toward zero; `nan`/`inf` are undefined |
 | `rand_f32` | `() -> f32` | xorshift32, in `[0, 1)` |
 | `rand_seed` | `(i32) -> void` | selects the random stream |
+| `arg_count` | `() -> i32` | includes the program name |
+| `arg_str` | `(i32) -> str` | `""` when out of range |
+| `str_len` | `(str) -> i32` | |
+| `str_concat` | `(str, str) -> str` | allocates from the string pool |
+| `str_to_i32` | `(str) -> i32` | leading number; `0` if there is none |
+| `str_to_f32` | `(str) -> f32` | leading number; `0.0` if there is none |
+| `to_str_i32` | `(i32) -> str` | allocates from the string pool |
+| `to_str_f32` | `(f32) -> str` | allocates from the string pool |
+| `to_str_bool` | `(bool) -> str` | no allocation |
+| `str_pool_reset` | `() -> void` | reclaims the string pool |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
@@ -254,6 +278,73 @@ is **reproducible across runs** — useful for tests. Seeding with a different
 value selects a different stream.
 
 There are no `sin`/`cos`/`tan` builtins.
+
+## Formatted output (v0.2.6)
+
+`print_fmt` writes a formatted line; `write_fmt` is the same without the
+trailing newline.
+
+```vanta
+print_fmt("frame {}: centroid ({}, {})", 7, 1.5, 2.25)
+# frame 7: centroid (1.500000, 2.250000)
+
+write_fmt("{}", 42)      # no newline
+print_newline()
+```
+
+Rules:
+
+- The format argument must be a **string literal**. Placeholders are resolved at
+  compile time, so a runtime-built string cannot be used as a format.
+- `{}` consumes one argument, left to right. A mismatch between the number of
+  placeholders and arguments is a compile error.
+- Formattable types are `i32`, `u32`, `f32`, `f64`, `bool`, and `str`.
+  Formatting a `Vec2` or a struct is a compile error.
+- `{{` and `}}` produce literal braces. A lone `{` or `}` is a compile error.
+- `%` in the literal is escaped for you, so `print_fmt("100% done")` is safe.
+- `f32`/`f64` use six decimal places, matching `print_f32`/`print_f64`.
+
+Because each placeholder is compiled to a typed printf conversion, there is no
+way to pass the wrong type to a specifier — that class of `printf` bug cannot
+happen here.
+
+## Command-line arguments (v0.2.5)
+
+```vanta
+func main() -> void:
+    if arg_count() > 1:
+        let n = str_to_i32(arg_str(1))
+        print_fmt("n={}", n)
+```
+
+`arg_count()` includes the program name at index 0. `arg_str(i)` returns `""`
+for an out-of-range index rather than failing, so bounds need no checking.
+
+Pass arguments through the driver with `python main.py run prog.vnt 3`.
+
+There is no integer-argument builtin: read the string and convert with
+`str_to_i32` / `str_to_f32`.
+
+## Strings and the string pool (v0.2.6)
+
+`str` is a `const char*`. Literals need no allocation, but anything built at
+runtime must live somewhere, so `str_concat` and `to_str_i32`/`to_str_f32`
+allocate from a fixed **process-lifetime string pool** of 64 KiB.
+
+```vanta
+let label = str_concat("scale", to_str_i32(3))
+print_fmt("{} has {} chars", label, str_len(label))
+# scale3 has 6 chars
+```
+
+- The pool is bump-allocated and **never freed**. `str_pool_reset()` reclaims
+  all of it, but doing so invalidates every string previously built from it.
+- Exhausting the pool is a hard error: the program prints
+  `vanta: string pool exhausted (65536 bytes); call str_pool_reset()` and exits
+  with code 1. It does not silently corrupt memory.
+- `to_str_bool` returns a literal and allocates nothing.
+
+There is no string indexing and no per-value ownership.
 
 ## Operators
 
