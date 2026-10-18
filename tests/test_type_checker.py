@@ -344,6 +344,24 @@ class TypeCheckerTests(unittest.TestCase):
         self.assertEqual(prog.decls[0].body[0].var_type, I32)
         self.assertEqual(prog.decls[0].body[1].var_type, F32)
 
+    def test_file_io_builtins_types(self):
+        from compiler.typesys import BOOL, I32, STR
+        prog, tc = run("func f() -> void:\n"
+                       "    let e = file_exists(\"a\")\n"
+                       "    let w = file_write(\"a\", \"b\")\n"
+                       "    let r = file_read(\"a\")\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, BOOL)
+        self.assertEqual(prog.decls[0].body[1].var_type, I32)
+        self.assertEqual(prog.decls[0].body[2].var_type, STR)
+
+    def test_file_read_rejects_non_str(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    file_read(1)\n")
+
+    def test_file_write_rejects_non_str_data(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    file_write(\"a\", 2)\n")
+
     def test_extern_registered(self):
         from compiler.typesys import VOID, I32
         prog, tc = run('extern "c" {\n'

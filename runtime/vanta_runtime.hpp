@@ -306,6 +306,46 @@ inline const char* to_str_f32(float v) {
 }
 inline const char* to_str_bool(bool v) { return v ? "true" : "false"; }
 
+// ---------- File I/O ----------
+// Paths and contents are plain `str` (bare const char*). file_read allocates
+// from the string pool above, so it obeys the same rules: the result is valid
+// until the next str_pool_reset(). An empty file and a missing file both read
+// as "", so use file_exists() when the difference matters. "Text mode" is not
+// a thing here: files are read and written as bytes, but Vanta strings are
+// NUL-terminated, so file_read() of a file containing NUL bytes is truncated
+// at the first NUL when consumed by other string operations.
+inline bool file_exists(const char* path) {
+    std::FILE* f = std::fopen(path, "rb");
+    if (!f) return false;
+    std::fclose(f);
+    return true;
+}
+inline int32_t file_write(const char* path, const char* data) {
+    std::FILE* f = std::fopen(path, "wb");
+    if (!f) return -1;
+    size_t n = std::fwrite(data, 1, std::strlen(data), f);
+    if (std::fclose(f) != 0) return -1;
+    return (int32_t)n;
+}
+inline const char* file_read(const char* path) {
+    std::FILE* f = std::fopen(path, "rb");
+    if (!f) return "";
+    if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return ""; }
+    long sz = std::ftell(f);
+    if (sz < 0 || std::fseek(f, 0, SEEK_SET) != 0) { std::fclose(f); return ""; }
+    if ((uint64_t)sz + 1 > STR_POOL_SIZE) {
+        std::fprintf(stderr, "vanta: file '%s' (%ld bytes) does not fit the %u-byte string pool\n",
+                     path, sz, (unsigned)STR_POOL_SIZE);
+        std::exit(1);
+    }
+    char* r = str_pool_alloc((uint32_t)sz + 1);
+    size_t got = std::fread(r, 1, (size_t)sz, f);
+    std::fclose(f);
+    if (got != (size_t)sz) return "";
+    r[got] = '\0';
+    return r;
+}
+
 // ---------- Pseudo-random (xorshift32) ----------
 // Deterministic by default so programs are reproducible across runs.
 // Call rand_seed(...) to pick a different stream.

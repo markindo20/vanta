@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.3.1 — 2026-10-18
+
+- Added `file_exists(path)`, `file_write(path, data)`, and `file_read(path)`.
+  `file_read` allocates from the string pool (valid until `str_pool_reset()`)
+  and returns `""` on any failure; a file too large for the pool fails loudly
+  with a specific message instead of truncating. `file_write` returns the byte
+  count or `-1` on failure.
+- Added `examples/file_io.vnt`: reads a file named on the command line and
+  writes a copy to `<path>.copy`, reporting both byte counts.
+
 ## v0.3.0 — 2026-10-18
 
 - Added `extern "lib" { ... }` declarations. Extern functions are declared

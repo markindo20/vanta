@@ -331,6 +331,80 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_file_io_example(self):
+        # Build examples/file_io.vnt and exercise all three branches:
+        # missing argument, missing file, and a real read/write round-trip
+        # through a copy next to the source file.
+        name, path = find_cxx_compiler()
+        tmp = tempfile.mkdtemp(prefix='vanta_fileio_')
+        try:
+            prog, tc = _frontend_only(os.path.join(EXAMPLES, 'file_io.vnt'))
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['usage: file_io <path>'])
+
+            missing = os.path.join(tmp, 'missing.txt')
+            r = subprocess.run([exe, missing], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['no such file: ' + missing])
+
+            src = os.path.join(tmp, 'in.txt')
+            with open(src, 'w', encoding='utf-8') as f:
+                f.write('hello world')
+            r = subprocess.run([exe, src], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), [
+                'read 11 bytes from ' + src,
+                'wrote 11 bytes to ' + src + '.copy',
+            ])
+            with open(src + '.copy', 'r', encoding='utf-8') as f:
+                self.assertEqual(f.read(), 'hello world')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_file_read_pool_overflow_fails_loudly(self):
+        # A file larger than the 64 KiB string pool must fail loudly with a
+        # specific message rather than returning garbage or a truncated read.
+        name, path = find_cxx_compiler()
+        src = (
+            "func main() -> void:\n"
+            "    let s = file_read(arg_str(1))\n"
+            "    print_i32(str_len(s))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_fileio_big_')
+        try:
+            src_path = os.path.join(tmp, 'big.vnt')
+            with open(src_path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            prog, tc = _frontend_only(src_path)
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            big = os.path.join(tmp, 'big.txt')
+            with open(big, 'w', encoding='utf-8') as f:
+                f.write('x' * 70000)
+            r = subprocess.run([exe, big], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('does not fit the 65536-byte string pool', r.stderr)
+            self.assertIn('(70000 bytes)', r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_string_pool_exhaustion_fails_loudly(self):
         src = (
             "func main() -> void:\n"

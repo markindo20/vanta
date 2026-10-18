@@ -27,6 +27,8 @@ BUILTIN_FN = {
     'str_to_i32': 'vanta::str_to_i32', 'str_to_f32': 'vanta::str_to_f32',
     'to_str_i32': 'vanta::to_str_i32', 'to_str_f32': 'vanta::to_str_f32',
     'to_str_bool': 'vanta::to_str_bool', 'str_pool_reset': 'vanta::str_pool_reset',
+    'file_exists': 'vanta::file_exists', 'file_write': 'vanta::file_write',
+    'file_read': 'vanta::file_read',
 }
 
 

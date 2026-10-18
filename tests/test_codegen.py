@@ -156,6 +156,15 @@ class CodegenTests(unittest.TestCase):
         cpp = gen('func main() -> void:\n    let a = str_to_i32("12")\n')
         self.assertIn('vanta::str_to_i32("12")', cpp)
 
+    def test_file_io_emit(self):
+        cpp = gen('func main() -> void:\n'
+                  '    let e = file_exists("a")\n'
+                  '    let w = file_write("a", "b")\n'
+                  '    let r = file_read("a")\n')
+        self.assertIn('vanta::file_exists("a")', cpp)
+        self.assertIn('vanta::file_write("a", "b")', cpp)
+        self.assertIn('vanta::file_read("a")', cpp)
+
     def test_extern_block_emitted_outside_namespace(self):
         cpp = gen('extern "mylib" {\n    func add(a: i32, b: i32) -> i32\n}\n'
                   'func main() -> void:\n    print_i32(add(1, 2))\n')
