@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Linux and macOS runners ship a C++17 compiler on PATH (g++ / clang++).
+      # Windows runners do not, so install mingw-w64 through MSYS2 and put it
+      # on PATH for the test process; the integration tests find it there and
+      # it supplies the DLLs the compiled test binaries need.
+      - name: Set up mingw-w64 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: false
+          install: mingw-w64-x86_64-gcc
+      - name: Expose mingw-w64 on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Version
+        run: python main.py --version
+      - name: Tests
+        run: python -m unittest discover -s tests
