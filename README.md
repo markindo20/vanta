@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.15.0)
+# Vanta - a game-oriented systems language (v0.16.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -85,7 +85,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (447 tests) |
+| `tests/` | `unittest` suite (455 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -108,6 +108,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`/`insert`/`remove`, comparator sort |
+| `callbacks.vnt` | C callbacks: Vanta functions called from C, with pointer user data (C side: `callbacks_lib.c`) |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
@@ -138,8 +139,9 @@ New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 ## Status
 
 Vanta is a prototype, not a finished language. Programs can span multiple
-files, link against C libraries, read command-line arguments, produce formatted
-output, read and write files, build 2D grids, pass functions around,
+files, link against C libraries (callbacks included), read command-line
+arguments, produce formatted output, read and write files, build 2D grids,
+pass functions around,
 bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
 lists (`List<T>`), assemble strings with `StrBuilder`, name states and modes
 with enums and branch on them exhaustively with `match`, and build and run
@@ -149,8 +151,9 @@ games) — but the remaining gaps are real:
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
   it (`StrBuilder` builds without the pool, but a `str` is still a bare pointer)
-- function values are plain pointers: no closures, no function-value equality,
-  and C callbacks (function types in `extern`) are not supported yet
+- function values are plain pointers: no closures and no function-value
+  equality; C callbacks work as `extern` parameters, but an `extern` cannot
+  return a function type yet
 - array indexing is unchecked unless you opt in with `xs.at(i)`; pointers have
   no checked access, and there is no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)

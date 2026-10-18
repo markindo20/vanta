@@ -2,6 +2,26 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.16.0 — 2026-10-18
+
+- C callbacks: an `extern` parameter typed `func(...)` is now a C function
+  pointer, so C libraries can call back into Vanta code. Pass any function
+  value — a Vanta function or another `extern`. The generated C++ spells the
+  callback inline where it appears (`int32_t(*v_f)(int32_t)` in a
+  declaration, `int32_t(**v_slot)(int32_t)` through a `ptr<func(...)>`), so
+  no aliases are needed before the namespace.
+- An `extern` cannot return a function type yet: the error says so and
+  suggests wrapping the C function in a shim (`extern function 'get' cannot
+  return a function type yet; wrap it in a C shim that calls it`).
+- Codegen fix: struct types in extern signatures are now namespace-qualified
+  and forward-declared ahead of the `extern "C"` block, so
+  `func f(p: ptr<State>)` in an `extern` compiles (previously the bare
+  `State` name was emitted before any declaration).
+- `examples/callbacks.vnt` + `examples/callbacks_lib.c`: a callback C calls
+  twice (`f(f(x))`) and a visitor with a `ptr<i32>` user-data pointer.
+  A libc `atexit` test exercises callbacks on every platform. 8 new tests
+  (455 total).
+
 ## v0.15.0 — 2026-10-18
 
 - `List<T>` can be edited in place: `xs.insert(i, v)` inserts at index `i`,

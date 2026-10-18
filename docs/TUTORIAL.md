@@ -432,6 +432,46 @@ coordinate slipped past the grid, the program would stop loudly with
 `vanta: index ... out of bounds (size ...) at line ...` instead of printing
 garbage.
 
+## C callbacks
+
+C libraries often want to call back into *your* code — timers, event
+handlers, hooks. An `extern` parameter typed `func(...)` is a C function
+pointer, so passing a function value hands C the address to call. `atexit`
+from the C standard library is the smallest way to watch this happen; it
+runs its callbacks when the program exits, most recently registered first:
+
+```vanta
+extern "C" {
+    func atexit(cb: func()) -> i32
+}
+
+func first():
+    print_str("first registered, runs last")
+
+func second():
+    print_str("second registered, runs first")
+
+func main() -> void:
+    atexit(first)
+    atexit(second)
+    print_str("main")
+```
+
+```
+main
+second registered, runs first
+first registered, runs last
+```
+
+Callbacks are plain function pointers — no closures — so state travels
+through parameters, like the `ptr<i32>` user-data pointer in
+`examples/callbacks.vnt`: a buildable example (with
+`examples/callbacks_lib.c`) where C calls a Vanta function twice and walks a
+visitor over a count. The C side must declare the matching
+function-pointer type, and an `extern` cannot return a function type yet.
+The full rules are under [Extern
+declarations](#extern-declarations-v030) in the reference.
+
 ## SDL2: a real window
 
 Printing to the terminal is where Vanta starts, not where it stops. `extern`

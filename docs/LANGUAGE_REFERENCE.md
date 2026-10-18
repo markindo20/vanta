@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.15.0)
+# Vanta Language Reference (v0.16.0)
 
-This is the reference for the language as implemented at tag `v0.15.0`. Every
+This is the reference for the language as implemented at tag `v0.16.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -792,23 +792,54 @@ extern "demo" {
   same way. The generated C++ declares them in an `extern "C" {}` block outside
   `namespace vanta_user`, and calls keep the original (unmangled) name.
 - Stick to C-compatible types: `i32`, `u32`, `f32`, `f64`, `bool`, `str`
-  (`const char*`), and `ptr<T>`. Opaque C handles are `ptr<void>`; a typed
-  `ptr<T>` (e.g. `ptr<i32>`) is for C pointers you intend to index, and it
-  widens to `ptr<void>` implicitly where that is declared. A C parameter
-  narrower than `i32` (`Uint8` channels, for instance) is declared `i32`:
-  the callee reads the low byte. Vanta struct types can appear in a
-  signature if the C++ side understands them, but a plain C library cannot.
-  Enum types cannot appear in an `extern` signature yet — pass
-  `enum_to_i32(v)` instead.
+  (`const char*`), `ptr<T>`, and `func(...)` parameters (callbacks, below).
+  Opaque C handles are `ptr<void>`; a typed `ptr<T>` (e.g. `ptr<i32>`) is
+  for C pointers you intend to index, and it widens to `ptr<void>`
+  implicitly where that is declared. A C parameter narrower than `i32`
+  (`Uint8` channels, for instance) is declared `i32`: the callee reads the
+  low byte. Vanta struct types can appear in a signature — the generated
+  code namespace-qualifies and forward-declares them — if the C side
+  understands the layout, but a plain C library cannot. Enum types cannot
+  appear in an `extern` signature yet — pass `enum_to_i32(v)` instead.
 - A name declared twice — in one block, across blocks, or colliding with a
   Vanta function, builtin, or type — is a compile error.
+
+A parameter typed `func(...)` is a C function pointer, so C can call back
+into Vanta code (v0.16.0). Pass any function value — a Vanta function or
+another `extern` — where the callback is wanted. The generated C++ spells
+the parameter inline (`void(*v_cb)()`), and the C side must declare the
+matching function-pointer type. Taking `atexit` from the C standard library:
+
+```vanta
+extern "C" {
+    func atexit(cb: func()) -> i32
+}
+
+func farewell():
+    print_str("goodbye from the callback")
+
+func main() -> void:
+    atexit(farewell)
+    print_str("main is done")
+```
+
+```
+main is done
+goodbye from the callback
+```
+
+`atexit` runs its callbacks as the program exits, most recently registered
+first. An `extern` cannot *return* a function type yet; wrap such a C
+function in a shim that calls the callback instead.
 
 ```powershell
 python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 ```
 
 `examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
-buildable example.
+buildable example. `examples/callbacks.vnt` and `examples/callbacks_lib.c`
+are a second one: a callback that C calls twice, and a visitor receiving a
+`ptr<i32>` user-data pointer.
 
 ## SDL2 and a window (v0.12.0)
 

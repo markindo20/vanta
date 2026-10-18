@@ -40,9 +40,13 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
    `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions. `extern` declarations
    are emitted as an `extern "C" {}` block before the namespace, and calls to
-   them skip the `fn_` prefix user functions get. Each distinct function type
-   is emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
-   namespace, innermost first, with raw declarators never written inline.
+   them skip the `fn_` prefix user functions get. Extern signatures predate
+   the namespace, so they are spelled in plain C: callback parameters expand
+   inline as declarators (`int32_t(*v_f)(int32_t)` — the name folds inside
+   the stars), and user structs are namespace-qualified with their tags
+   forward-declared ahead of the block. Each distinct function type is
+   emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
+   namespace, innermost first, and drives the in-namespace spellings.
    Enum declarations are emitted before the aliases, since signatures and
    fields may name them. A function that can fall through gets a
    type-appropriate default return: `""` for `str`, `nullptr` for pointers,
@@ -117,7 +121,7 @@ scope.
 
 ## Tests
 
-`tests/` holds 447 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 455 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless
