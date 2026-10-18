@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.7.0)
+# Vanta Language Reference (v0.8.0)
 
-This is the reference for the language as implemented at tag `v0.7.0`. Every
+This is the reference for the language as implemented at tag `v0.8.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -403,6 +403,10 @@ let r = from_quat(q)
 | `print_newline` | `() -> void` | writes `\n` |
 | `sqrt_f32` | `(f32) -> f32` | |
 | `sqrt_f64` | `(f64) -> f64` | |
+| `sin_f32`, `cos_f32`, `tan_f32` | `(f32) -> f32` | radians |
+| `sin_f64`, `cos_f64`, `tan_f64` | `(f64) -> f64` | radians |
+| `atan2_f32` | `(f32, f32) -> f32` | `atan2(y, x)`; angle of `(x, y)`, radians |
+| `atan2_f64` | `(f64, f64) -> f64` | `atan2(y, x)`; radians |
 | `abs_i32` | `(i32) -> i32` | |
 | `abs_f32` | `(f32) -> f32` | |
 | `min_i32`, `max_i32` | `(i32, i32) -> i32` | |
@@ -431,7 +435,19 @@ The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different
 value selects a different stream.
 
-There are no `sin`/`cos`/`tan` builtins.
+Trigonometry comes in `f32`/`f64` pairs; all angles are radians:
+
+```vanta
+print_f32(sin_f32(0.0))          # 0.000000
+print_f32(cos_f32(0.0))          # 1.000000
+print_f32(cos_f32(3.1415927))    # -1.000000  (pi as f32)
+print_f32(atan2_f32(1.0, 1.0))   # 0.785398   (pi/4)
+```
+
+`atan2_f32(y, x)` is the angle of the vector `(x, y)` — the "heading toward a
+point" operation — so a 45-degree unit vector comes back with its heading
+intact. The functions are values like any other builtin:
+`let g: func(f32) -> f32 = sin_f32` is fine.
 
 ## Formatted output (v0.2.6)
 

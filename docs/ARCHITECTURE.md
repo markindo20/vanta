@@ -62,7 +62,7 @@ distinct semantics.
 - `at_checked` / `at_checked_ref` (plus `index_fail`) — the bounds-checked
   access behind `xs.at(i)`; a bad index reports the array size and the
   access's source line
-- IO, `sqrt`, `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
+- IO, `sqrt` and trig (`sin`/`cos`/`tan`/`atan2`), `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
 - `write_*` variants of the `print_*` functions (no trailing newline)
 - `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
 - `str_eq` (`strcmp`-backed string equality), `str_len`, and `str_to_i32`/`str_to_f32`
@@ -96,7 +96,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 267 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 274 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 
