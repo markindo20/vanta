@@ -1,7 +1,7 @@
 import os, sys, subprocess, tempfile, shutil, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from compiler.driver import find_cxx_compiler, _frontend_only, _emit_source
+from compiler.driver import find_cxx_compiler, _frontend_only, _emit_source, _is_msvc
 
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,10 +15,21 @@ def _have_compiler():
 
 def _find_sdl2():
     """How to build against SDL2, or None when it is not available."""
+    name, path = find_cxx_compiler()
+    if name is None or _is_msvc(name):
+        # link.exe cannot consume the MinGW import library below; an MSVC
+        # setup would need SDL2's own .lib, so treat SDL2 as unavailable.
+        return None
     if os.name == 'nt':
-        lib_dir = r'C:\msys64\mingw64\lib'
-        if os.path.exists(os.path.join(lib_dir, 'libSDL2.dll.a')):
-            return {'lib_dirs': [lib_dir], 'libs': ['SDL2']}
+        candidates = []
+        if path:
+            # g++ lives in <prefix>\mingw64\bin; the libs are two levels up
+            # in <prefix>\mingw64\lib, wherever MSYS2 was installed.
+            candidates.append(os.path.join(os.path.dirname(os.path.dirname(path)), 'lib'))
+        candidates.append(r'C:\msys64\mingw64\lib')
+        for lib_dir in candidates:
+            if os.path.exists(os.path.join(lib_dir, 'libSDL2.dll.a')):
+                return {'lib_dirs': [lib_dir], 'libs': ['SDL2']}
         return None
     cfg = shutil.which('sdl2-config')
     if cfg:
@@ -625,6 +636,9 @@ class IntegrationTests(unittest.TestCase):
         if cc is None:
             self.skipTest('no C compiler available for the fixture')
         name, path = find_cxx_compiler()
+        if _is_msvc(name):
+            self.skipTest('fixture is a GNU archive (libdemo.a); '
+                          'MSVC would need a .lib fixture')
         tmp = tempfile.mkdtemp(prefix='vanta_extern_')
         try:
             obj = os.path.join(tmp, 'extern_demo_lib.o')

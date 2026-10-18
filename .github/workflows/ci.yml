@@ -28,10 +28,12 @@ jobs:
         run: brew install sdl2
 
       # Linux and macOS runners ship a C++17 compiler on PATH (g++ / clang++).
-      # Windows runners do not, so install mingw-w64 through MSYS2 and put it
-      # on PATH for the test process; the integration tests find it there and
-      # it supplies the DLLs the compiled test binaries need.
+      # Windows runners also have MSVC, and the driver prefers cl there, so
+      # install MSYS2's mingw-w64 toolchain, put it on PATH (it also supplies
+      # the DLLs the compiled test binaries need, SDL2 included), and pin CXX
+      # to g++ so Windows matches the toolchain used in development.
       - name: Set up mingw-w64 (Windows)
+        id: msys2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
@@ -41,7 +43,9 @@ jobs:
       - name: Expose mingw-w64 on PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: |
+          "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Version
         run: python main.py --version
