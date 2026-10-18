@@ -1,0 +1,78 @@
+# gamekit/sdl.vnt — SDL2 bindings and window lifecycle for gamekit programs.
+#
+# The kit is ordinary Vanta files: import the modules a game needs.
+# Because Vanta has one flat namespace, every kit name is prefixed by its
+# module (SDL_*, screen_*, ev_*, gfx_*, rand_*), so the modules coexist
+# with each other and with a game's own names.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/input.vnt"
+#   import "gamekit/gfx.vnt"
+#   import "gamekit/rng.vnt"
+#
+# Build with the SDL2 library, e.g. on Windows with MSYS2:
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# examples/pong.vnt is a complete game built on these four modules.
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_RenderFillRect(renderer: ptr<void>, rect: ptr<i32>) -> i32
+    func SDL_RenderPresent(renderer: ptr<void>) -> void
+    func SDL_PollEvent(event: ptr<i32>) -> i32
+}
+
+const SDL_INIT_VIDEO: u32 = 32
+const SDL_WINDOW_SHOWN: u32 = 4
+const SDL_RENDERER_ACCELERATED_VSYNC: u32 = 6    # ACCELERATED | PRESENTVSYNC
+const SDL_RENDERER_ANY: u32 = 0                  # fallback: the software renderer
+
+# Event types, as stored in SDL_Event.type.
+const EV_QUIT: i32 = 256
+const EV_KEYDOWN: i32 = 768
+const EV_KEYUP: i32 = 769
+
+# Key symbols (SDLK_*), as stored in a key event's keysym.sym.
+const KEY_ESCAPE: i32 = 27
+const KEY_W: i32 = 119
+const KEY_A: i32 = 97
+const KEY_S: i32 = 115
+const KEY_D: i32 = 100
+const KEY_UP: i32 = 1073741906
+const KEY_DOWN: i32 = 1073741905
+const KEY_LEFT: i32 = 1073741904
+const KEY_RIGHT: i32 = 1073741903
+
+struct Screen:
+    window: ptr<void>
+    renderer: ptr<void>
+
+func screen_open(title: str, w: i32, h: i32) -> Screen:
+    # There is no nil literal in Vanta, and there does not need to be one
+    # here: every field comes straight from a C call, and C reports failure
+    # by returning NULL. If SDL_Init fails, the later calls fail too and
+    # return null handles, so a window that cannot be created comes back
+    # as a Screen that fails screen_ok() rather than a fabricated value.
+    SDL_Init(SDL_INIT_VIDEO)
+    let window = SDL_CreateWindow(title, 100, 100, w, h, SDL_WINDOW_SHOWN)
+    mut renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED_VSYNC)
+    if ptr_is_null(renderer):
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ANY)
+    return Screen(window: window, renderer: renderer)
+
+func screen_ok(s: Screen) -> bool:
+    return not ptr_is_null(s.window) and not ptr_is_null(s.renderer)
+
+func screen_close(s: Screen) -> void:
+    if not ptr_is_null(s.renderer):
+        SDL_DestroyRenderer(s.renderer)
+    if not ptr_is_null(s.window):
+        SDL_DestroyWindow(s.window)
+    SDL_Quit()

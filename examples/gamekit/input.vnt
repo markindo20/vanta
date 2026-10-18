@@ -1,0 +1,21 @@
+# gamekit/input.vnt — reading SDL input events through the gamekit.
+#
+# An SDL_Event is read as i32s: index 0 is the event type and, for a key
+# event, index 5 is the key symbol (byte 20 of the 56-byte event). The
+# accessors below keep those offsets in one place; the KEY_* and EV_*
+# constants live in sdl.vnt.
+
+import "sdl.vnt"
+
+func ev_is_quit(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_QUIT
+
+func ev_is_keydown(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_KEYDOWN
+
+func ev_is_keyup(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_KEYUP
+
+func ev_key(ev: ptr<i32>) -> i32:
+    # The SDLK_* symbol of a key down/up event.
+    return ev[5]

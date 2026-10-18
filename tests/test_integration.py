@@ -1005,7 +1005,9 @@ class IntegrationTests(unittest.TestCase):
 
     def test_sdl_examples_typecheck(self):
         # Pure frontend: needs no SDL2 at all, so it runs everywhere.
-        for fn in ('sdl_window.vnt', 'sdl_game.vnt'):
+        # pong.vnt imports every gamekit module, so this also type-checks
+        # the kit's extern declarations.
+        for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'pong.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1031,6 +1033,47 @@ class IntegrationTests(unittest.TestCase):
             r = subprocess.run([exe, '600'], capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(), ['score 1 misses 2'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_pong_headless(self):
+        # The second game, built on the game kit. With no input under the
+        # dummy driver the AI takes every point, and the whole run is
+        # reproducible: the AI wins 5-0 in frame 576, well before the frame
+        # cap, so the cap never fires — it is only the backstop.
+        tmp = tempfile.mkdtemp(prefix='vanta_pong_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'pong.vnt'), tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '3000'], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['player 0 ai 5 frames 576'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_gamekit_rng(self):
+        # gamekit/rng.vnt stands alone (no SDL), so this slice of the kit
+        # runs on every machine that has a C++ compiler. The copy puts the
+        # relative import where the probe program can reach it; the frozen
+        # values are the deterministic stream.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitrng_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/rng.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    print_i32(rand_int(1, 6))\n'
+                        '    print_i32(rand_int(1, 6))\n'
+                        '    print_i32(rand_int(1, 6))\n'
+                        '    print_f32(rand_range_f32(0.0, 1.0))\n'
+                        '    print_i32(rand_sign())\n'
+                        '    print_i32(rand_sign())\n')
+            self._build_and_run(path, ['4', '3', '1', '0.701852', '-1', '1'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

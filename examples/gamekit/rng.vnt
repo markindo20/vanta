@@ -1,0 +1,19 @@
+# gamekit/rng.vnt — helpers over the built-in random stream.
+#
+# The stream is fixed at startup (call rand_seed to pick another), so a
+# game that never seeds replays identically run to run — what the headless
+# tests rely on.
+
+func rand_int(lo: i32, hi: i32) -> i32:
+    # A random integer in [lo, hi] — both ends can come up. Requires lo <= hi.
+    return lo + f32_to_i32(rand_f32() * i32_to_f32(hi - lo + 1))
+
+func rand_range_f32(lo: f32, hi: f32) -> f32:
+    # A random float in [lo, hi).
+    return lo + rand_f32() * (hi - lo)
+
+func rand_sign() -> i32:
+    # -1 or 1, with equal chance — a random direction.
+    if rand_f32() < 0.5:
+        return -1
+    return 1

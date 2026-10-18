@@ -1,0 +1,176 @@
+# pong.vnt — a second game on the Vanta game kit.
+#
+# Left paddle: W/S or Up/Down. Esc or the close button quits. The right
+# paddle is a simple AI: it tracks the ball while the ball is incoming and
+# drifts back to the middle otherwise. First to 5 points wins.
+#
+# The game runs without a display: an optional frame limit on the command
+# line ends it early, and with no input the AI keeps scoring, so the final
+# score is reproducible — the test suite freezes it.
+#
+# Usage (Windows with MSYS2; any platform with SDL2 works):
+#   python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#   python main.py run examples/pong.vnt 900 --lib-dir C:/msys64/mingw64/lib --link SDL2
+
+import "gamekit/sdl.vnt"
+import "gamekit/input.vnt"
+import "gamekit/gfx.vnt"
+import "gamekit/rng.vnt"
+
+const WIN_W: i32 = 640
+const WIN_H: i32 = 480
+const PADDLE_W: i32 = 12
+const PADDLE_H: i32 = 80
+const PADDLE_X: i32 = 24            # player paddle, on the left
+const AI_X: i32 = 604               # WIN_W - PADDLE_X - PADDLE_W
+const BALL: i32 = 12
+const PADDLE_SPEED: f32 = 6.0
+const AI_SPEED: f32 = 4.5
+const AI_DEADZONE: f32 = 6.0
+const BALL_VX_MAX: f32 = 9.0
+const BALL_VY_MAX: f32 = 7.5
+const WIN_SCORE: i32 = 5
+
+enum Side:
+    Left
+    Right
+
+struct Ball:
+    x: f32
+    y: f32
+    vx: f32
+    vy: f32
+
+func side_sign(s: Side) -> i32:
+    match s:
+        Side.Left:
+            return -1
+        Side.Right:
+            return 1
+
+func serve(toward: Side) -> Ball:
+    # Serve from the middle toward one side at 4.2..4.8 px per frame, with
+    # a small vertical angle — never a dead-horizontal serve, so rallies
+    # cannot stall.
+    let speed = 4.2 + i32_to_f32(rand_int(0, 2)) * 0.3
+    let vx = speed * i32_to_f32(side_sign(toward))
+    let vy = rand_range_f32(0.5, 1.6) * i32_to_f32(rand_sign())
+    return Ball(x: 320.0, y: 240.0, vx: vx, vy: vy)
+
+func main() -> void:
+    let screen = screen_open("Vanta pong", WIN_W, WIN_H)
+    if not screen_ok(screen):
+        print_str("vanta: could not open a window and renderer")
+        screen_close(screen)
+        return
+    let arena = Arena(512)
+    let ev = arena.alloc::<i32>(16)          # room for one SDL_Event
+    let rect = arena.alloc::<i32>(4)         # an SDL_Rect: x, y, w, h
+
+    mut frames = 0
+    mut max_frames = 0
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+
+    mut py = 200.0                        # paddle top edges; 200 puts the
+    mut ay = 200.0                        # 80px paddle across the middle
+    mut ball = serve(Side.Left)           # the first serve goes to the player
+    mut score_p = 0
+    mut score_a = 0
+    mut up_down = false
+    mut down_down = false
+    mut running = true
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            if ev_is_quit(ev):
+                running = false
+            elif ev_is_keydown(ev):
+                let k = ev_key(ev)
+                if k == KEY_ESCAPE:
+                    running = false
+                elif k == KEY_W or k == KEY_UP:
+                    up_down = true
+                elif k == KEY_S or k == KEY_DOWN:
+                    down_down = true
+            elif ev_is_keyup(ev):
+                let k = ev_key(ev)
+                if k == KEY_W or k == KEY_UP:
+                    up_down = false
+                elif k == KEY_S or k == KEY_DOWN:
+                    down_down = false
+
+        # The player paddle.
+        if up_down:
+            py -= PADDLE_SPEED
+        if down_down:
+            py += PADDLE_SPEED
+        py = max_f32(0.0, min_f32(py, i32_to_f32(WIN_H - PADDLE_H)))
+
+        # The ball, and the top and bottom walls.
+        ball.x += ball.vx
+        ball.y += ball.vy
+        if ball.y < 0.0:
+            ball.y = 0.0
+            ball.vy = -ball.vy
+        if ball.y > i32_to_f32(WIN_H - BALL):
+            ball.y = i32_to_f32(WIN_H - BALL)
+            ball.vy = -ball.vy
+
+        # The player paddle hits the ball: reflect, and steer with the
+        # contact point — the ball leaves steeper when the paddle's edge
+        # does the hitting.
+        if ball.vx < 0.0 and ball.x < 36.0 and ball.x > 12.0 and ball.y + 12.0 > py and ball.y < py + 80.0:
+            ball.x = 36.0
+            ball.vx = min_f32(BALL_VX_MAX, -ball.vx * 1.03)
+            ball.vy += (ball.y + 6.0 - (py + 40.0)) * 0.12
+            ball.vy = max_f32(-BALL_VY_MAX, min_f32(ball.vy, BALL_VY_MAX))
+
+        # The AI paddle: chase the ball while it is incoming, drift back to
+        # the middle otherwise. A dead zone keeps it from jittering.
+        mut ai_target = 200.0
+        if ball.vx > 0.0:
+            ai_target = ball.y - 40.0
+        if ai_target > ay + AI_DEADZONE:
+            ay += AI_SPEED
+        elif ai_target < ay - AI_DEADZONE:
+            ay -= AI_SPEED
+        ay = max_f32(0.0, min_f32(ay, i32_to_f32(WIN_H - PADDLE_H)))
+
+        if ball.vx > 0.0 and ball.x + 12.0 > 604.0 and ball.x < 616.0 and ball.y + 12.0 > ay and ball.y < ay + 80.0:
+            ball.x = 592.0
+            ball.vx = max_f32(-BALL_VX_MAX, -ball.vx * 1.03)
+            ball.vy += (ball.y + 6.0 - (ay + 40.0)) * 0.12
+            ball.vy = max_f32(-BALL_VY_MAX, min_f32(ball.vy, BALL_VY_MAX))
+
+        # Scoring: the side that lost the point gets the next serve.
+        if ball.x + 12.0 < 0.0:
+            score_a += 1
+            ball = serve(Side.Left)
+        elif ball.x > 640.0:
+            score_p += 1
+            ball = serve(Side.Right)
+
+        # Draw: background, border, dashed middle line, paddles, ball, and
+        # one pip per point for each side.
+        gfx_clear(screen, 16, 18, 26)
+        gfx_stroke_rect(screen, rect, 0, 0, WIN_W, WIN_H, 2, 58, 62, 78)
+        for i in range(0, 10):
+            gfx_fill_rect(screen, rect, 318, i * 48 + 8, 4, 24, 58, 62, 78)
+        gfx_fill_rect(screen, rect, PADDLE_X, f32_to_i32(py), PADDLE_W, PADDLE_H, 88, 216, 120)
+        gfx_fill_rect(screen, rect, AI_X, f32_to_i32(ay), PADDLE_W, PADDLE_H, 240, 128, 88)
+        gfx_fill_rect(screen, rect, f32_to_i32(ball.x), f32_to_i32(ball.y), BALL, BALL, 240, 240, 240)
+        for i in range(0, score_p):
+            gfx_fill_rect(screen, rect, 12 + i * 14, 12, 10, 10, 88, 216, 120)
+        for i in range(0, score_a):
+            gfx_fill_rect(screen, rect, 618 - i * 14, 12, 10, 10, 240, 128, 88)
+        gfx_present(screen)
+
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+        if score_p >= WIN_SCORE or score_a >= WIN_SCORE:
+            running = false
+
+    screen_close(screen)
+    print_fmt("player {} ai {} frames {}", score_p, score_a, frames)
