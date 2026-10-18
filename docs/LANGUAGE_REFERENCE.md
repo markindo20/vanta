@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.12.0)
+# Vanta Language Reference (v0.14.0)
 
-This is the reference for the language as implemented at tag `v0.12.0`. Every
+This is the reference for the language as implemented at tag `v0.14.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -774,12 +774,14 @@ buildable example.
 
 ## SDL2 and a window (v0.12.0)
 
-SDL2 is the worked example of `extern`. Two programs ship:
-`examples/sdl_window.vnt` opens a window and clears it to a colour, and
+SDL2 is the worked example of `extern`. Three programs ship:
+`examples/sdl_window.vnt` opens a window and clears it to a colour;
 `examples/sdl_game.vnt` is the first playable Vanta game — move the paddle
 with Left/Right (or A/D) to catch falling coins; Esc or the close button
-quits. Both are pure `extern` declarations: no SDL headers are involved at
-compile time, only the library at link time:
+quits — and `examples/pong.vnt` is the second, built on the
+[game kit](#the-game-kit-v0140) documented below. All are pure `extern`
+declarations: no SDL headers are involved at compile time, only the library
+at link time:
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -879,7 +881,7 @@ What the moving parts mean:
 - **`ptr_is_null` before trusting a handle**, and the `mut` on `renderer` is
   what lets the second creation attempt overwrite the first.
 
-Both examples take an optional frame-limit argument, so a smoke run needs no
+All three take an optional frame-limit argument, so a smoke run needs no
 display at all — this is how the test suite exercises them (CI installs SDL2
 on Linux, macOS, and Windows and runs the same smoke tests):
 
@@ -887,6 +889,58 @@ on Linux, macOS, and Windows and runs the same smoke tests):
 $env:SDL_VIDEODRIVER = "dummy"
 python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib --link SDL2
 ```
+
+## The game kit (v0.14.0)
+
+`examples/gamekit/` is four reusable modules over the SDL2 calls above —
+ordinary `.vnt` files, imported like anything else:
+
+| Module | Provides |
+|---|---|
+| `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
+| `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
+| `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
+| `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
+
+Three idioms fall out of the language rules:
+
+- **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
+  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `rand_*`);
+  several modules — and the game's own names — coexist.
+- **Failures come back the way C reports them.** There is no nil literal,
+  so `screen_open` returns a `Screen` carrying whatever the C calls
+  returned — null handles when anything failed — and `screen_ok` is the
+  test to run once before the game loop.
+- **One shared scratch rect.** SDL wants a four-`i32` `SDL_Rect*`; allocate
+  it once with `arena.alloc::<i32>(4)` and pass it to every `gfx_*` call.
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/rng.vnt"
+
+func main() -> void:
+    let screen = screen_open("Vanta", 320, 240)
+    print_bool(screen_ok(screen))     # true on any working video driver
+    print_i32(rand_int(1, 6))         # the RNG stream is fixed at startup,
+    print_i32(rand_int(1, 6))         # so these values are reproducible
+    screen_close(screen)
+```
+
+```
+true
+4
+3
+```
+
+Kit programs build like any other SDL2 program:
+
+```powershell
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
+
+`examples/pong.vnt` is the worked example: it imports all four modules,
+serves with `match`, and stays testable headless — a frame-limit argument
+plus `SDL_VIDEODRIVER=dummy` is how the test suite runs it in CI.
 
 ## File I/O (v0.3.1)
 

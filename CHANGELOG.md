@@ -2,6 +2,26 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.14.0 — 2026-10-18
+
+- Added the game kit: `examples/gamekit/` packages the SDL2 plumbing as four
+  importable modules — `sdl.vnt` (`extern` declarations, `EV_*`/`KEY_*`
+  constants, the `Screen` lifecycle), `input.vnt` (event accessors),
+  `gfx.vnt` (clear, filled rect, outline, present), and `rng.vnt` (bounded
+  integers and floats, random signs).
+- `examples/pong.vnt`, the second playable game, is built on the kit: W/S
+  or Up/Down against a tracking AI, wall bounces, contact-point steering,
+  first to 5 wins. `match` picks the serve direction.
+- Pong runs headless like the other SDL examples: a frame-limit argument
+  plus `SDL_VIDEODRIVER=dummy`. The frozen headless run: the AI wins 5-0 in
+  frame 576. `gamekit/rng.vnt` has no SDL dependency, so it gets its own
+  test that runs on every machine with a C++ compiler.
+- No compiler changes: the kit is plain Vanta, and the language needed
+  nothing new — struct fields typed `ptr<void>` (the `Screen` handle), a
+  failure value carried by C's own NULLs instead of a nil literal, and
+  ordinary imports all already worked.
+- 2 new tests (430 total).
+
 ## v0.13.0 — 2026-10-18
 
 - Added `match`: branch on an enum value with `Enum.Member:` arms (several

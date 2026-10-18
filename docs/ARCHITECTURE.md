@@ -115,12 +115,14 @@ scope.
 
 ## Tests
 
-`tests/` holds 428 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 430 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
-SDL2 tests build, link, and run the two SDL examples headless
+SDL2 tests build, link, and run the SDL examples headless
 (`SDL_VIDEODRIVER=dummy` plus a frame-limit argument) and skip when SDL2 is
-not installed; CI installs SDL2 on Linux, macOS, and Windows.
+not installed; CI installs SDL2 on Linux, macOS, and Windows. The game kit's
+`rng` module has no SDL dependency and is covered by its own test, so part
+of the kit runs anywhere a C++ compiler does.
 
 ```powershell
 python -m unittest discover -s tests

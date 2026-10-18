@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.13.0)
+# Vanta - a game-oriented systems language (v0.14.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -63,15 +63,19 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 
 SDL2 is the worked example of all this. `examples/sdl_window.vnt` opens a
 window; `examples/sdl_game.vnt` is the first playable Vanta game — catch the
-falling coins with Left/Right (or A/D), Esc or the close button quits:
+falling coins with Left/Right (or A/D), Esc or the close button quits. The
+game kit (`examples/gamekit/`) packages the SDL2 plumbing as four importable
+modules, and `examples/pong.vnt` is the second playable game built on it:
+W/S or Up/Down against a tracking AI, first to 5 wins.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 ```
 
-Both are pure `extern` declarations, so no SDL headers are needed to compile
-them, and both take an optional frame-limit argument for headless smoke runs
-(`SDL_VIDEODRIVER=dummy`).
+All of them are pure `extern` declarations, so no SDL headers are needed to
+compile, and all take an optional frame-limit argument for headless smoke
+runs (`SDL_VIDEODRIVER=dummy`).
 
 ## Project layout
 
@@ -81,7 +85,7 @@ them, and both take an optional frame-limit argument for headless smoke runs
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (428 tests) |
+| `tests/` | `unittest` suite (430 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -109,6 +113,8 @@ them, and both take an optional frame-limit argument for headless smoke runs
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
+| `gamekit/` | Four reusable game modules: SDL2 window lifecycle, event access, drawing, random numbers |
+| `pong.vnt` | The second playable game: paddles, tracking AI, contact-point steering — built on the game kit |
 
 ## Tests
 
@@ -136,9 +142,9 @@ files, link against C libraries, read command-line arguments, produce formatted
 output, read and write files, build 2D grids, pass functions around,
 bounds-check array access with `xs.at(i)`, grow arena-backed lists
 (`List<T>`), assemble strings with `StrBuilder`, name states and modes
-with enums and branch on them exhaustively with `match`, and open real
-windows with SDL2 (two examples, one of them a playable game) — but the
-remaining gaps are real:
+with enums and branch on them exhaustively with `match`, and build and run
+real SDL2 games on the game kit (three SDL examples, two of them playable
+games) — but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -152,8 +158,8 @@ remaining gaps are real:
   `arena.reset()` invalidates the lists made from that arena
 - enums are plain named constants: no explicit member values, no associated
   data; `==`/`!=` and `match` are the operations on them
-- windowing is shipped as SDL2 examples only: there is no audio/gamepad
-  wrapper, no text rendering, and events are read by hand (an `SDL_Event`
-  is viewed as raw `i32`s); nothing else ships in the box
+- windowing is shipped as SDL2 examples plus the game kit: there is no
+  audio/gamepad wrapper and no text rendering, and events are read by hand
+  (an `SDL_Event` is viewed as raw `i32`s)
 - pointers have no null safety beyond `ptr_is_null`; `ptr<void>` widening
   is the only implicit pointer conversion

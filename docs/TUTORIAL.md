@@ -470,13 +470,69 @@ falling coins. The event numbers (type at `ev[0]`, key symbol at `ev[5]`)
 and the rest of the API are documented in the reference's
 [SDL2 walkthrough](LANGUAGE_REFERENCE.md#sdl2-and-a-window-v0120).
 
+## The game kit
+
+The SDL2 program above talks to C directly, and that never stops working —
+but wiring the window, the input events, and the rectangles by hand in every
+game gets old. The game kit (`examples/gamekit/`) does it once, as four
+ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
+declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
+(reading events), `gfx.vnt` (drawing), and `rng.vnt` (bounded random
+numbers over the deterministic stream). A tiny demo — a square bouncing
+between the walls for 60 frames:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/gfx.vnt"
+
+func main() -> void:
+    let screen = screen_open("bounce", 320, 200)
+    if not screen_ok(screen):
+        print_str("could not open a window and renderer")
+        return
+    let arena = Arena(256)
+    let rect = arena.alloc::<i32>(4)     # one shared SDL_Rect scratch
+    mut x = 0.0
+    mut vx = 6.5
+    mut frames = 0
+    while frames < 60:
+        x += vx
+        if x < 0.0:
+            x = 0.0
+            vx = -vx
+        if x > 296.0:                    # 320 - 24 (the square is 24 wide)
+            x = 296.0
+            vx = -vx
+        gfx_clear(screen, 22, 24, 34)
+        gfx_fill_rect(screen, rect, f32_to_i32(x), 88, 24, 24, 240, 200, 60)
+        gfx_present(screen)
+        frames += 1
+    screen_close(screen)
+    print_fmt("ended at {} ({} frames)", f32_to_i32(x), frames)
+```
+
+```
+ended at 205 (60 frames)
+```
+
+Two details carry over from the raw SDL2 style. `Screen` fails the way C
+does: `screen_open` hands back null handles when a call fails (there is no
+nil literal), so `screen_ok` is the check. And the `gfx_*` calls share one
+four-`i32` scratch rectangle — that is the `SDL_Rect` SDL asks for.
+
+That is the whole kit: imports, prefixes, and C's own failure values.
+`examples/pong.vnt` puts it to work with two paddles, a tracking AI, and
+`match` for the serve direction; the
+[reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140) lists every function.
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
-  including imports, `extern` C linking, the SDL2 walkthrough, file I/O,
-  and the builtin list.
+  including imports, `extern` C linking, the SDL2 walkthrough and the game
+  kit, file I/O, and the builtin list.
 - [`../examples/`](../examples) — one sample per feature area, from
-  `physics.vnt` to `boids.vnt`, `grid.vnt`, and the playable `sdl_game.vnt`.
+  `physics.vnt` to `boids.vnt`, `grid.vnt`, and the playable `sdl_game.vnt`
+  and `pong.vnt`, with the reusable `gamekit/` modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (403 tests).
+- `python -m unittest discover -s tests` — run the test suite (430 tests).
