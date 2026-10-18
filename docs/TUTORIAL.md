@@ -125,8 +125,9 @@ func main() -> void:
 ## Enums
 
 An `enum` names a fixed set of states. Members are numbered from zero and
-written `Type.Member`; compare with `==`/`!=` and branch with `if`/`elif`.
-`enum_to_i32` turns a member into its number when you need to print it.
+written `Type.Member`; compare with `==`/`!=` and branch with `if`/`elif`
+(or `match` — next section). `enum_to_i32` turns a member into its number
+when you need to print it.
 
 ```vanta
 enum State:
@@ -154,6 +155,47 @@ menu
 playing
 1
 ```
+
+## Match
+
+`match` replaces the `if`/`elif` ladder when branching on an enum. Arms
+are written `Type.Member:` and run top to bottom; `else:` catches the
+rest. When every member has an arm, no `else` is needed — the compiler
+proves the match is exhaustive, and adding a member later points at every
+match that needs a new arm.
+
+```vanta
+enum State:
+    Menu
+    Playing
+    Paused
+
+func label(s: State) -> str:
+    match s:
+        State.Menu:
+            return "menu"
+        State.Playing:
+            return "playing"
+        State.Paused:
+            return "paused"
+
+func main() -> void:
+    mut s = State.Menu
+    print_str(label(s))             # menu
+    s = State.Playing
+    print_str(label(s))             # playing
+    print_str(label(State.Paused))  # paused
+```
+
+```
+menu
+playing
+paused
+```
+
+Several patterns can share one arm — `State.Menu, State.Paused:` — and
+`break`/`continue` inside an arm still control the enclosing loop, so a
+match inside a `for` never swallows them.
 
 ## Arrays and checked access
 

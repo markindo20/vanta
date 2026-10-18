@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.12.0)
+# Vanta - a game-oriented systems language (v0.13.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -81,7 +81,7 @@ them, and both take an optional frame-limit argument for headless smoke runs
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (403 tests) |
+| `tests/` | `unittest` suite (428 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -106,6 +106,7 @@ them, and both take an optional frame-limit argument for headless smoke runs
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`, checked access |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
+| `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
 
@@ -135,8 +136,9 @@ files, link against C libraries, read command-line arguments, produce formatted
 output, read and write files, build 2D grids, pass functions around,
 bounds-check array access with `xs.at(i)`, grow arena-backed lists
 (`List<T>`), assemble strings with `StrBuilder`, name states and modes
-with enums, and open real windows with SDL2 (two examples, one of them a
-playable game) — but the remaining gaps are real:
+with enums and branch on them exhaustively with `match`, and open real
+windows with SDL2 (two examples, one of them a playable game) — but the
+remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -149,8 +151,7 @@ playable game) — but the remaining gaps are real:
 - `List<T>` is arena-backed: there is no `insert`/`remove`/`sort`, and
   `arena.reset()` invalidates the lists made from that arena
 - enums are plain named constants: no explicit member values, no associated
-  data, and no `match`/`switch` — compare with `==`/`!=` and branch with
-  `if`/`elif`
+  data; `==`/`!=` and `match` are the operations on them
 - windowing is shipped as SDL2 examples only: there is no audio/gamepad
   wrapper, no text rendering, and events are read by hand (an `SDL_Event`
   is viewed as raw `i32`s); nothing else ships in the box

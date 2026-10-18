@@ -47,7 +47,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    fields may name them. A function that can fall through gets a
    type-appropriate default return: `""` for `str`, `nullptr` for pointers,
    value-initialization for everything else (`T{}` cannot be written for a
-   raw `T*`, which is why pointers are special-cased).
+   raw `T*`, which is why pointers are special-cased). `match` lowers to an
+   if/else chain over a single `const auto` binding of the matched value —
+   deliberately not a C++ `switch`, so a `break`/`continue` written in an
+   arm keeps its meaning for the enclosing loop.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -112,7 +115,7 @@ scope.
 
 ## Tests
 
-`tests/` holds 403 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 428 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the two SDL examples headless

@@ -114,6 +114,9 @@ while i < 3:
 `break` and `continue` are only valid inside a loop; using them at the top
 level is a compile-time error.
 
+Enum values branch with `match` (v0.13.0, below); `if`/`elif`/`else`
+chains stay the way to branch on bools.
+
 ## Structs, components, and systems
 
 `struct` declares a data type. `component` is an identical declaration that
@@ -188,7 +191,61 @@ false
   fields either — `s.Menu` is rejected with a hint to write `State.Menu`.
 - Type names share one namespace: an enum cannot reuse the name of a struct,
   function, or constant. `List` and `FnPtrN` are reserved.
+- `match` (v0.13.0, below) switches on enum values; when every member has
+  an arm the checker proves it and no `else` is needed.
 - `enum` is a reserved keyword.
+
+## Match (v0.13.0)
+
+`match` chooses a branch by comparing an enum value against member
+patterns. Arms are written `Enum.Member:` — several patterns per arm are
+separated by commas — and run top to bottom; the first match wins.
+`else:` is the fallback branch:
+
+```vanta
+enum State:
+    Menu
+    Playing
+    Paused
+    GameOver
+
+func label(s: State) -> str:
+    match s:
+        State.Menu:
+            return "menu"
+        State.Playing, State.Paused:
+            return "in game"
+        State.GameOver:
+            return "game over"
+
+func main() -> void:
+    print_str(label(State.Paused))      # in game
+    print_str(label(State.GameOver))    # game over
+    print_str(label(State.Menu))        # menu
+```
+
+```
+in game
+game over
+menu
+```
+
+- The matched value must be an enum; `match` on numbers, strings, or
+  structs is a compile error.
+- Patterns must name members of the matched enum: `Mode.On` against a
+  `State` value is an error, as are a misspelled member and the same
+  member used by two arms.
+- When every member has an arm somewhere in the match, no `else` is
+  needed — the checker proves it. With a member missing and no `else`,
+  the error names the missing members, so adding a member to an enum
+  later points at every match that must handle it.
+- `else` must be the last arm. It is allowed even when it is unreachable
+  (every member already covered).
+- Each arm has its own scope, and any statement is allowed inside —
+  including `break` and `continue`, which still control the enclosing
+  loop: `match` is not a loop, so it never captures them.
+- `match` is a statement, not an expression: it produces no value.
+- `match` is a reserved keyword.
 
 ## Arrays
 
