@@ -77,6 +77,8 @@ class Parser:
             return self.parse_extern()
         if t.type == TT.CONST:
             return self.parse_const()
+        if t.type == TT.IMPORT:
+            return self.parse_import()
         self.error(f"expected top-level declaration, got {t.type.name}")
 
     def parse_const(self):
@@ -104,6 +106,12 @@ class Parser:
         self.expect(TT.RBRACE)
         self.expect(TT.NEWLINE)
         return A.ExternDecl(lib_name, funcs, A.Pos(tok.line, tok.col))
+
+    def parse_import(self):
+        tok = self.advance()
+        path = self.expect(TT.STRING, "expected a path string after 'import'").value
+        self.expect(TT.NEWLINE)
+        return A.ImportDecl(path, A.Pos(tok.line, tok.col))
 
     def parse_func_decl(self):
         tok = self.advance()  # consume FUNC

@@ -6,6 +6,7 @@ from typing import Optional, List, Any
 class Pos:
     line: int
     col: int
+    file: Optional[str] = None
 
 
 @dataclass
@@ -51,6 +52,12 @@ class StructDecl:
 class ExternDecl:
     lib_name: str
     funcs: List['FuncDecl']
+    pos: Pos
+
+
+@dataclass
+class ImportDecl:
+    path: str
     pos: Pos
 
 

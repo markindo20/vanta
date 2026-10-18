@@ -11,7 +11,8 @@ from .formats import parse_format
 class CheckError(Exception):
     def __init__(self, msg, filename, pos):
         self.msg = msg; self.filename = filename; self.pos = pos
-        super().__init__(f"{filename}:{pos.line}:{pos.col}: {msg}")
+        where = getattr(pos, 'file', None) or filename
+        super().__init__(f"{where}:{pos.line}:{pos.col}: {msg}")
 
 
 class FuncSig:

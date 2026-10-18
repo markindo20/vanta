@@ -6,8 +6,9 @@ import sys
 import tempfile
 
 from . import VERSION
-from .lexer import Lexer, LexError
-from .parser import Parser, ParseError
+from .lexer import LexError
+from .parser import ParseError
+from .loader import load_program, LoadError
 from .type_checker import TypeChecker, CheckError
 from .codegen_cpp import CodeGen
 from .ast_nodes import FuncDecl
@@ -72,10 +73,7 @@ def _emit_source(program, tc, path):
 
 
 def _frontend_only(source_path):
-    with open(source_path, 'r', encoding='utf-8') as f:
-        src = f.read()
-    tokens = Lexer(src, source_path).tokenize()
-    program = Parser(tokens, source_path).parse_program()
+    program = load_program(source_path)
     tc = TypeChecker(program, source_path)
     tc.register()
     tc.check()
@@ -89,7 +87,7 @@ def _report_error(exc):
 def cmd_check(args):
     try:
         program, _ = _frontend_only(args.source)
-    except (LexError, ParseError, CheckError) as e:
+    except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
         return 1
     if not program.decls:
@@ -101,7 +99,7 @@ def cmd_check(args):
 def cmd_build(args):
     try:
         program, tc = _frontend_only(args.source)
-    except (LexError, ParseError, CheckError) as e:
+    except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
         return 1
 
@@ -152,7 +150,7 @@ def cmd_run(args):
         return 1
     try:
         program, tc = _frontend_only(args.source)
-    except (LexError, ParseError, CheckError) as e:
+    except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
         return 1
     if not any(isinstance(d, FuncDecl) and d.name == 'main' for d in program.decls):

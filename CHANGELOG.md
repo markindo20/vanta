@@ -2,6 +2,21 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.4.0 — 2026-10-18
+
+- Added `import "path.vnt"`. An import merges another file's declarations
+  into the program: paths resolve relative to the importing file, imports are
+  transitive, and each file is loaded once, so diamonds are fine. Import
+  cycles and missing files are compile errors. Declarations merge into the
+  existing flat namespace — imported functions, structs, constants, and
+  externs are used by their bare names. `import` is now a reserved word.
+- Errors inside imported files now name the file that contains them: every
+  AST position carries its source file, and `CheckError` prefers it.
+- Added `examples/imports_demo.vnt` with its module
+  `examples/imports_demo_lib.vnt`, plus 12 tests (176 total).
+- New `compiler/loader.py` owns import expansion; `_frontend_only` now goes
+  through it.
+
 ## v0.3.1 — 2026-10-18
 
 - Added `file_exists(path)`, `file_write(path, data)`, and `file_read(path)`.

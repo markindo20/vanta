@@ -1,0 +1,22 @@
+# imports_demo_lib.vnt — a module imported by imports_demo.vnt.
+#
+# Top-level declarations here merge into the importing program's global
+# namespace: there is no prefix or qualification at the call site.
+#
+# Run the demo with:
+#   python main.py run examples/imports_demo.vnt
+
+const TILE: i32 = 16
+
+struct Sprite:
+    x: i32
+    y: i32
+
+func sprite_at(x: i32, y: i32) -> Sprite:
+    return Sprite(x: x, y: y)
+
+func sprite_pixel(sp: Sprite) -> i32:
+    return sp.y * TILE + sp.x
+
+func tile_id(cx: i32, cy: i32) -> i32:
+    return cy * TILE + cx

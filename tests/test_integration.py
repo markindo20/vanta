@@ -295,6 +295,12 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_imports_example(self):
+        # Multi-file program: examples/imports_demo.vnt imports
+        # imports_demo_lib.vnt relative to its own directory.
+        self._build_and_run(os.path.join(EXAMPLES, 'imports_demo.vnt'),
+                            ['sprite pixel 35 tile_id 35', '16'])
+
     def test_extern_link_end_to_end(self):
         # Build the C side of examples/extern_demo.vnt into a static library,
         # link the generated program against it, run it, and check the output.

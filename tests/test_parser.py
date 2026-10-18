@@ -26,6 +26,17 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(sd, A.StructDecl)
         self.assertEqual(len(sd.fields), 2)
 
+    def test_import_decl(self):
+        prog = parse('import "lib/math.vnt"\n'
+                     'func main() -> void:\n    return\n')
+        imp = prog.decls[0]
+        self.assertIsInstance(imp, A.ImportDecl)
+        self.assertEqual(imp.path, 'lib/math.vnt')
+
+    def test_import_requires_string(self):
+        with self.assertRaises(ParseError):
+            parse('import math\n')
+
     def test_operator_precedence(self):
         prog = parse("func f() -> i32:\n    return 1 + 2 * 3\n")
         ret = prog.decls[0].body[0]

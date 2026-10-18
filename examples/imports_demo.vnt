@@ -1,0 +1,16 @@
+# imports_demo.vnt — splitting a program across files.
+#
+# Usage:
+#   python main.py run examples/imports_demo.vnt
+#
+# The import path is resolved relative to this file, and each file is loaded
+# once no matter how many times it is imported. TILE, Sprite, sprite_at,
+# sprite_pixel, and tile_id come from imports_demo_lib.vnt and are used here
+# as if they were declared in this file.
+
+import "imports_demo_lib.vnt"
+
+func main() -> void:
+    let sp = sprite_at(3, 2)
+    print_fmt("sprite pixel {} tile_id {}", sprite_pixel(sp), tile_id(sp.x, sp.y))
+    print_i32(TILE)
