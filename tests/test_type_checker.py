@@ -264,5 +264,27 @@ class TypeCheckerTests(unittest.TestCase):
             run("func f() -> void:\n    let r = rand_f32(1)\n")
 
 
+    def test_write_and_newline_builtins(self):
+        run("func f() -> void:\n    write_str(\"x\")\n    print_newline()\n")
+
+    def test_write_i32_rejects_float(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    write_i32(1.5)\n")
+
+    def test_abs_i32_type(self):
+        from compiler.typesys import I32
+        prog, tc = run("func f() -> void:\n    let a = abs_i32(-3)\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, I32)
+
+    def test_min_f32_arity(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let m = min_f32(1.0)\n")
+
+    def test_floor_f32_type(self):
+        from compiler.typesys import F32
+        prog, tc = run("func f() -> void:\n    let f = floor_f32(1.7)\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, F32)
+
+
 if __name__ == '__main__':
     unittest.main()

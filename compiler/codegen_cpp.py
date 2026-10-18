@@ -6,11 +6,19 @@ from .typesys import (
 )
 
 
-BUILTIN_PRINT = {
+BUILTIN_FN = {
     'print_i32': 'vanta::print_i32', 'print_u32': 'vanta::print_u32',
     'print_f32': 'vanta::print_f32', 'print_f64': 'vanta::print_f64',
     'print_bool': 'vanta::print_bool', 'print_str': 'vanta::print_str',
+    'write_i32': 'vanta::write_i32', 'write_u32': 'vanta::write_u32',
+    'write_f32': 'vanta::write_f32', 'write_f64': 'vanta::write_f64',
+    'write_bool': 'vanta::write_bool', 'write_str': 'vanta::write_str',
+    'print_newline': 'vanta::print_newline',
     'sqrt_f32': 'vanta::sqrt_f32', 'sqrt_f64': 'vanta::sqrt_f64',
+    'abs_i32': 'vanta::abs_i32', 'abs_f32': 'vanta::abs_f32',
+    'min_i32': 'vanta::min_i32', 'max_i32': 'vanta::max_i32',
+    'min_f32': 'vanta::min_f32', 'max_f32': 'vanta::max_f32',
+    'floor_f32': 'vanta::floor_f32', 'ceil_f32': 'vanta::ceil_f32',
     'i32_to_f32': 'vanta::i32_to_f32', 'f32_to_i32': 'vanta::f32_to_i32',
     'rand_f32': 'vanta::rand_f32', 'rand_seed': 'vanta::rand_seed',
 }
@@ -290,9 +298,9 @@ class CodeGen:
             if st is not None and not st.builtin:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{name}{{{args}}}'
-            if name in BUILTIN_PRINT:
+            if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)
-                return f'{BUILTIN_PRINT[name]}({args})'
+                return f'{BUILTIN_FN[name]}({args})'
             args = ', '.join(self._expr(a) for a in c.args)
             return f'fn_{name}({args})'
         if isinstance(f, A.Member):

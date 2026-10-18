@@ -216,6 +216,24 @@ inline double sqrt_f64(double v) { return std::sqrt(v); }
 inline float i32_to_f32(int32_t v) { return (float)v; }
 inline int32_t f32_to_i32(float v) { return (int32_t)v; }
 
+// ---------- Output without a trailing newline ----------
+inline void write_i32(int32_t v) { std::printf("%d", (int)v); }
+inline void write_u32(uint32_t v) { std::printf("%u", (unsigned)v); }
+inline void write_f32(float v) { std::printf("%f", (double)v); }
+inline void write_f64(double v) { std::printf("%lf", v); }
+inline void write_bool(bool v) { std::printf("%s", v ? "true" : "false"); }
+inline void write_str(const char* s) { std::printf("%s", s); }
+
+// ---------- Scalar math ----------
+inline int32_t abs_i32(int32_t v) { return v < 0 ? -v : v; }
+inline float abs_f32(float v) { return std::fabs(v); }
+inline int32_t min_i32(int32_t a, int32_t b) { return a < b ? a : b; }
+inline int32_t max_i32(int32_t a, int32_t b) { return a > b ? a : b; }
+inline float min_f32(float a, float b) { return a < b ? a : b; }
+inline float max_f32(float a, float b) { return a > b ? a : b; }
+inline float floor_f32(float v) { return std::floor(v); }
+inline float ceil_f32(float v) { return std::ceil(v); }
+
 // ---------- String helpers ----------
 inline bool str_eq(const char* a, const char* b) {
     if (a == b) return true;

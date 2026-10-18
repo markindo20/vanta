@@ -115,5 +115,17 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('vanta::rand_seed(7)', cpp)
 
 
+    def test_write_and_math_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    write_str(\"x\")\n"
+                  "    print_newline()\n"
+                  "    let a = min_i32(1, 2)\n"
+                  "    let b = floor_f32(1.5)\n")
+        self.assertIn('vanta::write_str("x")', cpp)
+        self.assertIn('vanta::print_newline()', cpp)
+        self.assertIn('vanta::min_i32(1, 2)', cpp)
+        self.assertIn('vanta::floor_f32(1.5f)', cpp)
+
+
 if __name__ == '__main__':
     unittest.main()

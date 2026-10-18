@@ -151,5 +151,27 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+    def test_grid_output(self):
+        # The point of write_* + print_newline: build a row without newlines.
+        src = (
+            "func main() -> void:\n"
+            "    for y in range(0, 3):\n"
+            "        for x in range(0, 3):\n"
+            "            if (x + y) % 2 == 0:\n"
+            "                write_str(\"#\")\n"
+            "            else:\n"
+            "                write_str(\".\")\n"
+            "        print_newline()\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_grid_')
+        try:
+            path = os.path.join(tmp, 'grid.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['#.#', '.#.', '#.#'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()
