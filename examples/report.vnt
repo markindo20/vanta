@@ -1,0 +1,41 @@
+# A small report over a fixed dataset.
+#
+# Usage:
+#   python main.py run examples/report.vnt 3
+#
+# The command-line argument is a scale factor. With none supplied it is 1.
+#
+# Demonstrates the v0.2.3-v0.2.6 additions end to end: write_fmt for the value
+# row, print_fmt for the labelled lines, str_to_i32 to read the argument, and
+# str_concat / str_len / to_str_i32 for building and measuring a string.
+
+const N: i32 = 8
+
+func main() -> void:
+    mut scale = 1
+    if arg_count() > 1:
+        scale = str_to_i32(arg_str(1))
+
+    let arena = Arena(4096)
+    let xs = arena.alloc::<i32>(N)
+    for i in range(0, N):
+        xs[i] = (i + 1) * scale
+
+    mut total = 0
+    mut big = 0
+    for i in range(0, N):
+        total += xs[i]
+        if xs[i] >= 5 * scale:
+            big += 1
+
+    print_fmt("scale={} n={}", scale, N)
+
+    write_str("values:")
+    for i in range(0, N):
+        write_fmt(" {}", xs[i])
+    print_newline()
+
+    print_fmt("sum={} mean={} big={}", total, i32_to_f32(total) / i32_to_f32(N), big)
+
+    let label = str_concat("scale", to_str_i32(scale))
+    print_fmt("label={} chars={}", label, str_len(label))

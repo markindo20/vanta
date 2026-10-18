@@ -134,5 +134,28 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('vanta::arg_count()', cpp)
 
 
+    def test_print_fmt_emit(self):
+        cpp = gen('func main() -> void:\n    print_fmt("n={} f={} b={}", 3, 1.5, true)\n')
+        self.assertIn('vanta::print_fmt_impl("n=%d f=%f b=%s\\n", 3, 1.5f, '
+                      '(true ? "true" : "false"))', cpp)
+
+    def test_write_fmt_has_no_newline(self):
+        cpp = gen('func main() -> void:\n    write_fmt("x{}", 1)\n')
+        self.assertIn('vanta::print_fmt_impl("x%d", 1)', cpp)
+
+    def test_fmt_escapes_percent(self):
+        cpp = gen('func main() -> void:\n    print_fmt("100% sure")\n')
+        self.assertIn('"100%% sure\\n"', cpp)
+
+    def test_str_concat_emit(self):
+        cpp = gen('func main() -> void:\n    let s = str_concat("a", "b")\n')
+        self.assertIn('vanta::str_concat("a", "b")', cpp)
+
+
+    def test_str_to_number_emit(self):
+        cpp = gen('func main() -> void:\n    let a = str_to_i32("12")\n')
+        self.assertIn('vanta::str_to_i32("12")', cpp)
+
+
 if __name__ == '__main__':
     unittest.main()

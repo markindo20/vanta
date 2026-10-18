@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cmath>
 #include <cstddef>
+#include <cstdarg>
 #include <array>
 
 namespace vanta {
@@ -240,6 +241,70 @@ inline bool str_eq(const char* a, const char* b) {
     if (!a || !b) return false;
     return std::strcmp(a, b) == 0;
 }
+inline int32_t str_len(const char* s) { return (int32_t)std::strlen(s); }
+// strtol/strtod parse a leading number and yield 0 when there is none.
+inline int32_t str_to_i32(const char* s) {
+    return (int32_t)std::strtol(s ? s : "", nullptr, 10);
+}
+inline float str_to_f32(const char* s) {
+    return (float)std::strtod(s ? s : "", nullptr);
+}
+
+// ---------- Formatted output ----------
+// print_fmt / write_fmt compile down to this. The format string is built at
+// compile time, so all argument checking happened before we got here.
+inline void print_fmt_impl(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    std::vprintf(fmt, ap);
+    va_end(ap);
+}
+
+// ---------- String pool ----------
+// str_concat and the to_str_* helpers need somewhere to put their results.
+// Vanta's `str` is a plain const char*, and the Arena is user-scoped, so we
+// bump-allocate from a fixed process-lifetime pool. It is never freed; call
+// str_pool_reset() to reclaim it, and note that strings built from the pool
+// are invalidated by a reset.
+inline const uint32_t STR_POOL_SIZE = 1u << 16;  // 64 KiB
+inline char*& str_pool_base() { static char* p = nullptr; return p; }
+inline uint32_t& str_pool_used() { static uint32_t u = 0; return u; }
+
+inline char* str_pool_alloc(uint32_t n) {
+    if (str_pool_base() == nullptr) {
+        str_pool_base() = (char*)std::malloc(STR_POOL_SIZE);
+        if (!str_pool_base()) { std::fprintf(stderr, "vanta: string pool alloc failed\n"); std::exit(1); }
+    }
+    if (str_pool_used() + n > STR_POOL_SIZE) {
+        std::fprintf(stderr, "vanta: string pool exhausted (%u bytes); call str_pool_reset()\n",
+                     (unsigned)STR_POOL_SIZE);
+        std::exit(1);
+    }
+    char* r = str_pool_base() + str_pool_used();
+    str_pool_used() += n;
+    return r;
+}
+inline void str_pool_reset() { str_pool_used() = 0; }
+
+inline const char* str_concat(const char* a, const char* b) {
+    uint32_t la = (uint32_t)std::strlen(a), lb = (uint32_t)std::strlen(b);
+    char* r = str_pool_alloc(la + lb + 1);
+    std::memcpy(r, a, la);
+    std::memcpy(r + la, b, lb);
+    r[la + lb] = '\0';
+    return r;
+}
+inline const char* to_str_i32(int32_t v) {
+    char* r = str_pool_alloc(12);
+    std::snprintf(r, 12, "%d", (int)v);
+    return r;
+}
+inline const char* to_str_f32(float v) {
+    char* r = str_pool_alloc(32);
+    std::snprintf(r, 32, "%f", (double)v);
+    return r;
+}
+inline const char* to_str_bool(bool v) { return v ? "true" : "false"; }
 
 // ---------- Pseudo-random (xorshift32) ----------
 // Deterministic by default so programs are reproducible across runs.

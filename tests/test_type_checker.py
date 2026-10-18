@@ -297,5 +297,53 @@ class TypeCheckerTests(unittest.TestCase):
             run("func f() -> void:\n    arg_str(1.5)\n")
 
 
+    def test_print_fmt_ok(self):
+        run("func f() -> void:\n    print_fmt(\"n={} f={}\", 1, 2.0)\n")
+
+    def test_print_fmt_placeholder_count(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    print_fmt(\"{} {}\", 1)\n")
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    print_fmt(\"{}\", 1, 2)\n")
+
+    def test_print_fmt_requires_literal(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let s = \"x{}\"\n    print_fmt(s, 1)\n")
+
+    def test_print_fmt_rejects_unformattable(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    let v = Vec2(1.0, 2.0)\n    print_fmt(\"{}\", v)\n")
+
+    def test_fmt_unmatched_brace(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    print_fmt(\"oops {\", 1)\n")
+
+    def test_str_concat_and_len_types(self):
+        from compiler.typesys import STR, I32
+        prog, tc = run("func f() -> void:\n"
+                       "    let s = str_concat(\"a\", \"b\")\n"
+                       "    let n = str_len(s)\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, STR)
+        self.assertEqual(prog.decls[0].body[1].var_type, I32)
+
+    def test_to_str_types(self):
+        from compiler.typesys import STR
+        prog, tc = run("func f() -> void:\n"
+                       "    let a = to_str_i32(1)\n"
+                       "    let b = to_str_f32(1.0)\n"
+                       "    let c = to_str_bool(true)\n")
+        for decl in prog.decls[0].body:
+            self.assertEqual(decl.var_type, STR)
+
+
+    def test_str_to_number_types(self):
+        from compiler.typesys import I32, F32
+        prog, tc = run("func f() -> void:\n"
+                       "    let a = str_to_i32(\"12\")\n"
+                       "    let b = str_to_f32(\"1.5\")\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, I32)
+        self.assertEqual(prog.decls[0].body[1].var_type, F32)
+
+
 if __name__ == '__main__':
     unittest.main()

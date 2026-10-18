@@ -231,5 +231,98 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+    def test_format_strings(self):
+        src = (
+            "func main() -> void:\n"
+            "    print_fmt(\"pos=({}, {})\", 1.5, 2.5)\n"
+            "    print_fmt(\"n={} b={} s={}\", 7, true, \"hi\")\n"
+            "    write_fmt(\"a\")\n"
+            "    write_fmt(\"{}\", 9)\n"
+            "    print_newline()\n"
+            "    let s = str_concat(\"x\", to_str_i32(5))\n"
+            "    print_fmt(\"{} len={}\", s, str_len(s))\n"
+            "    print_fmt(\"braces {{}} pct 50%\")\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_fmt_')
+        try:
+            path = os.path.join(tmp, 'fmt.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, [
+                'pos=(1.500000, 2.500000)',
+                'n=7 b=true s=hi',
+                'a9',
+                'x5 len=2',
+                'braces {} pct 50%',
+            ])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_report_example_with_arg(self):
+        name, path = find_cxx_compiler()
+        source = os.path.join(EXAMPLES, 'report.vnt')
+        prog, tc = _frontend_only(source)
+        tmp = tempfile.mkdtemp(prefix='vanta_report_')
+        try:
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            # with an explicit scale
+            r = subprocess.run([exe, '3'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), [
+                'scale=3 n=8',
+                'values: 3 6 9 12 15 18 21 24',
+                'sum=108 mean=13.500000 big=4',
+                'label=scale3 chars=6',
+            ])
+
+            # with no argument the scale defaults to 1
+            r2 = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r2.returncode, 0, msg=r2.stderr)
+            self.assertEqual(r2.stdout.strip().splitlines(), [
+                'scale=1 n=8',
+                'values: 1 2 3 4 5 6 7 8',
+                'sum=36 mean=4.500000 big=4',
+                'label=scale1 chars=6',
+            ])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_string_pool_exhaustion_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    mut s = \"x\"\n"
+            "    for i in range(0, 100000):\n"
+            "        s = str_concat(s, \"y\")\n"
+            "    print_i32(str_len(s))\n"
+        )
+        name, path = find_cxx_compiler()
+        tmp = tempfile.mkdtemp(prefix='vanta_pool_')
+        try:
+            src_path = os.path.join(tmp, 'pool.vnt')
+            with open(src_path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            prog, tc = _frontend_only(src_path)
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('string pool exhausted', r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()

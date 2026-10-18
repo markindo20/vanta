@@ -5,6 +5,7 @@ from .typesys import (
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
+from .formats import parse_format
 
 
 class CheckError(Exception):
@@ -70,6 +71,14 @@ class TypeChecker:
         bf("rand_seed", [("seed", I32)], VOID)
         bf("arg_count", [], I32)
         bf("arg_str", [("i", I32)], STR)
+        bf("str_concat", [("a", STR), ("b", STR)], STR)
+        bf("str_len", [("s", STR)], I32)
+        bf("str_to_i32", [("s", STR)], I32)
+        bf("str_to_f32", [("s", STR)], F32)
+        bf("to_str_i32", [("v", I32)], STR)
+        bf("to_str_f32", [("v", F32)], STR)
+        bf("to_str_bool", [("v", BOOL)], STR)
+        bf("str_pool_reset", [], VOID)
         bf("assert", [("cond", BOOL)], VOID)
         bf("translation", [("x", F32), ("y", F32), ("z", F32)], self.structs["Matrix4"])
         bf("scale", [("s", F32)], self.structs["Matrix4"])
@@ -564,6 +573,8 @@ class TypeChecker:
             name = f.name
             if name == 'len':
                 return self._check_len(call)
+            if name in ('print_fmt', 'write_fmt'):
+                return self._check_fmt(call, name)
             if name in self.structs:
                 st = self.structs[name]
                 if st.builtin:
@@ -587,6 +598,35 @@ class TypeChecker:
             raise CheckError(f"len expects an array, got {at}", self.filename, call.pos)
         call.type = I32
         return I32
+
+    def _check_fmt(self, call: A.Call, name: str) -> Type:
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError(f"{name} does not accept named arguments", self.filename, call.pos)
+        if not call.args:
+            raise CheckError(f"{name} requires a format string", self.filename, call.pos)
+        fmt = call.args[0]
+        if not isinstance(fmt, A.StringLit):
+            raise CheckError(f"{name} format must be a string literal", self.filename, call.pos)
+        try:
+            _pieces, n_ph = parse_format(fmt.value)
+        except ValueError as e:
+            raise CheckError(f"{name}: {e}", self.filename, call.pos)
+        extra = call.args[1:]
+        if len(extra) != n_ph:
+            raise CheckError(
+                f"{name}: format string has {n_ph} placeholder(s) "
+                f"but {len(extra)} argument(s) were given",
+                self.filename, call.pos)
+        allowed = (I32, U32, F32, F64, BOOL, STR)
+        for a in extra:
+            at = self._default_type(self._check_expr(a), a)
+            if not any(at is t for t in allowed):
+                raise CheckError(
+                    f"{name}: cannot format a value of type {at} "
+                    f"(expected i32, u32, f32, f64, bool, or str)",
+                    self.filename, call.pos)
+        call.type = VOID
+        return VOID
 
     def _check_builtin_ctor(self, st: StructType, call: A.Call) -> Type:
         n = st.name

@@ -1,5 +1,6 @@
 from . import ast_nodes as A
 from . import VERSION
+from .formats import parse_format
 from .typesys import (
     PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType, StructType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
@@ -22,7 +23,52 @@ BUILTIN_FN = {
     'i32_to_f32': 'vanta::i32_to_f32', 'f32_to_i32': 'vanta::f32_to_i32',
     'rand_f32': 'vanta::rand_f32', 'rand_seed': 'vanta::rand_seed',
     'arg_count': 'vanta::arg_count', 'arg_str': 'vanta::arg_str',
+    'str_concat': 'vanta::str_concat', 'str_len': 'vanta::str_len',
+    'str_to_i32': 'vanta::str_to_i32', 'str_to_f32': 'vanta::str_to_f32',
+    'to_str_i32': 'vanta::to_str_i32', 'to_str_f32': 'vanta::to_str_f32',
+    'to_str_bool': 'vanta::to_str_bool', 'str_pool_reset': 'vanta::str_pool_reset',
 }
+
+
+# printf conversion for each formattable Vanta type.
+FMT_SPEC = {
+    'i32': '%d', 'u32': '%u', 'f32': '%f', 'f64': '%lf',
+    'bool': '%s', 'str': '%s',
+}
+
+
+def _c_escape(s: str) -> str:
+    """Escape literal format text for a C string, including printf's '%'."""
+    out = []
+    for ch in s:
+        if ch == '\\':
+            out.append('\\\\')
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == '\n':
+            out.append('\\n')
+        elif ch == '\t':
+            out.append('\\t')
+        elif ch == '\r':
+            out.append('\\r')
+        elif ch == '%':
+            out.append('%%')
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
+def build_fmt_c_string(fmt: str, arg_type_names, newline: bool) -> str:
+    """Turn a Vanta format literal plus argument types into a printf format."""
+    pieces, _n = parse_format(fmt)
+    parts = []
+    for i, piece in enumerate(pieces):
+        parts.append(_c_escape(piece))
+        if i < len(arg_type_names):
+            parts.append(FMT_SPEC[arg_type_names[i]])
+    if newline:
+        parts.append('\\n')
+    return ''.join(parts)
 
 BUILTIN_MATH_CTOR = {
     'translation': 'vanta::mat4_translation',
@@ -281,12 +327,32 @@ class CodeGen:
             return self._call(e)
         raise RuntimeError(f"cannot codegen expression {type(e).__name__}")
 
+    def _fmt_call(self, c: A.Call, name: str) -> str:
+        fmt_lit = c.args[0]
+        type_names = []
+        rendered = []
+        for a in c.args[1:]:
+            t = getattr(a, 'type', None)
+            tname = t.name if isinstance(t, PrimType) else None
+            if tname not in FMT_SPEC:
+                raise RuntimeError(f"internal: unformattable type {t} in {name}")
+            type_names.append(tname)
+            if tname == 'bool':
+                rendered.append(f'({self._expr(a)} ? "true" : "false")')
+            else:
+                rendered.append(self._expr(a))
+        fmt = build_fmt_c_string(fmt_lit.value, type_names, newline=(name == 'print_fmt'))
+        args = ', '.join([f'"{fmt}"'] + rendered)
+        return f'vanta::print_fmt_impl({args})'
+
     def _call(self, c: A.Call) -> str:
         f = c.func
         if isinstance(f, A.Name):
             name = f.name
             if name == 'len':
                 return f'int32_t(({self._expr(c.args[0])}).size())'
+            if name in ('print_fmt', 'write_fmt'):
+                return self._fmt_call(c, name)
             if name == 'assert':
                 line = c.pos.line if c.pos else 0
                 return f'vanta::assert_impl({self._expr(c.args[0])}, {line})'
