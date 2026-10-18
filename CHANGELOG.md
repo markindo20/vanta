@@ -2,6 +2,44 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.17.0 — 2026-10-18
+
+- Narrow integers: `i8`, `u8`, `i16`, `u16`. They store their exact width —
+  a `u8` field is one byte (`uint8_t` in the generated C++) — and read as
+  `i32` in arithmetic, C's integer promotion. Assigning any integer into a
+  narrow slot keeps the low bits, but a *literal* that does not fit is a
+  compile-time error (`initializer: value 300 out of range for u8`), and the
+  same check covers literals beside a narrow value (`x == 300`). Narrow types
+  work everywhere a type is written: fields, arrays, `ptr<u16>`, `List<u8>`,
+  and `extern` signatures. Pushing to a narrow `List` element type now emits
+  an explicit template argument so wider values still convert.
+- `ptr_cast::<T>(p)` reinterprets a pointer's element type
+  (`reinterpret_cast` semantics, unchecked): view the same memory as another
+  type, or give a `ptr<void>` from C a useful element type again. Any data
+  type is a legal target, `void` included (erasing the type); function-type
+  targets are rejected (`ptr_cast cannot target a function type`).
+- `for x in xs` iterates a `List<T>` or an array element by element. The loop
+  variable is a read-only copy, one per iteration; `break`/`continue` mean the
+  same as in range loops; anything else is a compile error (`cannot iterate
+  over ptr<i32>; for-each supports arrays and Lists`). A list's length is
+  re-read every pass, so do not grow one mid-walk.
+- Struct equality: `==`/`!=` on user structs compare field by field — numbers
+  by value, `str` by content, arrays element-wise, nested structs
+  recursively. A field with no equality (pointer, function value, `List`,
+  `Quat`/`Matrix4`) is a compile error naming the path (`cannot compare struct
+  'Outer' with '==': field 'inner.p' (ptr<i32>) has no equality`). Every
+  comparable struct gets non-member `operator==`/`!=` emitted — all
+  declarations before all definitions, so nesting order does not matter.
+- Enum types may now appear in `extern` signatures (parameters, returns,
+  `ptr<Enum>`, `List<Enum>`); the generated C++ names the fixed-`int32_t`
+  enum and forward-declares it ahead of the `extern "C"` block, so the C side
+  declares `int32_t` or a matching C enum. The old "pass `enum_to_i32(...)`
+  instead" limitation is gone.
+- Examples: `narrow_ints.vnt` plus a C fixture (exact-width parameters and a
+  C mirror struct reading a Vanta struct's bytes for the layout check),
+  `foreach.vnt`, `struct_eq.vnt`, `ptr_cast.vnt`, and `enums_extern.vnt` plus
+  a C fixture. 52 new tests (507 total).
+
 ## v0.16.0 — 2026-10-18
 
 - C callbacks: an `extern` parameter typed `func(...)` is now a C function

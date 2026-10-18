@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.16.0)
+# Vanta - a game-oriented systems language (v0.17.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -85,7 +85,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (455 tests) |
+| `tests/` | `unittest` suite (507 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -109,6 +109,11 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`/`insert`/`remove`, comparator sort |
 | `callbacks.vnt` | C callbacks: Vanta functions called from C, with pointer user data (C side: `callbacks_lib.c`) |
+| `narrow_ints.vnt` | Exact-width integers `i8`/`u8`/`i16`/`u16`: C ABI parameters and struct layout verified byte for byte (C side: `narrow_ints_lib.c`) |
+| `foreach.vnt` | `for x in xs` over lists and arrays, with `break`/`continue` |
+| `struct_eq.vnt` | `==`/`!=` on structs: `str` by content, arrays element-wise, nested structs |
+| `ptr_cast.vnt` | `ptr_cast::<T>(p)` reinterpretation, including a `ptr<void>` round trip |
+| `enums_extern.vnt` | Enum types in `extern` signatures, through `match` and back (C side: `enums_extern_lib.c`) |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
@@ -139,11 +144,14 @@ New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 ## Status
 
 Vanta is a prototype, not a finished language. Programs can span multiple
-files, link against C libraries (callbacks included), read command-line
-arguments, produce formatted output, read and write files, build 2D grids,
-pass functions around,
+files, link against C libraries (callbacks and enum types included), read
+command-line arguments, produce formatted output, read and write files, build
+2D grids, pass functions around,
 bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
-lists (`List<T>`), assemble strings with `StrBuilder`, name states and modes
+lists (`List<T>`) and walk lists and arrays with `for x in xs`, store
+exact-width integers (`i8`/`u8`/`i16`/`u16`) whose memory layout matches C,
+compare structs field by field with `==`, reinterpret pointers with
+`ptr_cast::<T>(p)`, assemble strings with `StrBuilder`, name states and modes
 with enums and branch on them exhaustively with `match`, and build and run
 real SDL2 games on the game kit (three SDL examples, two of them playable
 games) — but the remaining gaps are real:
@@ -160,11 +168,13 @@ games) — but the remaining gaps are real:
 - `List<T>` is arena-backed: elements must be copyable, growth and sorting
   allocate from the arena, and `sort` needs a comparator function value (there
   is no default ordering); `arena.reset()` invalidates the lists made from that
-  arena, and iteration is manual (no iterator protocol)
+  arena
 - enums are plain named constants: no explicit member values, no associated
-  data; `==`/`!=` and `match` are the operations on them
+  data; `==`/`!=` and `match` are the operations on them (they may appear in
+  `extern` signatures)
 - windowing is shipped as SDL2 examples plus the game kit: there is no
   audio/gamepad wrapper and no text rendering, and events are read by hand
   (an `SDL_Event` is viewed as raw `i32`s)
 - pointers have no null safety beyond `ptr_is_null`; `ptr<void>` widening
-  is the only implicit pointer conversion
+  is the only implicit pointer conversion, and `ptr_cast::<T>(p)` is the
+  unchecked explicit escape hatch

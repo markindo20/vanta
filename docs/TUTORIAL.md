@@ -51,6 +51,34 @@ func main() -> void:
 16
 ```
 
+## Narrow integers
+
+`i8`, `u8`, `i16`, `u16` store their exact width — this is your bridge to C
+byte layouts, and how a `u8` field stays one byte in memory. Two rules make
+them pleasant:
+
+```vanta
+func main() -> void:
+    mut health: u8 = 250
+    health = health + 10        # 260 does not fit: keeps the low bits
+    print_i32(health)
+
+    let damage: i16 = -40
+    let shield: u16 = 100
+    print_i32(shield + damage)  # reads promote to i32
+```
+
+```
+4
+60
+```
+
+Reading a narrow value yields `i32`, so arithmetic, comparisons, and printing
+just work — `shield + damage` is a plain `i32`. Storing is C-style
+truncation, as in `health` above, but a *literal* that does not fit its
+narrow type is a compile error (`let x: u8 = 300`), so typos never silently
+wrap.
+
 ## Functions
 
 Return types are written with `->`; omit it for `void`. `-> T` can be omitted
@@ -121,6 +149,34 @@ func main() -> void:
 7
 25
 ```
+
+## Comparing structs
+
+`==` and `!=` work on structs when every field has equality: numbers by
+value, `str` by content, arrays element by element, nested structs
+recursively.
+
+```vanta
+struct Card:
+    suit: str
+    rank: i32
+
+func main() -> void:
+    let a = Card(suit: "spades", rank: 7)
+    let b = Card(suit: "spades", rank: 7)
+    let c = Card(suit: "hearts", rank: 7)
+    print_bool(a == b)
+    print_bool(a == c)
+```
+
+```
+true
+false
+```
+
+A field with no equality — a pointer, a function value, a `List` — makes the
+comparison a compile error that names the field, so `==` never compares the
+wrong thing quietly.
 
 ## Enums
 
@@ -309,6 +365,28 @@ func main() -> void:
 10
 ```
 
+## Pointer casts
+
+`ptr_cast::<T>(p)` reinterprets a pointer as pointing at a different type —
+the escape hatch when raw bytes need a second viewing, and the way a
+`ptr<void>` handed back by C becomes usable again:
+
+```vanta
+func main() -> void:
+    let arena = Arena(256)
+    let cell = arena.alloc::<i32>(1)
+    cell[0] = 1078530011          # f32 pi, as bits
+    let as_f32 = ptr_cast::<f32>(cell)
+    print_f32(as_f32[0])
+```
+
+```
+3.141593
+```
+
+It is unchecked by design — the bytes must really be a `T`. Function-type
+targets are rejected.
+
 ## Growable lists
 
 Arrays are fixed-size; when the size is not known up front (entities, events,
@@ -382,6 +460,40 @@ program on an out-of-range index, exactly like `at`. `sort(cmp)` takes a
 comparator `func(T, T) -> i32` returning negative, zero, or positive for
 less-than, equal, greater-than, and is stable: elements the comparator calls
 equal keep their order.
+
+## Iterating a collection
+
+`for x in xs` walks a `List<T>` or an array directly — no index needed. The
+loop variable is a fresh read-only copy of the element; to write back, use
+an index or `xs.at(i)`.
+
+```vanta
+func main() -> void:
+    let arena = Arena(4096)
+    let names = arena.list::<str>()
+    names.push("ada")
+    names.push("grace")
+    for n in names:
+        print_str(n)
+
+    let dice = [1, 6, 3]
+    mut best = 0
+    for d in dice:
+        if d > best:
+            best = d
+    print_i32(best)
+```
+
+```
+ada
+grace
+6
+```
+
+`break` and `continue` work as in range loops. The iterable can be any
+array/List expression — a variable, a parameter, even an array literal
+(`for v in [1, 2, 3]:`). Don't push to a list while iterating it: the
+length is re-read on every pass.
 
 ## Project: an ASCII terrain generator
 

@@ -34,7 +34,11 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    performs the C-style `ptr<T>` → `ptr<void>` widening (and only that
    direction), `ptr_is_null` is checked in `_check_ptr_is_null`, a
    `ptr<void>` cannot be indexed, and `alloc::<void>` is rejected with its
-   own message.
+   own message. The integer-width rules live here too (v0.17.0): narrow
+   values promote to `i32` in arithmetic, any integer truncates into a narrow
+   slot, out-of-range literals are rejected, and `eq_blocker` (in
+   `typesys.py`) walks struct fields to decide whether a struct may be
+   compared with `==`.
 7. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
@@ -54,7 +58,15 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    raw `T*`, which is why pointers are special-cased). `match` lowers to an
    if/else chain over a single `const auto` binding of the matched value —
    deliberately not a C++ `switch`, so a `break`/`continue` written in an
-   arm keeps its meaning for the enclosing loop.
+   arm keeps its meaning for the enclosing loop. `for x in xs` lowers to an
+   index loop over a bound handle (Lists) or a const reference (arrays),
+   re-reading a list's length each pass. Comparable structs get non-member
+   `operator==`/`!=` emitted field by field (`str` through `str_eq`, arrays
+   element-wise), every declaration ahead of every definition so nesting
+   order does not matter, and narrow fields or elements get `static_cast<T>`
+   where C++ braced initialization would refuse the narrowing. Enum tags are
+   forward-declared with their fixed `int32_t` underlying type next to the
+   struct tags ahead of the `extern "C"` block.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -116,12 +128,13 @@ The only rule enforced is that **`Arena` is non-copyable**: `let a2 = a1` (where
 rejected. `ptr<T>` has no borrow checking, lifetime tracking, or aliasing
 analysis, so dangling and aliased pointers are not detected; the checker only
 guards the conversions (widening to `ptr<void>` is implicit, the reverse is
-an error) and offers `ptr_is_null`. Broader ownership analysis is out of
-scope.
+an error) and offers `ptr_is_null`. `ptr_cast::<T>(p)` (v0.17.0) is the
+explicit, unchecked reinterpretation — the escape hatch stays opt-in.
+Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 455 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 507 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

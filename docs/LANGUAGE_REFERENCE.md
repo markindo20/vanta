@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.16.0)
+# Vanta Language Reference (v0.17.0)
 
 This is the reference for the language as implemented at tag `v0.16.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -28,6 +28,7 @@ Assigning to a `let` binding is a compile-time error.
 
 | Type | Notes |
 |---|---|
+| `i8`, `u8`, `i16`, `u16` | narrow integers with exact width — `u8` is one byte (see [Narrow integers](#narrow-integers-v0170)) |
 | `i32`, `u32` | 32-bit integers |
 | `f32`, `f64` | 32/64-bit floats |
 | `bool` | `true` / `false` |
@@ -44,14 +45,62 @@ Assigning to a `let` binding is a compile-time error.
 
 Integer literals default to `i32`; float literals default to `f32`.
 
-**There is no implicit numeric conversion**, including `i32` → `u32`. This will
-bite you when calling a `u32` parameter with an `i32` variable:
+Wider-into-narrower integer assignment is the one exception (v0.17.0): any
+integer stores into a narrow slot by keeping its low bits, C-style — see
+[Narrow integers](#narrow-integers-v0170). **Otherwise there is no implicit
+numeric conversion**, including `i32` → `u32`. This will bite you when
+calling a `u32` parameter with an `i32` variable:
 
 ```
 error: cannot assign i32 to u32
 ```
 
-Use `i32_to_f32` / `f32_to_i32` for conversions.
+Use `i32_to_f32` / `f32_to_i32` for float conversions.
+
+## Narrow integers (v0.17.0)
+
+`i8`, `u8`, `i16`, and `u16` store their exact width — a `u8` field or buffer
+element is one byte — so Vanta structs and pointers can match a C layout
+byte for byte (`uint8_t`, `int16_t`, ... in the generated C++). Two rules
+make them ergonomic:
+
+**Reads promote.** Reading a narrow value yields `i32`, exactly like C's
+integer promotion, so arithmetic and comparisons need no casts:
+
+```vanta
+func main() -> void:
+    mut px: u8 = 250
+    px = px + 10                # 260 does not fit: keeps the low bits
+    print_i32(px)
+    let big: u16 = 60000
+    let small: i16 = -300
+    print_i32(big + small)
+    print_fmt("u8={} i16={}", px, small)
+```
+
+```
+4
+59700
+u8=4 i16=-300
+```
+
+**Stores truncate; literals must fit.** Assigning any integer expression into
+a narrow slot keeps the low bits (`px = px + 10` above stores `4`), but a
+*literal* that does not fit is a compile-time error instead of a silent
+mistake:
+
+```
+error: initializer: value 300 out of range for u8
+```
+
+The same range check applies to literals appearing beside a narrow value
+(`if px == 300:` errors identically). Narrow values convert
+value-preservingly into `i32`/`u32`, so `print_u32(x)` and `let w: u32 = x`
+work for a `u8`; `u8` → `f32` does not (go through `i32_to_f32`).
+
+Narrow types may be written anywhere a type is written: locals, struct
+fields, array elements (`[u8, 16]`), `ptr<u16>`, `List<u8>`, and `extern`
+signatures.
 
 ## Constants (v0.1.2)
 
@@ -90,8 +139,51 @@ for i in range(0, 20, 5):     # 0, 5, 10, 15
 for i in range(5, 0, -1):     # 5, 4, 3, 2, 1
 ```
 
-The end is exclusive. A step of zero is rejected. `range` is the **only**
-expression permitted after `for ... in`; there is no array iteration.
+The end is exclusive. A step of zero is rejected. Ranges are the numeric
+loop; to walk a collection element by element, `for x in xs` iterates arrays
+and `List<T>` (next section).
+
+## For-each over arrays and lists (v0.17.0)
+
+```vanta
+for x in xs:            # xs is a List<T> or a [T, N]
+    print_i32(x)
+```
+
+`for x in <expr>` walks a `List<T>` or a fixed-size array element by element.
+The loop variable is bound once per iteration to a **read-only copy** of the
+element — assigning to it is a compile error, and writing back means an index
+or a checked `at(i)`:
+
+```vanta
+func main() -> void:
+    let arena = Arena(4096)
+    let xs = arena.list::<i32>()
+    xs.push(3)
+    xs.push(5)
+    mut total = 0
+    for x in xs:
+        total = total + x
+    for v in [1, 2, 3]:
+        total = total + v
+    print_i32(total)
+```
+
+```
+14
+```
+
+The iterable can be any expression of an array or `List` type — a local, a
+parameter, a function result, an array literal. `break` and `continue` mean
+the same as in range loops. Iterating anything else is a compile error:
+
+```
+error: cannot iterate over ptr<i32>; for-each supports arrays and Lists
+```
+
+A List's length is re-read every iteration (the loop lowers to an index loop
+over the list handle), so **do not grow a list while iterating it** — use a
+`while` loop when the collection changes mid-walk.
 
 ## Control flow
 
@@ -143,6 +235,39 @@ let p = Position(0, 0)         # error: struct construction requires named argum
 The built-in types are the exception and take positional arguments:
 `Vec2(x, y)`, `Vec3(x, y, z)`, `Quat(x, y, z, w)`, `Matrix4()` (identity).
 
+### Struct equality (v0.17.0)
+
+`==` and `!=` compare two values of the same struct type field by field:
+numbers by value, `str` **by content** (`str_eq`), arrays element by element,
+and nested structs recursively. `Vec2` and `Vec3` keep their built-in
+equality.
+
+```vanta
+struct Point:
+    x: i32
+    y: i32
+
+func main() -> void:
+    let a = Point(x: 2, y: 5)
+    let b = Point(x: 2, y: 5)
+    print_bool(a == b)
+```
+
+```
+true
+```
+
+A field whose type has no equality — `ptr<T>`, a function value, `List<T>`,
+or `Quat`/`Matrix4` — makes comparing the whole struct a compile error that
+names the field path:
+
+```
+error: cannot compare struct 'Sprite' with '==': field 'pos.p' (ptr<i32>) has no equality
+```
+
+The check is recursive, so array fields (`cells[N]`) and nested structs are
+inspected down to the leaf.
+
 ## Enums (v0.11.0)
 
 `enum` declares a fixed set of named members, numbered from `0` in
@@ -184,9 +309,10 @@ false
 - `==` and `!=` compare values of the same enum. Ordering comparisons
   (`<`, `<=`, `>`, `>=`) are compile errors, as are compares between two
   different enums or between an enum and a number.
-- `enum_to_i32(v)` returns a member's number — the bridge to printing,
-  arithmetic, and `extern` calls (extern signatures cannot take enum types
-  directly yet).
+- `enum_to_i32(v)` returns a member's number — the bridge to printing and
+  arithmetic. `extern` signatures may also take and return enum types
+  directly (v0.17.0): the generated C++ uses the fixed-`int32_t` enum, so
+  the C side declares `int32_t` or a matching C enum.
 - An enum cannot be constructed: `State(1)` is an error. Enum types have no
   fields either — `s.Menu` is rejected with a hint to write `State.Menu`.
 - Type names share one namespace: an enum cannot reuse the name of a struct,
@@ -383,6 +509,36 @@ error: cannot pass Arena to a function
 This is the only ownership rule enforced. `ptr<T>` has **no** borrow checking,
 so dangling or aliased pointers are not detected.
 
+### Pointer casts: `ptr_cast::<T>` (v0.17.0)
+
+`ptr_cast::<T>(p)` reinterprets a pointer's element type, keeping the
+address — `reinterpret_cast` in the generated C++. It is unchecked: the
+language trusts the bytes really are a `T`. Use it to view the same memory
+as a different type, or to give a `ptr<void>` from C a useful element type
+again:
+
+```vanta
+func main() -> void:
+    let arena = Arena(256)
+    let words = arena.alloc::<i32>(1)
+    words[0] = 1078530011        # the f32 bit pattern of pi
+    let f = ptr_cast::<f32>(words)
+    print_f32(f[0])
+```
+
+```
+3.141593
+```
+
+The argument must be a pointer, and the target may be any data type —
+`i32`, a struct, an array, or `void` (erasing the element type, so the
+result is a `ptr<void>` and cannot be indexed). Function types are the one
+rejection:
+
+```
+error: ptr_cast cannot target a function type
+```
+
 ## Dynamic lists: `List<T>` (v0.9.0)
 
 `List<T>` is a growable array whose storage lives in an `Arena`. Create an
@@ -470,8 +626,8 @@ func main() -> void:
 Limits: element types must be copyable, so `List<void>` and `List<Arena>` are
 compile errors. `arena.reset()` invalidates every list made from that arena,
 because the storage lives there. Sorting allocates its scratch block from the
-same arena. Iterate with `for i in range(0, len(xs))` — there is no iterator
-protocol.
+same arena. Iterate with `for x in xs` (v0.17.0, above) or an index range
+(`for i in range(0, len(xs))`).
 
 ## String building: `StrBuilder` (v0.10.0)
 
@@ -791,16 +947,23 @@ extern "demo" {
 - Extern functions are called like any other function and type-checked the
   same way. The generated C++ declares them in an `extern "C" {}` block outside
   `namespace vanta_user`, and calls keep the original (unmangled) name.
-- Stick to C-compatible types: `i32`, `u32`, `f32`, `f64`, `bool`, `str`
-  (`const char*`), `ptr<T>`, and `func(...)` parameters (callbacks, below).
-  Opaque C handles are `ptr<void>`; a typed `ptr<T>` (e.g. `ptr<i32>`) is
-  for C pointers you intend to index, and it widens to `ptr<void>`
-  implicitly where that is declared. A C parameter narrower than `i32`
-  (`Uint8` channels, for instance) is declared `i32`: the callee reads the
-  low byte. Vanta struct types can appear in a signature — the generated
-  code namespace-qualifies and forward-declares them — if the C side
-  understands the layout, but a plain C library cannot. Enum types cannot
-  appear in an `extern` signature yet — pass `enum_to_i32(v)` instead.
+- Stick to C-compatible types: `i8`, `u8`, `i16`, `u16` (v0.17.0), `i32`,
+  `u32`, `f32`, `f64`, `bool`, `str` (`const char*`), `ptr<T>`, enum types
+  (v0.17.0), and `func(...)` parameters (callbacks, below). Narrow types map
+  to `int8_t`/`uint8_t`/`int16_t`/`uint16_t` in the generated signature, so
+  the C side must declare the matching width (`Uint8` channels, for
+  instance); a wider value passed into one keeps its low byte, with
+  out-of-range *literals* caught at compile time. Opaque C handles are
+  `ptr<void>`; a typed `ptr<T>` (e.g. `ptr<i32>`) is for C pointers you
+  intend to index, and it widens to `ptr<void>` implicitly where that is
+  declared (type it again later with `ptr_cast::<T>` — see
+  [Pointer casts](#pointer-casts-ptr_castt-v0170)). Vanta struct types can
+  appear in a signature — the generated code namespace-qualifies and
+  forward-declares them — if the C side understands the layout, but a plain
+  C library cannot. An enum type is emitted as its `enum class` with a fixed
+  `int32_t` underlying type, forward-declared ahead of the `extern "C"`
+  block together with the struct tags, so the C side may declare the
+  parameter/result as `int32_t` or a matching C enum.
 - A name declared twice — in one block, across blocks, or colliding with a
   Vanta function, builtin, or type — is a compile error.
 
@@ -839,7 +1002,11 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 `examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
 buildable example. `examples/callbacks.vnt` and `examples/callbacks_lib.c`
 are a second one: a callback that C calls twice, and a visitor receiving a
-`ptr<i32>` user-data pointer.
+`ptr<i32>` user-data pointer. `examples/enums_extern.vnt` with
+`examples/enums_extern_lib.c` is a third: an enum crossing into C and back,
+and `examples/narrow_ints.vnt` with `examples/narrow_ints_lib.c` shows
+exact-width parameters plus a C mirror struct reading a Vanta struct's
+bytes.
 
 ## SDL2 and a window (v0.12.0)
 
