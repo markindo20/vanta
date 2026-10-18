@@ -5,7 +5,7 @@ from enum import Enum, auto
 class TT(Enum):
     INT = auto(); FLOAT = auto(); STRING = auto(); IDENT = auto()
     FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto(); CONST = auto()
-    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto()
+    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto(); ENUM = auto()
     IMPORT = auto()
     IF = auto(); ELIF = auto(); ELSE = auto()
     WHILE = auto(); FOR = auto(); IN = auto()
@@ -26,6 +26,7 @@ KEYWORDS = {
     'func': TT.FUNC, 'let': TT.LET, 'mut': TT.MUT, 'return': TT.RETURN,
     'const': TT.CONST,
     'struct': TT.STRUCT, 'component': TT.COMPONENT, 'system': TT.SYSTEM,
+    'enum': TT.ENUM,
     'extern': TT.EXTERN, 'import': TT.IMPORT,
     'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE,
     'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,

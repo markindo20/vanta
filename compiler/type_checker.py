@@ -1,7 +1,7 @@
 from . import ast_nodes as A
 from .typesys import (
     Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType,
-    InferType, StructType, FuncType,
+    InferType, StructType, EnumType, FuncType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
@@ -14,6 +14,15 @@ def _contains_func_type(t) -> bool:
         return True
     if isinstance(t, (PtrType, ArrayType)):
         return _contains_func_type(t.inner)
+    return False
+
+
+def _contains_enum_type(t) -> bool:
+    """True when t is an enum type or wraps one (pointer/array/list)."""
+    if isinstance(t, EnumType):
+        return True
+    if isinstance(t, (PtrType, ArrayType, ListType)):
+        return _contains_enum_type(t.inner)
     return False
 
 
@@ -34,6 +43,7 @@ class TypeChecker:
         self.program = program
         self.filename = filename
         self.structs: dict[str, StructType] = {}
+        self.enums: dict[str, EnumType] = {}
         self.functions: dict[str, FuncSig] = {}
         self.constants: dict[str, Type] = {}
         # Function types seen anywhere in the program, mapped to the C++
@@ -127,6 +137,8 @@ class TypeChecker:
             return PRIM_TYPES[n]
         if n in self.structs:
             return self.structs[n]
+        if n in self.enums:
+            return self.enums[n]
         if n == 'List':
             raise CheckError("List requires an element type: List<T>", self.filename, te.pos)
         raise CheckError(f"unknown type '{n}'", self.filename, te.pos)
@@ -149,6 +161,8 @@ class TypeChecker:
         for d in self.program.decls:
             if isinstance(d, A.StructDecl):
                 self._register_struct(d)
+            elif isinstance(d, A.EnumDecl):
+                self._register_enum(d)
             elif isinstance(d, A.FuncDecl):
                 self._register_func(d)
             elif isinstance(d, A.ConstDecl):
@@ -157,8 +171,11 @@ class TypeChecker:
                 self._register_extern(d)
 
     def _register_struct(self, d):
-        if d.name in self.structs:
+        if d.name in self.structs or d.name in self.enums:
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
+        if d.name in self.functions:
+            raise CheckError(f"type name '{d.name}' collides with function",
+                             self.filename, d.pos)
         if d.name.startswith('FnPtr') and d.name[5:].isdigit():
             raise CheckError(
                 f"type name '{d.name}' is reserved for generated function-pointer aliases",
@@ -172,10 +189,29 @@ class TypeChecker:
             fields[fname] = self._resolve_type(ftype)
         self.structs[d.name] = StructType(d.name, fields, builtin=False)
 
+    def _register_enum(self, d):
+        if d.name in self.structs or d.name in self.enums:
+            raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
+        if d.name in self.functions:
+            raise CheckError(f"type name '{d.name}' collides with function",
+                             self.filename, d.pos)
+        if d.name.startswith('FnPtr') and d.name[5:].isdigit():
+            raise CheckError(
+                f"type name '{d.name}' is reserved for generated function-pointer aliases",
+                self.filename, d.pos)
+        if d.name == 'List':
+            raise CheckError("'List' is a reserved built-in type name", self.filename, d.pos)
+        members = {}
+        for (mname, mpos) in d.members:
+            if mname in members:
+                raise CheckError(f"duplicate member '{mname}'", self.filename, mpos)
+            members[mname] = len(members)
+        self.enums[d.name] = EnumType(d.name, members)
+
     def _register_func(self, d):
         if d.name in self.functions:
             raise CheckError(f"duplicate function '{d.name}'", self.filename, d.pos)
-        if d.name in self.structs:
+        if d.name in self.structs or d.name in self.enums:
             raise CheckError(f"function name '{d.name}' collides with type", self.filename, d.pos)
         params = []
         for p in d.params:
@@ -186,7 +222,7 @@ class TypeChecker:
     def _register_const(self, c):
         if c.name in self.constants:
             raise CheckError(f"duplicate constant '{c.name}'", self.filename, c.pos)
-        if c.name in self.structs:
+        if c.name in self.structs or c.name in self.enums:
             raise CheckError(f"constant '{c.name}' collides with type", self.filename, c.pos)
         if c.name in self.functions:
             raise CheckError(f"constant '{c.name}' collides with function", self.filename, c.pos)
@@ -211,7 +247,7 @@ class TypeChecker:
         for fd in d.funcs:
             if fd.name in self.functions:
                 raise CheckError(f"duplicate function '{fd.name}'", self.filename, fd.pos)
-            if fd.name in self.structs:
+            if fd.name in self.structs or fd.name in self.enums:
                 raise CheckError(f"function name '{fd.name}' collides with type", self.filename, fd.pos)
             params = []
             for p in fd.params:
@@ -221,6 +257,11 @@ class TypeChecker:
                 raise CheckError(
                     f"extern function '{fd.name}' cannot use function types; "
                     f"C callbacks are not supported yet",
+                    self.filename, fd.pos)
+            if _contains_enum_type(ret) or any(_contains_enum_type(t) for (_, t) in params):
+                raise CheckError(
+                    f"extern function '{fd.name}' cannot use enum types yet; "
+                    f"pass enum_to_i32(...) instead",
                     self.filename, fd.pos)
             self.functions[fd.name] = FuncSig(fd.name, params, ret, is_extern=True)
 
@@ -480,10 +521,10 @@ class TypeChecker:
             if ent is not None:
                 expr.type = ent[0]
                 return ent[0]
-            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert'):
+            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
-            if expr.name in self.structs or expr.name == 'List':
+            if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
                 raise CheckError(f"cannot use type '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.functions:
@@ -521,7 +562,19 @@ class TypeChecker:
         if isinstance(expr, A.Call):
             return self._check_call(expr)
         if isinstance(expr, A.Member):
+            if (isinstance(expr.obj, A.Name) and self._lookup(expr.obj.name) is None
+                    and expr.obj.name in self.enums):
+                et = self.enums[expr.obj.name]
+                if expr.field not in et.members:
+                    raise CheckError(f"enum '{et.name}' has no member '{expr.field}'",
+                                     self.filename, expr.pos)
+                expr.is_enum_member = True
+                expr.type = et
+                return et
             ot = self._check_expr(expr.obj)
+            if isinstance(ot, EnumType):
+                raise CheckError(f"enum values have no fields; write {ot}.Member",
+                                 self.filename, expr.pos)
             if isinstance(ot, StructType) and expr.field in ot.fields:
                 t = ot.fields[expr.field]
                 expr.type = t
@@ -591,6 +644,14 @@ class TypeChecker:
             if isinstance(lt, FuncType) or isinstance(rt, FuncType):
                 raise CheckError("function values cannot be compared",
                                  self.filename, expr.pos)
+            if isinstance(lt, EnumType) or isinstance(rt, EnumType):
+                if lt == rt and op in ('==', '!='):
+                    return BOOL
+                if lt == rt:
+                    raise CheckError(
+                        f"ordering comparisons are not supported on {lt}; use '==' or '!='",
+                        self.filename, expr.pos)
+                raise CheckError(f"cannot compare {lt} and {rt} with '{op}'", self.filename, expr.pos)
             if isinstance(lt, StructType) or isinstance(rt, StructType):
                 if (op in ('==', '!=') and isinstance(lt, StructType)
                         and lt == rt and lt.name in ("Vec2", "Vec3")):
@@ -700,6 +761,8 @@ class TypeChecker:
                                  self.filename, call.pos)
             if name == 'len':
                 return self._check_len(call)
+            if name == 'enum_to_i32':
+                return self._check_enum_to_i32(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.structs:
@@ -709,6 +772,10 @@ class TypeChecker:
                 return self._check_user_struct_ctor(st, call)
             if name in self.functions:
                 return self._check_func_call(name, call)
+            if name in self.enums:
+                raise CheckError(
+                    f"cannot construct '{name}'; use its members, e.g. {name}.Member",
+                    self.filename, call.pos)
             if name == 'List':
                 raise CheckError("a List is created from an Arena: arena.list::<T>()",
                                  self.filename, call.pos)
@@ -770,6 +837,23 @@ class TypeChecker:
         if not isinstance(at, (ArrayType, ListType)) and not (
                 isinstance(at, StructType) and at.name == "StrBuilder"):
             raise CheckError(f"len expects an array, a List, or a StrBuilder, got {at}",
+                             self.filename, call.pos)
+        call.type = I32
+        return I32
+
+    def _check_enum_to_i32(self, call: A.Call) -> Type:
+        if call.type_args:
+            raise CheckError("enum_to_i32 does not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("enum_to_i32 does not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != 1:
+            raise CheckError(f"enum_to_i32 takes one argument, got {len(call.args)}",
+                             self.filename, call.pos)
+        at = self._check_expr(call.args[0])
+        if not isinstance(at, EnumType):
+            raise CheckError(f"enum_to_i32 expects an enum value, got {at}",
                              self.filename, call.pos)
         call.type = I32
         return I32

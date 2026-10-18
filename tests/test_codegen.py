@@ -422,6 +422,65 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('void fn_note(vanta::StrBuilder v_b)', cpp)
         self.assertIn('fn_note(v_b);', cpp)
 
+    def test_enum_decl_emit(self):
+        cpp = gen("enum State:\n"
+                  "    Menu\n"
+                  "    Playing\n"
+                  "    Paused\n"
+                  "func main() -> void:\n"
+                  "    print_str(\"x\")\n")
+        self.assertIn('enum class State : int32_t { Menu = 0, Playing = 1, Paused = 2 };', cpp)
+
+    def test_enum_member_ref_emit(self):
+        cpp = gen("enum State:\n"
+                  "    Menu\n"
+                  "    Playing\n"
+                  "func main() -> void:\n"
+                  "    let s = State.Menu\n"
+                  "    if s == State.Playing:\n"
+                  "        print_str(\"p\")\n")
+        self.assertIn('State v_s = State::Menu;', cpp)
+        self.assertIn('(v_s == State::Playing)', cpp)
+
+    def test_enum_to_i32_emit(self):
+        cpp = gen("enum State:\n"
+                  "    Menu\n"
+                  "func main() -> void:\n"
+                  "    let s = State.Menu\n"
+                  "    print_i32(enum_to_i32(s))\n")
+        self.assertIn('vanta::print_i32(static_cast<int32_t>(v_s));', cpp)
+
+    def test_enum_struct_field_emit(self):
+        cpp = gen("enum State:\n"
+                  "    Menu\n"
+                  "struct Game:\n"
+                  "    state: State\n"
+                  "func main() -> void:\n"
+                  "    let g = Game(state: State.Menu)\n"
+                  "    print_i32(enum_to_i32(g.state))\n")
+        self.assertIn('State v_state;', cpp)
+        self.assertIn('Game{State::Menu}', cpp)
+
+    def test_enum_fnptr_alias_emit(self):
+        cpp = gen("enum Mode:\n"
+                  "    On\n"
+                  "func is_on(m: Mode) -> bool:\n"
+                  "    return m == Mode.On\n"
+                  "func apply(f: func(Mode) -> bool, m: Mode) -> bool:\n"
+                  "    return f(m)\n"
+                  "func main() -> void:\n"
+                  "    print_bool(apply(is_on, Mode.On))\n")
+        self.assertIn('using FnPtr0 = bool(*)(Mode);', cpp)
+
+    def test_str_returning_function_default_emit(self):
+        cpp = gen("func name(x: i32) -> str:\n"
+                  "    if x > 0:\n"
+                  "        return \"pos\"\n"
+                  "func main() -> void:\n"
+                  "    print_str(name(1))\n")
+        self.assertIn('return "";', cpp)
+        self.assertNotIn('return const char*{};', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

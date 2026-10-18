@@ -52,6 +52,13 @@ class StructDecl:
 
 
 @dataclass
+class EnumDecl:
+    name: str
+    members: List[Any]
+    pos: Pos
+
+
+@dataclass
 class ExternDecl:
     lib_name: str
     funcs: List['FuncDecl']

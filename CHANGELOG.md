@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.11.0 — 2026-10-18
+
+- Added enums: `enum Name:` declares a fixed set of named members, numbered
+  from 0 in declaration order and written `Name.Member` (e.g.
+  `State.Playing`). An enum is a first-class type — variables, struct
+  fields, function parameters and returns, arrays, `List<T>`, function
+  values, and imported modules all accept enum values unchanged.
+- Values compare with `==` and `!=`. Ordering comparisons on enums, and
+  compares between different enums or against numbers, are compile errors.
+  `enum_to_i32(v)` returns a member's number for printing, arithmetic, or
+  passing to an `extern` function (extern signatures cannot take enum types
+  directly yet). Enum values cannot be constructed (`State(1)` is an error),
+  and enum types have no fields — `s.Menu` suggests `State.Menu`.
+- Fixed: functions returning `str` never compiled — the implicit default
+  return that codegen appends was invalid C++ (`return const char*{};`).
+  A function that falls through now yields the empty string.
+- Fixed: a type declared after a function of the same name (`func P()` then
+  `struct P:`) is now reported as a collision instead of silently shadowing
+  the function.
+- New example `examples/enums.vnt`: a tiny state machine switching on a
+  `State` enum, plus `enum_to_i32` and iteration over an array of members;
+  plus 42 tests (383 total).
+
 ## v0.10.0 — 2026-10-18
 
 - Added `StrBuilder`, an arena-backed string builder: `arena.str_builder()`

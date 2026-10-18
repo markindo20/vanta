@@ -57,6 +57,16 @@ class StructType(Type):
     def __repr__(self): return self.name
 
 
+@dataclass(eq=False)
+class EnumType(Type):
+    name: str
+    members: Dict[str, int]
+    def __eq__(self, other):
+        return isinstance(other, EnumType) and self.name == other.name
+    def __hash__(self): return hash(self.name)
+    def __repr__(self): return self.name
+
+
 @dataclass(frozen=True)
 class FuncType(Type):
     params: Tuple[Type, ...]

@@ -1,0 +1,39 @@
+# Enums name a fixed set of states: flags, modes, and small state machines.
+
+enum State:
+    Menu
+    Playing
+    Paused
+    GameOver
+
+struct Game:
+    state: State
+    hp: i32
+
+func state_name(s: State) -> str:
+    if s == State.Menu:
+        return "menu"
+    elif s == State.Playing:
+        return "playing"
+    elif s == State.Paused:
+        return "paused"
+    return "game over"
+
+func main() -> void:
+    let g = Game(state: State.Menu, hp: 3)
+    print_str(state_name(g.state))         # menu
+
+    # enum_to_i32 turns a member into its position (0, 1, 2, ...).
+    mut s = State.Playing
+    print_str(state_name(s))               # playing
+    s = State.Paused
+    print_i32(enum_to_i32(s))              # 2
+
+    # Enum values work in arrays and loops like any other value.
+    let cycle: [State, 4] = [State.Menu, State.Playing, State.Paused, State.GameOver]
+    for i in range(0, len(cycle)):
+        print_str(state_name(cycle.at(i)))
+    # menu
+    # playing
+    # paused
+    # game over

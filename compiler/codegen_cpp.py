@@ -3,7 +3,7 @@ from . import VERSION
 from .formats import parse_format
 from .typesys import (
     PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType, InferType,
-    StructType, FuncType,
+    StructType, EnumType, FuncType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
 )
 
@@ -102,6 +102,7 @@ def cpp_type(t):
     if isinstance(t, StructType):
         if t.builtin: return 'vanta::' + t.name
         return t.name
+    if isinstance(t, EnumType): return t.name
     raise ValueError(f"unknown type {t}")
 
 
@@ -194,6 +195,10 @@ class CodeGen:
         self.emit('namespace vanta_user {')
         self.indent += 1
 
+        # Enums first: structs, constants, and signatures may use them.
+        for ed in [d for d in self.program.decls if isinstance(d, A.EnumDecl)]:
+            self._gen_enum(ed)
+
         # Function-pointer aliases, innermost first.
         if self.tc.func_types:
             for ft in self._ordered_func_types():
@@ -245,6 +250,12 @@ class CodeGen:
         prefix = '' if sig.is_extern else 'fn_'
         return f'{ret_s} {prefix}{fn.name}({params})'
 
+    def _gen_enum(self, ed: A.EnumDecl):
+        et = self.tc.enums[ed.name]
+        body = ', '.join(f'{m} = {v}' for m, v in et.members.items())
+        self.emit(f'enum class {ed.name} : int32_t {{ {body} }};')
+        self.emit('')
+
     def _gen_struct(self, sd: A.StructDecl):
         st = self.tc.structs[sd.name]
         self.emit(f'struct {sd.name} {{')
@@ -263,7 +274,10 @@ class CodeGen:
             self._gen_stmt(stmt)
         ret_type = self.tc.functions[fn.name].ret
         if ret_type is not VOID:
-            self.emit(f'return {self._ctype(ret_type)}{{}};')
+            if ret_type is STR:
+                self.emit('return "";')
+            else:
+                self.emit(f'return {self._ctype(ret_type)}{{}};')
         self.indent -= 1
         self.emit('}')
         self.emit('')
@@ -421,6 +435,8 @@ class CodeGen:
                 return f'(!{self._expr(e.operand)})'
             return f'(-{self._expr(e.operand)})'
         if isinstance(e, A.Member):
+            if getattr(e, 'is_enum_member', False):
+                return f'{e.obj.name}::{e.field}'
             obj_t = getattr(e.obj, 'type', None)
             base = self._expr(e.obj)
             if isinstance(obj_t, StructType) and obj_t.builtin:
@@ -467,6 +483,8 @@ class CodeGen:
                         isinstance(t, StructType) and t.name == 'StrBuilder'):
                     return f'int32_t(({self._expr(c.args[0])}).h->len)'
                 return f'int32_t(({self._expr(c.args[0])}).size())'
+            if name == 'enum_to_i32':
+                return f'static_cast<int32_t>({self._expr(c.args[0])})'
             if name in ('print_fmt', 'write_fmt'):
                 return self._fmt_call(c, name)
             if name == 'assert':

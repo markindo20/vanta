@@ -73,6 +73,8 @@ class Parser:
             return self.parse_struct(False)
         if t.type == TT.COMPONENT:
             return self.parse_struct(True)
+        if t.type == TT.ENUM:
+            return self.parse_enum()
         if t.type == TT.EXTERN:
             return self.parse_extern()
         if t.type == TT.CONST:
@@ -171,6 +173,20 @@ class Parser:
             fields.append((fn.value, ft, A.Pos(fn.line, fn.col)))
         self.expect(TT.DEDENT)
         return A.StructDecl(name, fields, is_component, A.Pos(tok.line, tok.col))
+
+    def parse_enum(self):
+        tok = self.advance()
+        name = self.expect(TT.IDENT).value
+        self.expect(TT.COLON)
+        self.expect(TT.NEWLINE)
+        self.expect(TT.INDENT)
+        members = []
+        while not self.check(TT.DEDENT):
+            mn = self.expect(TT.IDENT)
+            self.expect(TT.NEWLINE)
+            members.append((mn.value, A.Pos(mn.line, mn.col)))
+        self.expect(TT.DEDENT)
+        return A.EnumDecl(name, members, A.Pos(tok.line, tok.col))
 
     def parse_type(self):
         t = self.peek()

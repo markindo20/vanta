@@ -1112,6 +1112,247 @@ class TypeCheckerTests(unittest.TestCase):
             "    b.append_str(\"abc\")\n"
             "    print_i32(len(b))\n")
 
+    def test_enum_declare_and_use(self):
+        run("enum State:\n"
+            "    Menu\n"
+            "    Playing\n"
+            "func f() -> void:\n"
+            "    let s = State.Menu\n"
+            "    if s == State.Playing:\n"
+            "        print_str(\"playing\")\n")
+
+    def test_enum_members_numbered_in_order(self):
+        prog, tc = run("enum State:\n"
+                       "    Menu\n"
+                       "    Playing\n"
+                       "    Paused\n"
+                       "func f() -> void:\n"
+                       "    let s = State.Menu\n")
+        et = tc.enums['State']
+        self.assertEqual(et.members, {'Menu': 0, 'Playing': 1, 'Paused': 2})
+
+    def test_enum_in_struct_and_signatures(self):
+        run("enum Mode:\n"
+            "    Off\n"
+            "    On\n"
+            "struct Lamp:\n"
+            "    mode: Mode\n"
+            "func toggle(m: Mode) -> Mode:\n"
+            "    if m == Mode.On:\n"
+            "        return Mode.Off\n"
+            "    return Mode.On\n"
+            "func main() -> void:\n"
+            "    let l = Lamp(mode: Mode.Off)\n"
+            "    print_i32(enum_to_i32(toggle(l.mode)))\n")
+
+    def test_enum_inequality(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func main() -> void:\n"
+            "    let a = State.A\n"
+            "    let b = State.B\n"
+            "    if a != b and a == State.A:\n"
+            "        print_str(\"ok\")\n")
+
+    def test_enum_in_array(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func main() -> void:\n"
+            "    let xs: [State, 2] = [State.A, State.B]\n"
+            "    if xs.at(1) == State.B:\n"
+            "        print_str(\"b\")\n")
+
+    def test_enum_in_list(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(4096)\n"
+            "    let xs = arena.list::<State>()\n"
+            "    xs.push(State.A)\n"
+            "    xs.push(State.B)\n"
+            "    if xs.at(0) == State.A:\n"
+            "        print_str(\"a\")\n"
+            "    print_i32(len(xs))\n")
+
+    def test_enum_rebind_requires_mut(self):
+        with self.assertRaisesRegex(CheckError, "invalid assignment target"):
+            run("enum State:\n"
+                "    A\n"
+                "    B\n"
+                "func main() -> void:\n"
+                "    let s = State.A\n"
+                "    s = State.B\n")
+
+    def test_enum_mut_rebind(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func main() -> void:\n"
+            "    mut s = State.A\n"
+            "    s = State.B\n"
+            "    print_i32(enum_to_i32(s))\n")
+
+    def test_enum_unknown_member(self):
+        with self.assertRaisesRegex(CheckError, "enum 'State' has no member 'Purple'"):
+            run("enum State:\n"
+                "    Menu\n"
+                "func main() -> void:\n"
+                "    let s = State.Purple\n")
+
+    def test_enum_ordering_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ordering comparisons are not supported on State"):
+            run("enum State:\n"
+                "    A\n"
+                "    B\n"
+                "func main() -> void:\n"
+                "    if State.A < State.B:\n"
+                "        print_str(\"x\")\n")
+
+    def test_enum_compare_mismatched_enums_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot compare A and B"):
+            run("enum A:\n"
+                "    X\n"
+                "enum B:\n"
+                "    Y\n"
+                "func main() -> void:\n"
+                "    if A.X == B.Y:\n"
+                "        print_str(\"x\")\n")
+
+    def test_enum_compare_with_int_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot compare State and <int-lit>"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let s = State.A\n"
+                "    if s == 1:\n"
+                "        print_str(\"x\")\n")
+
+    def test_enum_wrong_initializer_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot assign <int-lit> to State"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let s: State = 1\n")
+
+    def test_enum_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use type 'State' as a value"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let x = State\n")
+
+    def test_enum_construction_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot construct 'State'"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let x = State(1)\n")
+
+    def test_enum_member_on_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "enum values have no fields; write State.Member"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let s = State.A\n"
+                "    let x = s.A\n")
+
+    def test_enum_duplicate_member(self):
+        with self.assertRaisesRegex(CheckError, "duplicate member 'Menu'"):
+            run("enum State:\n"
+                "    Menu\n"
+                "    Menu\n")
+
+    def test_enum_duplicate_type(self):
+        with self.assertRaisesRegex(CheckError, "duplicate type 'State'"):
+            run("enum State:\n    A\n"
+                "enum State:\n    B\n")
+
+    def test_enum_struct_collision(self):
+        with self.assertRaisesRegex(CheckError, "duplicate type 'State'"):
+            run("struct State:\n    x: i32\n"
+                "enum State:\n    A\n")
+
+    def test_enum_func_collision(self):
+        with self.assertRaisesRegex(CheckError, "function name 'State' collides with type"):
+            run("enum State:\n    A\n"
+                "func State() -> void:\n    print_str(\"x\")\n")
+
+    def test_type_after_func_collision(self):
+        with self.assertRaisesRegex(CheckError, "type name 'State' collides with function"):
+            run("func State() -> void:\n    print_str(\"x\")\n"
+                "enum State:\n    A\n")
+
+    def test_struct_after_func_collision(self):
+        with self.assertRaisesRegex(CheckError, "type name 'P' collides with function"):
+            run("func P() -> void:\n    print_str(\"x\")\n"
+                "struct P:\n    x: i32\n")
+
+    def test_enum_const_collision(self):
+        with self.assertRaisesRegex(CheckError, "constant 'State' collides with type"):
+            run("enum State:\n    A\n"
+                "const State = 5\n")
+
+    def test_enum_reserved_type_names(self):
+        with self.assertRaisesRegex(CheckError, "'List' is a reserved built-in type name"):
+            run("enum List:\n    A\n")
+        with self.assertRaisesRegex(CheckError, "reserved for generated function-pointer aliases"):
+            run("enum FnPtr0:\n    A\n")
+
+    def test_enum_to_i32(self):
+        run("enum State:\n"
+            "    A\n"
+            "func main() -> void:\n"
+            "    let n: i32 = enum_to_i32(State.A)\n")
+
+    def test_enum_to_i32_wrong_arg(self):
+        with self.assertRaisesRegex(CheckError, "enum_to_i32 expects an enum value, got <int-lit>"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    print_i32(enum_to_i32(3))\n")
+
+    def test_enum_to_i32_arity(self):
+        with self.assertRaisesRegex(CheckError, "enum_to_i32 takes one argument, got 2"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    print_i32(enum_to_i32(State.A, State.A))\n")
+
+    def test_enum_to_i32_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'enum_to_i32' as a value"):
+            run("enum State:\n"
+                "    A\n"
+                "func main() -> void:\n"
+                "    let f = enum_to_i32\n")
+
+    def test_enum_in_extern_rejected(self):
+        with self.assertRaisesRegex(CheckError, "extern function 'set_mode' cannot use enum types yet"):
+            run("enum Mode:\n"
+                "    On\n"
+                "extern \"c\" {\n"
+                "    func set_mode(m: Mode) -> void\n"
+                "}\n")
+
+    def test_enum_in_extern_list_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use enum types yet"):
+            run("enum Mode:\n"
+                "    On\n"
+                "extern \"c\" {\n"
+                "    func f(xs: List<Mode>) -> void\n"
+                "}\n")
+
+    def test_enum_to_i32_extern_ok(self):
+        run("enum Mode:\n"
+            "    On\n"
+            "extern \"c\" {\n"
+            "    func set_mode(m: i32) -> void\n"
+            "}\n"
+            "func main() -> void:\n"
+            "    set_mode(enum_to_i32(Mode.On))\n")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -795,6 +795,130 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_enums_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'enums.vnt'),
+                            ['menu', 'playing', '2', 'menu', 'playing',
+                             'paused', 'game over'])
+
+    def test_enum_state_machine(self):
+        src = (
+            "enum State:\n"
+            "    Menu\n"
+            "    Playing\n"
+            "    Paused\n"
+            "    GameOver\n"
+            "struct Game:\n"
+            "    state: State\n"
+            "    hp: i32\n"
+            "func state_name(s: State) -> str:\n"
+            "    if s == State.Menu:\n"
+            "        return \"menu\"\n"
+            "    elif s == State.Playing:\n"
+            "        return \"playing\"\n"
+            "    elif s == State.Paused:\n"
+            "        return \"paused\"\n"
+            "    return \"game over\"\n"
+            "func main() -> void:\n"
+            "    let g = Game(state: State.Menu, hp: 3)\n"
+            "    print_str(state_name(g.state))\n"
+            "    mut s = State.Playing\n"
+            "    print_str(state_name(s))\n"
+            "    print_i32(enum_to_i32(s))\n"
+            "    s = State.GameOver\n"
+            "    if s != State.Playing:\n"
+            "        print_str(state_name(s))\n"
+            "    let cycle: [State, 4] = [State.Menu, State.Playing, State.Paused, State.GameOver]\n"
+            "    for i in range(0, len(cycle)):\n"
+            "        print_i32(enum_to_i32(cycle.at(i)))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_enum_')
+        try:
+            path = os.path.join(tmp, 'states.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['menu', 'playing', '1', 'game over',
+                                       '0', '1', '2', '3'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_enum_field_transition(self):
+        src = (
+            "enum State:\n"
+            "    Menu\n"
+            "    Playing\n"
+            "func is_playing(s: State) -> bool:\n"
+            "    return s == State.Playing\n"
+            "struct Game:\n"
+            "    state: State\n"
+            "func main() -> void:\n"
+            "    mut g = Game(state: State.Menu)\n"
+            "    print_bool(is_playing(g.state))\n"
+            "    g.state = State.Playing\n"
+            "    print_bool(is_playing(g.state))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_enum_field_')
+        try:
+            path = os.path.join(tmp, 'field.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['false', 'true'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_enum_list_and_function_values(self):
+        src = (
+            "enum Suit:\n"
+            "    Clubs\n"
+            "    Diamonds\n"
+            "func is_clubs(s: Suit) -> bool:\n"
+            "    return s == Suit.Clubs\n"
+            "func apply(f: func(Suit) -> bool, s: Suit) -> bool:\n"
+            "    return f(s)\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(4096)\n"
+            "    let xs = arena.list::<Suit>()\n"
+            "    xs.push(Suit.Clubs)\n"
+            "    xs.push(Suit.Diamonds)\n"
+            "    xs.push(Suit.Clubs)\n"
+            "    print_i32(len(xs))\n"
+            "    print_i32(enum_to_i32(xs.at(1)))\n"
+            "    let p = xs.pop()\n"
+            "    print_i32(enum_to_i32(p))\n"
+            "    if is_clubs(xs[0]):\n"
+            "        print_str(\"clubs\")\n"
+            "    if apply(is_clubs, Suit.Clubs):\n"
+            "        print_str(\"applied\")\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_enum_list_')
+        try:
+            path = os.path.join(tmp, 'suit.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['3', '1', '0', 'clubs', 'applied'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_returning_function(self):
+        # Regression: functions with a str return type used to emit the
+        # invalid default 'return const char*{};'.
+        src = (
+            "func pick(x: i32) -> str:\n"
+            "    if x > 0:\n"
+            "        return \"pos\"\n"
+            "func main() -> void:\n"
+            "    print_str(pick(1))\n"
+            "    print_str(pick(0))\n"
+            "    print_str(\"end\")\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_strret_')
+        try:
+            path = os.path.join(tmp, 'strret.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['pos', '', 'end'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == '__main__':
     unittest.main()
