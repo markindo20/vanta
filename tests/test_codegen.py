@@ -481,6 +481,45 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('return "";', cpp)
         self.assertNotIn('return const char*{};', cpp)
 
+    def test_extern_ptr_void_emit(self):
+        cpp = gen("extern \"sdl2\" {\n"
+                  "    func SDL_CreateWindow(title: str, flags: u32) -> ptr<void>\n"
+                  "    func SDL_DestroyWindow(window: ptr<void>) -> void\n"
+                  "}\n"
+                  "func main() -> void:\n"
+                  "    let w = SDL_CreateWindow(\"x\", 4)\n"
+                  "    SDL_DestroyWindow(w)\n")
+        self.assertIn('void* SDL_CreateWindow(const char* v_title, uint32_t v_flags);', cpp)
+        self.assertIn('void SDL_DestroyWindow(void* v_window);', cpp)
+
+    def test_ptr_void_widening_emit(self):
+        cpp = gen("func take(p: ptr<void>) -> void:\n"
+                  "    print_str(\"x\")\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(256)\n"
+                  "    let xs = a.alloc::<i32>(1)\n"
+                  "    take(xs)\n")
+        self.assertIn('void fn_take(void* v_p)', cpp)
+        self.assertIn('fn_take(v_xs);', cpp)
+
+    def test_ptr_is_null_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(256)\n"
+                  "    let xs = a.alloc::<i32>(1)\n"
+                  "    print_bool(ptr_is_null(xs))\n")
+        self.assertIn('vanta::print_bool(((v_xs) == nullptr));', cpp)
+
+    def test_ptr_returning_function_default_emit(self):
+        cpp = gen("extern \"c\" {\n"
+                  "    func mk() -> ptr<void>\n"
+                  "}\n"
+                  "func maybe() -> ptr<void>:\n"
+                  "    print_str(\"x\")\n"
+                  "func main() -> void:\n"
+                  "    print_bool(ptr_is_null(maybe()))\n")
+        self.assertIn('return nullptr;', cpp)
+        self.assertNotIn('void*{}', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

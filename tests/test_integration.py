@@ -13,6 +13,27 @@ def _have_compiler():
     return path is not None
 
 
+def _find_sdl2():
+    """How to build against SDL2, or None when it is not available."""
+    if os.name == 'nt':
+        lib_dir = r'C:\msys64\mingw64\lib'
+        if os.path.exists(os.path.join(lib_dir, 'libSDL2.dll.a')):
+            return {'lib_dirs': [lib_dir], 'libs': ['SDL2']}
+        return None
+    cfg = shutil.which('sdl2-config')
+    if cfg:
+        out = subprocess.run([cfg, '--libs'], capture_output=True, text=True).stdout
+        lib_dirs = [tok[2:] for tok in out.split() if tok.startswith('-L')]
+        return {'lib_dirs': lib_dirs, 'libs': ['SDL2']}
+    import ctypes.util
+    if ctypes.util.find_library('SDL2'):
+        return {'lib_dirs': [], 'libs': ['SDL2']}
+    return None
+
+
+SDL2 = _find_sdl2()
+
+
 @unittest.skipUnless(_have_compiler(), "no C++17 compiler available")
 class IntegrationTests(unittest.TestCase):
     def _build_and_run(self, source, expected_lines):
@@ -916,6 +937,50 @@ class IntegrationTests(unittest.TestCase):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(src)
             self._build_and_run(path, ['pos', '', 'end'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _build_sdl(self, source_path, tmp):
+        name, path = find_cxx_compiler()
+        prog, tc = _frontend_only(source_path)
+        cpp = os.path.join(tmp, 'main.cpp')
+        _emit_source(prog, tc, cpp)
+        exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+        from compiler.driver import _compiler_cmd
+        cmd = _compiler_cmd(name, path, cpp, exe, release=True,
+                            lib_dirs=SDL2['lib_dirs'], libs=SDL2['libs'])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+        return exe
+
+    def test_sdl_examples_typecheck(self):
+        # Pure frontend: needs no SDL2 at all, so it runs everywhere.
+        for fn in ('sdl_window.vnt', 'sdl_game.vnt'):
+            _frontend_only(os.path.join(EXAMPLES, fn))
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_window_headless(self):
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlwin_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_window.vnt'), tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '120'], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['frames 120'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_game_headless(self):
+        # rand() is deterministic, the dummy driver produces no input, so the
+        # whole simulation is reproducible: 600 frames, one catch, two misses.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlgame_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_game.vnt'), tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '600'], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['score 1 misses 2'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

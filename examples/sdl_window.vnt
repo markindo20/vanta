@@ -1,0 +1,71 @@
+# The smallest Vanta + SDL2 program: open a window and clear it to a colour.
+# Close the window (or press Esc) to quit.
+#
+#   python main.py run examples/sdl_window.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# Optional argument: a frame limit, so the same binary can run a quick
+# headless smoke test without a display:
+#
+#   set SDL_VIDEODRIVER=dummy
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_RenderPresent(renderer: ptr<void>) -> void
+    func SDL_PollEvent(event: ptr<i32>) -> i32
+}
+
+const EV_QUIT: i32 = 256        # SDL_QUIT
+const EV_KEYDOWN: i32 = 768     # SDL_KEYDOWN
+const KEY_ESCAPE: i32 = 27      # SDLK_ESCAPE
+
+func main() -> void:
+    if SDL_Init(32) != 0:       # SDL_INIT_VIDEO
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta", 100, 100, 480, 320, 4)
+    if ptr_is_null(window):
+        print_str("SDL_CreateWindow failed")
+        SDL_Quit()
+        return
+    mut renderer = SDL_CreateRenderer(window, -1, 6)   # accelerated + vsync
+    if ptr_is_null(renderer):
+        renderer = SDL_CreateRenderer(window, -1, 0)   # any renderer (headless)
+    if ptr_is_null(renderer):
+        print_str("SDL_CreateRenderer failed")
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
+
+    let arena = Arena(256)
+    let ev = arena.alloc::<i32>(16)
+    mut running = true
+    mut frames = 0
+    mut max_frames = 0
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            let t = ev[0]
+            if t == EV_QUIT:
+                running = false
+            elif t == EV_KEYDOWN and ev[5] == KEY_ESCAPE:
+                running = false
+        SDL_SetRenderDrawColor(renderer, 30, 90, 160, 255)
+        SDL_RenderClear(renderer)
+        SDL_RenderPresent(renderer)
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    print_fmt("frames {}", frames)

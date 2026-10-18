@@ -521,7 +521,8 @@ class TypeChecker:
             if ent is not None:
                 expr.type = ent[0]
                 return ent[0]
-            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32'):
+            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32',
+                             'ptr_is_null'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
@@ -601,6 +602,11 @@ class TypeChecker:
             ot = self._check_expr(expr.obj)
             it = self._check_expr(expr.index)
             self._coerce_value(expr.index, it, I32, expr.pos, "index")
+            if isinstance(ot, PtrType) and ot.inner is VOID:
+                raise CheckError(
+                    "cannot index a ptr<void> (it has no element type); "
+                    "declare the pointer with the element type, e.g. ptr<i32>",
+                    self.filename, expr.pos)
             if isinstance(ot, (PtrType, ArrayType, ListType)):
                 expr.type = ot.inner
                 return ot.inner
@@ -736,6 +742,11 @@ class TypeChecker:
                 return
             raise CheckError(f"{ctx}: cannot convert {actual} to {expected}",
                              self.filename, pos)
+        if (isinstance(expected, PtrType) and expected.inner is VOID
+                and isinstance(actual, PtrType)):
+            # C-style widening: any T* is accepted where void* is expected.
+            expr.type = expected
+            return
         raise CheckError(f"{ctx}: cannot assign {actual} to {expected}", self.filename, pos)
 
     def _default_type(self, t: Type, expr) -> Type:
@@ -763,6 +774,8 @@ class TypeChecker:
                 return self._check_len(call)
             if name == 'enum_to_i32':
                 return self._check_enum_to_i32(call)
+            if name == 'ptr_is_null':
+                return self._check_ptr_is_null(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.structs:
@@ -857,6 +870,23 @@ class TypeChecker:
                              self.filename, call.pos)
         call.type = I32
         return I32
+
+    def _check_ptr_is_null(self, call: A.Call) -> Type:
+        if call.type_args:
+            raise CheckError("ptr_is_null does not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("ptr_is_null does not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != 1:
+            raise CheckError(f"ptr_is_null takes one argument, got {len(call.args)}",
+                             self.filename, call.pos)
+        at = self._check_expr(call.args[0])
+        if not isinstance(at, PtrType):
+            raise CheckError(f"ptr_is_null expects a pointer, got {at}",
+                             self.filename, call.pos)
+        call.type = BOOL
+        return BOOL
 
     def _check_at(self, call: A.Call, arr: ArrayType) -> Type:
         if call.type_args:
@@ -1043,6 +1073,8 @@ class TypeChecker:
                 at = self._check_expr(call.args[0])
                 self._coerce_value(call.args[0], at, I32, call.pos, "alloc count")
                 inner = self._resolve_type(call.type_args[0])
+                if inner is VOID:
+                    raise CheckError("cannot allocate void", self.filename, call.pos)
                 t = PtrType(inner)
                 call.type = t
                 return t

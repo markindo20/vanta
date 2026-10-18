@@ -2,6 +2,35 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.12.0 — 2026-10-18
+
+- SDL2 support, shown end to end. `examples/sdl_window.vnt` opens a window
+  and clears it to a colour; `examples/sdl_game.vnt` is the first playable
+  Vanta game — move the paddle with Left/Right (or A/D) to catch falling
+  coins, Esc or the close button quits. Both are pure `extern`
+  declarations, so no SDL headers are involved at compile time:
+
+  ```powershell
+  python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+  ```
+
+- Pointers widen to `ptr<void>` implicitly, matching C's conversion to
+  `void*`: any `ptr<T>` is accepted where `ptr<void>` is expected, which
+  is how opaque C handles (`SDL_Window`, `SDL_Renderer`, ...) are typed.
+  The narrowing direction stays an error, and a `ptr<void>` cannot be
+  indexed — it has no element type.
+- New builtin `ptr_is_null(p) -> bool`: compares any pointer (including
+  `ptr<void>`) against null so failed calls can be handled. Pointer
+  bindings can be reassigned with `mut`, and user functions may take and
+  return pointers.
+- Fixed: functions returning pointers never compiled — the implicit
+  default return was invalid C++ (`T*{}`); a fallthrough now yields
+  `nullptr`. Same bug class as the v0.11.0 `str` fix.
+- Both SDL examples take an optional frame-limit argument and run headless
+  under `SDL_VIDEODRIVER=dummy`, so the test suite builds, links, and runs
+  them for real; CI installs SDL2 on Linux, macOS, and Windows. 20 new
+  tests (403 total).
+
 ## v0.11.0 — 2026-10-18
 
 - Added enums: `enum Name:` declares a fixed set of named members, numbered

@@ -276,6 +276,8 @@ class CodeGen:
         if ret_type is not VOID:
             if ret_type is STR:
                 self.emit('return "";')
+            elif isinstance(ret_type, PtrType):
+                self.emit('return nullptr;')
             else:
                 self.emit(f'return {self._ctype(ret_type)}{{}};')
         self.indent -= 1
@@ -485,6 +487,8 @@ class CodeGen:
                 return f'int32_t(({self._expr(c.args[0])}).size())'
             if name == 'enum_to_i32':
                 return f'static_cast<int32_t>({self._expr(c.args[0])})'
+            if name == 'ptr_is_null':
+                return f'(({self._expr(c.args[0])}) == nullptr)'
             if name in ('print_fmt', 'write_fmt'):
                 return self._fmt_call(c, name)
             if name == 'assert':

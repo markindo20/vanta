@@ -1353,6 +1353,107 @@ class TypeCheckerTests(unittest.TestCase):
             "func main() -> void:\n"
             "    set_mode(enum_to_i32(Mode.On))\n")
 
+    def test_ptr_void_widening_in_argument(self):
+        run("func take(p: ptr<void>) -> void:\n"
+            "    print_str(\"ok\")\n"
+            "func main() -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let xs = a.alloc::<i32>(4)\n"
+            "    take(xs)\n")
+
+    def test_ptr_void_widening_in_return(self):
+        run("func wrap(p: ptr<i32>) -> ptr<void>:\n"
+            "    return p\n"
+            "func main() -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let xs = a.alloc::<i32>(1)\n"
+            "    let w = wrap(xs)\n"
+            "    print_bool(ptr_is_null(w))\n")
+
+    def test_ptr_widening_only_to_void(self):
+        with self.assertRaisesRegex(CheckError, "cannot assign ptr<i32> to ptr<f32>"):
+            run("func take(p: ptr<f32>) -> void:\n"
+                "    print_str(\"x\")\n"
+                "func main() -> void:\n"
+                "    let a = Arena(256)\n"
+                "    let xs = a.alloc::<i32>(4)\n"
+                "    take(xs)\n")
+
+    def test_ptr_void_not_narrowed_to_typed(self):
+        with self.assertRaisesRegex(CheckError, "cannot assign ptr<void> to ptr<i32>"):
+            run("extern \"c\" {\n"
+                "    func mk() -> ptr<void>\n"
+                "}\n"
+                "func take(p: ptr<i32>) -> void:\n"
+                "    print_str(\"x\")\n"
+                "func main() -> void:\n"
+                "    take(mk())\n")
+
+    def test_ptr_void_cannot_be_indexed(self):
+        with self.assertRaisesRegex(CheckError, "cannot index a ptr<void>"):
+            run("extern \"c\" {\n"
+                "    func mk() -> ptr<void>\n"
+                "}\n"
+                "func main() -> void:\n"
+                "    let p = mk()\n"
+                "    print_i32(p[0])\n")
+
+    def test_alloc_void_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot allocate void"):
+            run("func main() -> void:\n"
+                "    let a = Arena(256)\n"
+                "    let xs = a.alloc::<void>(1)\n")
+
+    def test_ptr_is_null(self):
+        run("func main() -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let xs = a.alloc::<i32>(1)\n"
+            "    if ptr_is_null(xs):\n"
+            "        print_str(\"null\")\n")
+
+    def test_ptr_is_null_on_ptr_void(self):
+        run("extern \"c\" {\n"
+            "    func mk() -> ptr<void>\n"
+            "}\n"
+            "func main() -> void:\n"
+            "    if not ptr_is_null(mk()):\n"
+            "        print_str(\"got\")\n")
+
+    def test_ptr_is_null_wrong_arg(self):
+        with self.assertRaisesRegex(CheckError, "ptr_is_null expects a pointer, got <int-lit>"):
+            run("func main() -> void:\n"
+                "    print_bool(ptr_is_null(3))\n")
+
+    def test_ptr_is_null_arity(self):
+        with self.assertRaisesRegex(CheckError, "ptr_is_null takes one argument, got 2"):
+            run("func main() -> void:\n"
+                "    let a = Arena(256)\n"
+                "    let xs = a.alloc::<i32>(1)\n"
+                "    print_bool(ptr_is_null(xs, xs))\n")
+
+    def test_ptr_is_null_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_is_null' as a value"):
+            run("func main() -> void:\n"
+                "    let f = ptr_is_null\n")
+
+    def test_ptr_mut_rebind(self):
+        run("extern \"c\" {\n"
+            "    func mk() -> ptr<void>\n"
+            "}\n"
+            "func main() -> void:\n"
+            "    mut p = mk()\n"
+            "    p = mk()\n"
+            "    print_bool(ptr_is_null(p))\n")
+
+    def test_ptr_rebind_requires_mut(self):
+        with self.assertRaisesRegex(CheckError, "invalid assignment target"):
+            run("extern \"c\" {\n"
+                "    func mk() -> ptr<void>\n"
+                "}\n"
+                "func main() -> void:\n"
+                "    let p = mk()\n"
+                "    p = mk()\n")
+
 
 if __name__ == '__main__':
     unittest.main()
