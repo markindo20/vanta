@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.3.1)
+# Vanta — a game-oriented systems language (v0.4.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -66,10 +66,10 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | Path | Contents |
 |---|---|
 | `main.py` | CLI entry point |
-| `compiler/` | Python frontend: lexer, parser, type checker, C++ code generator, driver |
+| `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (164 tests) |
+| `tests/` | `unittest` suite (176 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -87,6 +87,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `report.vnt` | Formatted output and string building, with a command-line argument |
 | `extern_demo.vnt` | `extern` declarations linking a C library (C side: `extern_demo_lib.c`) |
 | `file_io.vnt` | `file_exists` / `file_read` / `file_write`, with a path from the command line |
+| `imports_demo.vnt` | A multi-file program: `import "imports_demo_lib.vnt"` |
 
 ## Tests
 
@@ -106,11 +107,10 @@ compiler, set the `CXX` environment variable.
 
 ## Status
 
-Vanta is a prototype, not a finished language. Programs can link against C
-libraries, read command-line arguments, produce formatted output, and read and
-write files, but the remaining gaps are real:
+Vanta is a prototype, not a finished language. Programs can span multiple
+files, link against C libraries, read command-line arguments, produce formatted
+output, and read and write files, but the remaining gaps are real:
 
-- no imports or multi-file programs
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from it
 - no 2D arrays (flatten by hand)

@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.3.1)
+# Vanta Language Reference (v0.4.0)
 
 This is the reference for the language as implemented at tag `v0.2.6`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -411,6 +411,42 @@ first NUL when its contents are passed to string operations.
 
 `examples/file_io.vnt` reads a file named on the command line and writes a copy
 to `<path>.copy`.
+
+## Imports (v0.4.0)
+
+`import` merges another file's declarations into the program:
+
+```vanta
+import "imports_demo_lib.vnt"
+
+func main() -> void:
+    let sp = sprite_at(3, 2)
+    print_i32(sprite_pixel(sp))
+```
+
+- The path is a string literal resolved **relative to the file containing the
+  import**. There is no search path, and no implicit extension — write
+  `import "lib/math.vnt"` in full.
+- Vanta has a single flat namespace. An import makes the other file's
+  functions, structs, constants, and `extern` declarations available as if
+  they were written in the importing file; they are used by their bare names.
+  A name declared twice across any files is a compile error.
+- Imports are transitive, and each file is loaded once no matter how many
+  times it is imported — importing a file twice, or from two files, still
+  adds its declarations exactly once.
+- Import cycles are a compile error, reported with the chain:
+  `a.vnt: import cycle: a.vnt -> b.vnt -> a.vnt`.
+- A missing import is a compile error at the import statement:
+  `main.vnt:1:1: cannot open import 'lib/nope.vnt'`.
+- Errors inside an imported file name that file, not the entry file.
+- Imports may appear anywhere among top-level declarations; the convention is
+  at the top of the file.
+
+`examples/imports_demo.vnt` and `examples/imports_demo_lib.vnt` are a complete
+example.
+
+There is no per-module namespacing, no visibility control (`pub`), and no
+package manager: an import is a path on disk.
 
 ## Operators
 
