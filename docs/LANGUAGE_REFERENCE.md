@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.14.0)
+# Vanta Language Reference (v0.15.0)
 
-This is the reference for the language as implemented at tag `v0.14.0`. Every
+This is the reference for the language as implemented at tag `v0.15.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -409,6 +409,17 @@ print_i32(len(xs))     # 1
   through it, and an out-of-bounds index stops the program with
   `vanta: index I out of bounds (size N) at line L`.
 - `xs[i]` is the unchecked form, exactly as for fixed-size arrays.
+- `xs.insert(i, v)` inserts `v` at index `i`, shifting the rest right; `i` may
+  be `len(xs)`, which is the same as `push`. An out-of-range index stops the
+  program with `vanta: insert index I out of bounds (size N) at line L`.
+- `xs.remove(i)` removes and returns the element at index `i`, shifting the
+  rest left. An out-of-range index stops the program with
+  `vanta: remove index I out of bounds (size N) at line L`.
+- `xs.sort(cmp)` sorts in place with a comparator — a function value
+  `func(T, T) -> i32` that returns a negative number, zero, or a positive
+  number for less-than, equal, greater-than. The sort is **stable** (elements
+  the comparator calls equal keep their order) and costs `O(n log n)`
+  comparisons.
 
 **A `List<T>` is a handle, not the storage.** Copying one (`let ys = xs`) copies
 the handle, so both names see the same elements. Passing a list to a function
@@ -426,14 +437,41 @@ func main() -> void:
     print_i32(len(xs))     # 3
 ```
 
-Because a list is an indirection — like `ptr<T>` — `push`, `pop`, and element
-writes are allowed through a plain `let`; `mut` is only needed to rebind the
-name (`xs = other`).
+Because a list is an indirection — like `ptr<T>` — `push`, `pop`, `insert`,
+`remove`, `sort`, and element writes are allowed through a plain `let`; `mut`
+is only needed to rebind the name (`xs = other`).
+
+`insert` shifts the rest right, `remove` shifts the rest left and returns the
+element, and `sort` takes a comparator — a function value `func(T, T) -> i32`
+returning negative, zero, or positive for less-than, equal, greater-than:
+
+```vanta
+func by_score(a: i32, b: i32) -> i32:
+    return b - a            # descending
+
+func main() -> void:
+    let arena = Arena(1024)
+    let xs = arena.list::<i32>()
+    xs.push(3)
+    xs.push(1)
+    xs.insert(0, 2)         # 2 3 1
+    print_i32(xs.remove(2)) # 1
+    xs.sort(by_score)       # 3 2
+    print_i32(xs.at(0))     # 3
+    print_i32(xs.at(1))     # 2
+```
+
+```
+1
+3
+2
+```
 
 Limits: element types must be copyable, so `List<void>` and `List<Arena>` are
 compile errors. `arena.reset()` invalidates every list made from that arena,
-because the storage lives there. There is no `insert`, `remove`, or `sort`
-yet; iterate with `for i in range(0, len(xs))`.
+because the storage lives there. Sorting allocates its scratch block from the
+same arena. Iterate with `for i in range(0, len(xs))` — there is no iterator
+protocol.
 
 ## String building: `StrBuilder` (v0.10.0)
 

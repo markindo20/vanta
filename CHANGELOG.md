@@ -2,6 +2,27 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.15.0 — 2026-10-18
+
+- `List<T>` can be edited in place: `xs.insert(i, v)` inserts at index `i`,
+  shifting the rest right (`i` may be `len(xs)`, the same as `push`), and
+  `xs.remove(i)` removes and returns the element at `i`, shifting the rest
+  left. Out-of-range indexes stop the program with
+  `vanta: insert index I out of bounds (size N) at line L` /
+  `vanta: remove index I out of bounds (size N) at line L`.
+- `xs.sort(cmp)` sorts a list in place with a comparator — a function value
+  `func(T, T) -> i32` returning negative, zero, or positive for less-than,
+  equal, greater-than. It is a stable, `O(n log n)` merge sort: elements the
+  comparator calls equal keep their order.
+- The comparator is fully checked: a missing, wrongly-typed, or wrong-arity
+  comparator is a compile error naming the expected signature, e.g.
+  `'sort' expects a comparator func(i32, i32) -> i32, got func(i32, i32) -> bool`.
+- Codegen fix: function-pointer aliases may now mention structs by value —
+  struct forward declarations are emitted before the aliases — so comparators
+  over `List<Struct>` work.
+- `examples/lists.vnt` now demonstrates insert, remove, and a comparator
+  sort (stable ties included); 17 new tests (447 total).
+
 ## v0.14.0 — 2026-10-18
 
 - Added the game kit: `examples/gamekit/` packages the SDL2 plumbing as four

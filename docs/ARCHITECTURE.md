@@ -71,8 +71,10 @@ distinct semantics.
 
 - `Vec2`, `Vec3`, `Quat`, `Matrix4` (row-major) with their operators
 - the `Arena` bump allocator
-- `List<T>` with `list_new` / `list_push` / `list_pop` / `list_at_checked[_ref]`
-  — the arena-backed growable lists behind `arena.list::<T>()`
+- `List<T>` with `list_new` / `list_push` / `list_pop` / `list_insert` /
+  `list_remove` / `list_sort` (a stable merge sort driven by the caller's
+  comparator function value) / `list_at_checked[_ref]` — the arena-backed
+  growable lists behind `arena.list::<T>()`
 - `StrBuilder` with `strb_append_*` / `strb_to_str` / `strb_clear` — arena-backed
   string building behind `arena.str_builder()`; `to_str()` copies, so results
   are stable
@@ -115,7 +117,7 @@ scope.
 
 ## Tests
 
-`tests/` holds 430 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 447 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

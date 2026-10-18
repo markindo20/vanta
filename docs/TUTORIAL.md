@@ -339,10 +339,49 @@ func main() -> void:
 16
 ```
 
-A list is a handle: `len(xs)`, `xs.at(i)`, `xs[i]`, `push`, and `pop` all work
-through a plain `let`, and passing `xs` to a function lets that function append
-to your list — `fill(xs)` above does exactly that. `xs.at(i)` is checked and
-stops the program on a bad index; `xs[i]` is the raw, unchecked form.
+A list is a handle: `len(xs)`, `xs.at(i)`, `xs[i]`, `push`, `pop`, `insert`,
+`remove`, and `sort` all work through a plain `let`, and passing `xs` to a
+function lets that function append to your list — `fill(xs)` above does
+exactly that. `xs.at(i)` is checked and stops the program on a bad index;
+`xs[i]` is the raw, unchecked form.
+
+Lists also support insertion, removal, and comparator-driven sorting:
+
+```vanta
+struct Coin:
+    value: i32
+
+func by_value(a: Coin, b: Coin) -> i32:
+    return a.value - b.value
+
+func main() -> void:
+    let arena = Arena(4096)
+    let coins = arena.list::<Coin>()
+    coins.push(Coin(value: 5))
+    coins.push(Coin(value: 1))
+    coins.push(Coin(value: 5))
+    coins.insert(0, Coin(value: 3))   # 3 5 1 5
+    let first = coins.remove(3)       # the 5 that was pushed first
+    coins.sort(by_value)              # stable: 1 3 5
+    print_i32(first.value)            # 5
+    print_i32(len(coins))             # 3
+    print_i32(coins.at(0).value)      # 1
+    print_i32(coins.at(2).value)      # 5
+```
+
+```
+5
+3
+1
+5
+```
+
+`insert(i, v)` shifts the rest right — `i` may be `len(xs)`, same as `push`;
+`remove(i)` shifts the rest left and returns the element; both stop the
+program on an out-of-range index, exactly like `at`. `sort(cmp)` takes a
+comparator `func(T, T) -> i32` returning negative, zero, or positive for
+less-than, equal, greater-than, and is stable: elements the comparator calls
+equal keep their order.
 
 ## Project: an ASCII terrain generator
 

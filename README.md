@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.14.0)
+# Vanta - a game-oriented systems language (v0.15.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -85,7 +85,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (430 tests) |
+| `tests/` | `unittest` suite (447 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -107,7 +107,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
 | `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
-| `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`, checked access |
+| `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`/`insert`/`remove`, comparator sort |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
@@ -140,8 +140,8 @@ New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
 output, read and write files, build 2D grids, pass functions around,
-bounds-check array access with `xs.at(i)`, grow arena-backed lists
-(`List<T>`), assemble strings with `StrBuilder`, name states and modes
+bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
+lists (`List<T>`), assemble strings with `StrBuilder`, name states and modes
 with enums and branch on them exhaustively with `match`, and build and run
 real SDL2 games on the game kit (three SDL examples, two of them playable
 games) — but the remaining gaps are real:
@@ -154,8 +154,10 @@ games) — but the remaining gaps are real:
 - array indexing is unchecked unless you opt in with `xs.at(i)`; pointers have
   no checked access, and there is no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
-- `List<T>` is arena-backed: there is no `insert`/`remove`/`sort`, and
-  `arena.reset()` invalidates the lists made from that arena
+- `List<T>` is arena-backed: elements must be copyable, growth and sorting
+  allocate from the arena, and `sort` needs a comparator function value (there
+  is no default ordering); `arena.reset()` invalidates the lists made from that
+  arena, and iteration is manual (no iterator protocol)
 - enums are plain named constants: no explicit member values, no associated
   data; `==`/`!=` and `match` are the operations on them
 - windowing is shipped as SDL2 examples plus the game kit: there is no
