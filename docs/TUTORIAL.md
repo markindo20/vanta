@@ -203,6 +203,41 @@ func main() -> void:
 10
 ```
 
+## Growable lists
+
+Arrays are fixed-size; when the size is not known up front (entities, events,
+anything you append to), use a `List<T>`. It allocates from the `Arena`, so
+per-frame data comes back to life with `arena.reset()`. Create it with
+`arena.list::<T>()` and grow it with `push`:
+
+```vanta
+func fill(xs: List<i32>):
+    for i in range(0, 5):
+        xs.push(i * i)
+
+func main() -> void:
+    let arena = Arena(4096)
+    let xs = arena.list::<i32>()
+    fill(xs)
+    print_i32(len(xs))      # 5
+    print_i32(xs.at(3))     # 9
+    xs.at(3) = 100          # checked write
+    print_i32(xs.at(3))     # 100
+    print_i32(xs.pop())     # 16
+```
+
+```
+5
+9
+100
+16
+```
+
+A list is a handle: `len(xs)`, `xs.at(i)`, `xs[i]`, `push`, and `pop` all work
+through a plain `let`, and passing `xs` to a function lets that function append
+to your list — `fill(xs)` above does exactly that. `xs.at(i)` is checked and
+stops the program on a bad index; `xs[i]` is the raw, unchecked form.
+
 ## Project: an ASCII terrain generator
 
 Everything together: a seeded random number generator, a 2D grid, checked
@@ -260,4 +295,4 @@ garbage.
   `physics.vnt` to `boids.vnt` and `grid.vnt`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (274 tests).
+- `python -m unittest discover -s tests` — run the test suite (313 tests).

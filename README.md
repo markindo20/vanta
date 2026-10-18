@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.8.0)
+# Vanta — a game-oriented systems language (v0.9.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,7 +69,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (274 tests) |
+| `tests/` | `unittest` suite (313 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -91,6 +91,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
 | `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
+| `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`, checked access |
 
 ## Tests
 
@@ -115,8 +116,9 @@ New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 
 Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
-output, read and write files, build 2D grids, pass functions around, and
-bounds-check array access with `xs.at(i)`, but the remaining gaps are real:
+output, read and write files, build 2D grids, pass functions around,
+bounds-check array access with `xs.at(i)`, and grow arena-backed lists
+(`List<T>`), but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from it
@@ -125,5 +127,7 @@ bounds-check array access with `xs.at(i)`, but the remaining gaps are real:
 - array indexing is unchecked unless you opt in with `xs.at(i)`; pointers have
   no checked access, and there is no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
+- `List<T>` is arena-backed: there is no `insert`/`remove`/`sort`, and
+  `arena.reset()` invalidates the lists made from that arena
 - windowing and audio are now reachable through `extern` (SDL2 and friends),
   but nothing ships in the box

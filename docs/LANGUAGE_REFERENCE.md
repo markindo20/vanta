@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.8.0)
+# Vanta Language Reference (v0.9.0)
 
-This is the reference for the language as implemented at tag `v0.8.0`. Every
+This is the reference for the language as implemented at tag `v0.9.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -35,6 +35,7 @@ Assigning to a `let` binding is a compile-time error.
 | `str` | string literal type (see [Strings](#strings)) |
 | `ptr<T>` | raw pointer, function parameter type only |
 | `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array; checked access with `xs.at(i)` (see [Checked indexing](#checked-indexing-at-v070)) |
+| `List<T>` | growable list whose storage lives in an `Arena`; `push`/`pop`/`len`/`at`/`xs[i]` (see [Dynamic lists](#dynamic-lists-listt-v090)) |
 | `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
@@ -261,6 +262,58 @@ error: cannot pass Arena to a function
 
 This is the only ownership rule enforced. `ptr<T>` has **no** borrow checking,
 so dangling or aliased pointers are not detected.
+
+## Dynamic lists: `List<T>` (v0.9.0)
+
+`List<T>` is a growable array whose storage lives in an `Arena`. Create an
+empty one with `arena.list::<T>()` and append to it with `push`:
+
+```vanta
+let arena = Arena(4096)
+let xs = arena.list::<i32>()
+xs.push(10)
+xs.push(20)
+print_i32(len(xs))     # 2
+print_i32(xs.at(1))    # 20
+xs.at(1) = 21          # checked write
+print_i32(xs.pop())    # 21
+print_i32(len(xs))     # 1
+```
+
+- `xs.push(v)` appends one value; growth doubles the capacity (starting at 4)
+  and copies the old elements into a fresh arena block.
+- `xs.pop()` removes and returns the last element; popping an empty list stops
+  the program with `vanta: pop from empty list at line L`.
+- `len(xs)` returns the element count as `i32`.
+- `xs.at(i)` is the v0.7.0 checked access: reads copy the element, writes store
+  through it, and an out-of-bounds index stops the program with
+  `vanta: index I out of bounds (size N) at line L`.
+- `xs[i]` is the unchecked form, exactly as for fixed-size arrays.
+
+**A `List<T>` is a handle, not the storage.** Copying one (`let ys = xs`) copies
+the handle, so both names see the same elements. Passing a list to a function
+therefore lets the function append to the caller's list:
+
+```vanta
+func fill(xs: List<i32>):
+    for i in range(0, 3):
+        xs.push(i)
+
+func main() -> void:
+    let arena = Arena(1024)
+    let xs = arena.list::<i32>()
+    fill(xs)
+    print_i32(len(xs))     # 3
+```
+
+Because a list is an indirection — like `ptr<T>` — `push`, `pop`, and element
+writes are allowed through a plain `let`; `mut` is only needed to rebind the
+name (`xs = other`).
+
+Limits: element types must be copyable, so `List<void>` and `List<Arena>` are
+compile errors. `arena.reset()` invalidates every list made from that arena,
+because the storage lives there. There is no `insert`, `remove`, or `sort`
+yet; iterate with `for i in range(0, len(xs))`.
 
 ## Function values (v0.6.0)
 
