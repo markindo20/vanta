@@ -333,6 +333,8 @@ class CodeGen:
             self.emit('}')
         elif isinstance(stmt, A.ForRangeStmt):
             self._gen_for(stmt)
+        elif isinstance(stmt, A.MatchStmt):
+            self._gen_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
             self.emit(f'{self._expr(stmt.expr)};')
         else:
@@ -363,6 +365,39 @@ class CodeGen:
             self.emit('}')
             self.indent -= 1
             self.emit('}')
+
+    def _gen_match(self, stmt):
+        # Bind the matched value once, then test the arms as an if/else
+        # chain. A C++ switch would capture `break` written in an arm body,
+        # so the chain is what keeps break/continue meaning the enclosing
+        # loop, as they do everywhere else in the language.
+        self.temp_counter += 1
+        n = self.temp_counter
+        self.emit('{')
+        self.indent += 1
+        self.emit(f'const auto __match_{n} = {self._expr(stmt.value)};')
+        for i, arm in enumerate(stmt.arms):
+            if arm.is_else:
+                if i == 0:
+                    self.emit('{')
+                else:
+                    self.emit('} else {')
+            else:
+                cond = ' || '.join(f'__match_{n} == {tn}::{mn}'
+                                   for (tn, mn, _pos) in arm.patterns)
+                if len(arm.patterns) > 1:
+                    cond = f'({cond})'
+                if i == 0:
+                    self.emit(f'if ({cond}) {{')
+                else:
+                    self.emit(f'}} else if ({cond}) {{')
+            self.indent += 1
+            for s in arm.body:
+                self._gen_stmt(s)
+            self.indent -= 1
+        self.emit('}')
+        self.indent -= 1
+        self.emit('}')
 
     def _lvalue(self, expr) -> str:
         if isinstance(expr, A.Name):

@@ -121,6 +121,22 @@ class IfStmt:
 
 
 @dataclass
+class MatchArm:
+    # One (enum name, member name, pos) triple per pattern; empty for else.
+    patterns: List[Any]
+    is_else: bool
+    body: List[Any]
+    pos: Pos
+
+
+@dataclass
+class MatchStmt:
+    value: Any
+    arms: List[Any]
+    pos: Pos
+
+
+@dataclass
 class WhileStmt:
     cond: Any
     body: List[Any]

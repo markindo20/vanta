@@ -56,6 +56,80 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('break;', cpp)
         self.assertIn('continue;', cpp)
 
+    def test_match_chain_codegen(self):
+        cpp = gen("enum State:\n"
+                  "    A\n"
+                  "    B\n"
+                  "func f(s: State) -> i32:\n"
+                  "    match s:\n"
+                  "        State.A:\n"
+                  "            return 1\n"
+                  "        State.B:\n"
+                  "            return 2\n")
+        self.assertIn('const auto __match_1 = v_s;', cpp)
+        self.assertIn('if (__match_1 == State::A) {', cpp)
+        self.assertIn('} else if (__match_1 == State::B) {', cpp)
+
+    def test_match_multi_pattern_codegen(self):
+        cpp = gen("enum State:\n"
+                  "    A\n"
+                  "    B\n"
+                  "    C\n"
+                  "func f(s: State) -> void:\n"
+                  "    match s:\n"
+                  "        State.A, State.B:\n"
+                  "            print_str(\"x\")\n"
+                  "        State.C:\n"
+                  "            print_str(\"y\")\n")
+        self.assertIn('if ((__match_1 == State::A || __match_1 == State::B)) {', cpp)
+
+    def test_match_else_codegen(self):
+        cpp = gen("enum State:\n"
+                  "    A\n"
+                  "    B\n"
+                  "func f(s: State) -> void:\n"
+                  "    match s:\n"
+                  "        State.A:\n"
+                  "            print_str(\"x\")\n"
+                  "        else:\n"
+                  "            print_str(\"y\")\n")
+        self.assertIn('} else {', cpp)
+
+    def test_match_value_bound_once(self):
+        cpp = gen("enum State:\n"
+                  "    A\n"
+                  "    B\n"
+                  "func pick() -> State:\n"
+                  "    return State.A\n"
+                  "func f() -> void:\n"
+                  "    match pick():\n"
+                  "        State.A:\n"
+                  "            print_str(\"x\")\n"
+                  "        else:\n"
+                  "            print_str(\"y\")\n")
+        self.assertEqual(cpp.count('const auto __match_1 ='), 1)
+
+    def test_two_matches_get_distinct_temps(self):
+        cpp = gen("enum A:\n"
+                  "    X\n"
+                  "    Y\n"
+                  "enum B:\n"
+                  "    M\n"
+                  "    N\n"
+                  "func f(a: A, b: B) -> void:\n"
+                  "    match a:\n"
+                  "        A.X:\n"
+                  "            print_str(\"x\")\n"
+                  "        A.Y:\n"
+                  "            print_str(\"y\")\n"
+                  "    match b:\n"
+                  "        B.M:\n"
+                  "            print_str(\"m\")\n"
+                  "        B.N:\n"
+                  "            print_str(\"n\")\n")
+        self.assertIn('const auto __match_1 = v_a;', cpp)
+        self.assertIn('const auto __match_2 = v_b;', cpp)
+
     def test_const_emitted(self):
         cpp = gen("const X: i32 = 5\nfunc main() -> void:\n    print_i32(X)\n")
         self.assertIn('constexpr int32_t v_X = 5', cpp)

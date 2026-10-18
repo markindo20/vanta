@@ -258,6 +258,8 @@ class Parser:
             return self.parse_while()
         if t.type == TT.FOR:
             return self.parse_for()
+        if t.type == TT.MATCH:
+            return self.parse_match()
         return self.parse_expr_or_assign()
 
     def parse_var_decl(self):
@@ -323,6 +325,38 @@ class Parser:
         self.expect(TT.COLON)
         body = self.parse_block()
         return A.ForRangeStmt(var, start, end, step, body, A.Pos(tok.line, tok.col))
+
+    def parse_match(self):
+        tok = self.advance()
+        value = self.parse_expr()
+        self.expect(TT.COLON)
+        self.expect(TT.NEWLINE)
+        self.expect(TT.INDENT)
+        arms = []
+        while not self.check(TT.DEDENT) and not self.check(TT.EOF):
+            arm = self.parse_match_arm()
+            if arm.is_else and not (self.check(TT.DEDENT) or self.check(TT.EOF)):
+                self.error("'else' must be the last match arm")
+            arms.append(arm)
+        self.expect(TT.DEDENT)
+        return A.MatchStmt(value, arms, A.Pos(tok.line, tok.col))
+
+    def parse_match_arm(self):
+        t = self.peek()
+        if t.type == TT.ELSE:
+            self.advance()
+            self.expect(TT.COLON)
+            return A.MatchArm([], True, self.parse_block(), A.Pos(t.line, t.col))
+        patterns = []
+        while True:
+            tn = self.expect(TT.IDENT)
+            self.expect(TT.DOT, "match patterns are written Enum.Member")
+            mn = self.expect(TT.IDENT)
+            patterns.append((tn.value, mn.value, A.Pos(tn.line, tn.col)))
+            if not self.match(TT.COMMA):
+                break
+        self.expect(TT.COLON)
+        return A.MatchArm(patterns, False, self.parse_block(), A.Pos(t.line, t.col))
 
     def parse_expr_or_assign(self):
         tok = self.peek()

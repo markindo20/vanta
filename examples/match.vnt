@@ -1,0 +1,67 @@
+# match switches on an enum value. Arms run top to bottom; the first match
+# wins. When every member is covered the checker accepts the match without
+# an else arm - add a member later and every match that needs a new arm
+# tells you.
+
+enum State:
+    Menu
+    Playing
+    Paused
+    GameOver
+
+struct Game:
+    state: State
+    lives: i32
+
+func label(s: State) -> str:
+    match s:
+        State.Menu:
+            return "menu"
+        State.Playing, State.Paused:
+            return "in game"
+        State.GameOver:
+            return "game over"
+
+func next(s: State) -> State:
+    match s:
+        State.Menu:
+            return State.Playing
+        State.Playing:
+            return State.Paused
+        State.Paused:
+            return State.Playing
+        else:
+            return State.Menu
+
+func main() -> void:
+    mut g = Game(state: State.Menu, lives: 3)
+
+    print_str(label(State.Playing))        # in game
+
+    # match works on any enum-valued expression, fields included.
+    match g.state:
+        State.Menu:
+            print_str("fresh start")       # fresh start
+        else:
+            print_str("mid game")
+
+    # A small state machine driven in a loop.
+    for step in range(0, 5):
+        print_str(label(g.state))
+        g.state = next(g.state)
+    # menu
+    # in game
+    # in game
+    # in game
+    # in game
+
+    # break inside an arm still exits the enclosing loop: match is not a
+    # loop, so it never captures break or continue.
+    for i in range(0, 10):
+        match g.state:
+            State.Playing:
+                break
+            else:
+                g.state = next(g.state)
+    print_str(str_concat("caught the run at ", label(g.state)))
+    # caught the run at in game

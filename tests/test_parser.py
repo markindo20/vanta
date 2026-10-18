@@ -110,6 +110,38 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(inner1, A.ContinueStmt)
         self.assertIsInstance(inner2, A.BreakStmt)
 
+    def test_match_stmt(self):
+        src = ("func f(s: State) -> void:\n"
+               "    match s:\n"
+               "        State.A, State.B:\n"
+               "            return\n"
+               "        else:\n"
+               "            return\n")
+        prog = parse(src)
+        stmt = prog.decls[0].body[0]
+        self.assertIsInstance(stmt, A.MatchStmt)
+        self.assertEqual(len(stmt.arms), 2)
+        self.assertFalse(stmt.arms[0].is_else)
+        self.assertEqual([p[:2] for p in stmt.arms[0].patterns],
+                         [('State', 'A'), ('State', 'B')])
+        self.assertTrue(stmt.arms[1].is_else)
+
+    def test_match_else_must_be_last(self):
+        with self.assertRaisesRegex(ParseError, "'else' must be the last match arm"):
+            parse("func f(s: State) -> void:\n"
+                  "    match s:\n"
+                  "        else:\n"
+                  "            return\n"
+                  "        State.A:\n"
+                  "            return\n")
+
+    def test_match_pattern_needs_member(self):
+        with self.assertRaisesRegex(ParseError, "match patterns are written Enum.Member"):
+            parse("func f(s: State) -> void:\n"
+                  "    match s:\n"
+                  "        A:\n"
+                  "            return\n")
+
     def test_syntax_error(self):
         with self.assertRaises(ParseError):
             parse("func f(:\n    return 1\n")

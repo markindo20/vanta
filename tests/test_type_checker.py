@@ -1353,6 +1353,173 @@ class TypeCheckerTests(unittest.TestCase):
             "func main() -> void:\n"
             "    set_mode(enum_to_i32(Mode.On))\n")
 
+    def test_match_exhaustive_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func f(s: State) -> i32:\n"
+            "    match s:\n"
+            "        State.A:\n"
+            "            return 1\n"
+            "        State.B:\n"
+            "            return 2\n")
+
+    def test_match_else_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func f(s: State) -> i32:\n"
+            "    match s:\n"
+            "        State.A:\n"
+            "            return 1\n"
+            "        else:\n"
+            "            return 0\n")
+
+    def test_match_else_only_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "func f(s: State) -> void:\n"
+            "    match s:\n"
+            "        else:\n"
+            "            print_str(\"x\")\n")
+
+    def test_match_multi_pattern_arm_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "    C\n"
+            "func f(s: State) -> i32:\n"
+            "    match s:\n"
+            "        State.A, State.B:\n"
+            "            return 1\n"
+            "        State.C:\n"
+            "            return 2\n")
+
+    def test_match_on_field_and_call_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "struct G:\n"
+            "    state: State\n"
+            "func pick() -> State:\n"
+            "    return State.A\n"
+            "func f(g: G) -> i32:\n"
+            "    match g.state:\n"
+            "        State.A:\n"
+            "            return 1\n"
+            "        else:\n"
+            "            return 0\n"
+            "func h() -> i32:\n"
+            "    match pick():\n"
+            "        State.A:\n"
+            "            return 1\n"
+            "        else:\n"
+            "            return 0\n")
+
+    def test_match_break_and_continue_in_loop_ok(self):
+        run("enum State:\n"
+            "    A\n"
+            "    B\n"
+            "func f(s: State) -> void:\n"
+            "    for i in range(0, 3):\n"
+            "        match s:\n"
+            "            State.A:\n"
+            "                continue\n"
+            "            else:\n"
+            "                break\n")
+
+    def test_match_break_outside_loop_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'break' outside loop"):
+            run("enum State:\n"
+                "    A\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.A:\n"
+                "            break\n"
+                "        else:\n"
+                "            return\n")
+
+    def test_match_non_enum_rejected(self):
+        with self.assertRaisesRegex(CheckError, "match expects an enum value, got <int-lit>"):
+            run("func f() -> void:\n"
+                "    match 3:\n"
+                "        else:\n"
+                "            return\n")
+
+    def test_match_wrong_enum_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot match Mode.On against 'State'"):
+            run("enum State:\n"
+                "    A\n"
+                "enum Mode:\n"
+                "    On\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        Mode.On:\n"
+                "            return\n"
+                "        else:\n"
+                "            return\n")
+
+    def test_match_unknown_member_rejected(self):
+        with self.assertRaisesRegex(CheckError, "enum 'State' has no member 'Purple'"):
+            run("enum State:\n"
+                "    A\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.Purple:\n"
+                "            return\n"
+                "        else:\n"
+                "            return\n")
+
+    def test_match_duplicate_arm_rejected(self):
+        with self.assertRaisesRegex(CheckError, "duplicate match arm 'State.A'"):
+            run("enum State:\n"
+                "    A\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.A:\n"
+                "            return\n"
+                "        State.A:\n"
+                "            return\n"
+                "        else:\n"
+                "            return\n")
+
+    def test_match_missing_member_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                "match on 'State' is missing member 'B'; add an arm or an else branch"):
+            run("enum State:\n"
+                "    A\n"
+                "    B\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.A:\n"
+                "            return\n")
+
+    def test_match_missing_members_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                "match on 'State' is missing members 'B', 'C'"):
+            run("enum State:\n"
+                "    A\n"
+                "    B\n"
+                "    C\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.A:\n"
+                "            return\n")
+
+    def test_match_arm_locals_scoped(self):
+        with self.assertRaises(CheckError):
+            run("enum State:\n"
+                "    A\n"
+                "func f(s: State) -> void:\n"
+                "    match s:\n"
+                "        State.A:\n"
+                "            let x = 1\n"
+                "        else:\n"
+                "            return\n"
+                "    print_i32(x)\n")
+
     def test_ptr_void_widening_in_argument(self):
         run("func take(p: ptr<void>) -> void:\n"
             "    print_str(\"ok\")\n"

@@ -43,7 +43,7 @@
       "patterns": [
         {
           "name": "entity.name.type.vanta",
-          "match": "(?<=\\b(?:struct|component)\\s+)[A-Za-z_][A-Za-z0-9_]*"
+          "match": "(?<=\\b(?:struct|component|enum)\\s+)[A-Za-z_][A-Za-z0-9_]*"
         }
       ]
     },
@@ -51,7 +51,7 @@
       "patterns": [
         {
           "name": "keyword.control.vanta",
-          "match": "\\b(func|let|mut|const|struct|component|system|extern|import|if|elif|else|while|for|in|break|continue|return|and|or|not)\\b"
+          "match": "\\b(func|let|mut|const|struct|component|system|enum|extern|import|if|elif|else|match|while|for|in|break|continue|return|and|or|not)\\b"
         }
       ]
     },
@@ -79,7 +79,7 @@
         },
         {
           "name": "support.function.builtin.vanta",
-          "match": "\\b(len|assert|range|arg_count|arg_str|str_len|str_concat|str_to_i32|str_to_f32|str_pool_reset|file_exists|file_read|file_write|i32_to_f32|f32_to_i32|translation|scale|from_quat)\\b"
+          "match": "\\b(len|assert|range|arg_count|arg_str|str_len|str_concat|str_to_i32|str_to_f32|str_pool_reset|file_exists|file_read|file_write|i32_to_f32|f32_to_i32|translation|scale|from_quat|enum_to_i32|ptr_is_null|alloc)\\b"
         }
       ]
     },

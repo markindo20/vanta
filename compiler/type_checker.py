@@ -375,6 +375,8 @@ class TypeChecker:
             self._check_while(stmt)
         elif isinstance(stmt, A.ForRangeStmt):
             self._check_for(stmt)
+        elif isinstance(stmt, A.MatchStmt):
+            self._check_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
             self._check_expr(stmt.expr)
         else:
@@ -499,6 +501,41 @@ class TypeChecker:
         finally:
             self.loop_depth -= 1
             self._pop()
+
+    def _check_match(self, m: A.MatchStmt):
+        vt = self._check_expr(m.value)
+        if not isinstance(vt, EnumType):
+            raise CheckError(f"match expects an enum value, got {vt}",
+                             self.filename, m.pos)
+        covered = []
+        has_else = False
+        for arm in m.arms:
+            if arm.is_else:
+                has_else = True
+            else:
+                for (tn, mn, ppos) in arm.patterns:
+                    if tn != vt.name:
+                        raise CheckError(f"cannot match {tn}.{mn} against '{vt.name}'",
+                                         self.filename, ppos)
+                    if mn not in vt.members:
+                        raise CheckError(f"enum '{vt.name}' has no member '{mn}'",
+                                         self.filename, ppos)
+                    if mn in covered:
+                        raise CheckError(f"duplicate match arm '{vt.name}.{mn}'",
+                                         self.filename, ppos)
+                    covered.append(mn)
+            self._push()
+            for s in arm.body:
+                self._check_stmt(s)
+            self._pop()
+        if not has_else:
+            missing = [mn for mn in vt.members if mn not in covered]
+            if missing:
+                names = ', '.join(f"'{mn}'" for mn in missing)
+                word = 'member' if len(missing) == 1 else 'members'
+                raise CheckError(
+                    f"match on '{vt.name}' is missing {word} {names}; "
+                    f"add an arm or an else branch", self.filename, m.pos)
 
     def _check_cond(self, cond, pos):
         ct = self._check_expr(cond)

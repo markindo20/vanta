@@ -835,6 +835,42 @@ class IntegrationTests(unittest.TestCase):
                             ['menu', 'playing', '2', 'menu', 'playing',
                              'paused', 'game over'])
 
+    def test_match_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'match.vnt'),
+                            ['in game', 'fresh start', 'menu',
+                             'in game', 'in game', 'in game', 'in game',
+                             'caught the run at in game'])
+
+    def test_match_break_binds_to_loop(self):
+        # break/continue in an arm control the enclosing loop: match is
+        # not a loop and never captures them (codegen uses if/else, not
+        # a C++ switch).
+        src = (
+            "enum Kind:\n"
+            "    A\n"
+            "    B\n"
+            "    C\n"
+            "func main() -> void:\n"
+            "    let ks: [Kind, 3] = [Kind.A, Kind.B, Kind.C]\n"
+            "    for i in range(0, 3):\n"
+            "        match ks.at(i):\n"
+            "            Kind.A:\n"
+            "                continue\n"
+            "            Kind.B:\n"
+            "                break\n"
+            "            else:\n"
+            "                print_str(\"C reached\")\n"
+            "    print_str(\"done\")\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_match_')
+        try:
+            path = os.path.join(tmp, 'flow.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['done'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_enum_state_machine(self):
         src = (
             "enum State:\n"

@@ -24,6 +24,10 @@ class LexerTests(unittest.TestCase):
         self.assertEqual(toks[0].type, TT.BREAK)
         self.assertEqual(toks[1].type, TT.CONTINUE)
 
+    def test_match_keyword(self):
+        toks = lex("match\n")
+        self.assertEqual(toks[0].type, TT.MATCH)
+
     def test_ident_and_int(self):
         toks = lex("x 42 3.14\n")
         self.assertEqual(toks[0].type, TT.IDENT)

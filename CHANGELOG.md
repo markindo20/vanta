@@ -2,6 +2,36 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.13.0 — 2026-10-18
+
+- Added `match`: branch on an enum value with `Enum.Member:` arms (several
+  members per arm, commas between them) and an optional `else:` fallback.
+  Arms run top to bottom; the first match wins. `examples/match.vnt` walks
+  a little state machine:
+
+  ```vanta
+  match g.state:
+      State.Menu:
+          print_str("fresh start")
+      State.Playing, State.Paused:
+          print_str("in game")
+      else:
+          print_str("somewhere else")
+  ```
+
+- The checker proves coverage: when every member has an arm, no `else` is
+  needed, and a missing member is a compile error that names the members
+  it needs — add a member to an enum later and every match that must
+  handle it says so. A member used by two arms, a member of a different
+  enum, and a misspelled member are errors too.
+- `match` arms have their own scope, and `break`/`continue` inside an arm
+  still control the enclosing loop: `match` is not a loop, and codegen
+  keeps it that way (an if/else chain rather than a C++ `switch`). The
+  matched value is evaluated exactly once.
+- `match` on numbers, strings, or structs is a compile error; it is a
+  statement, not an expression. `match` joins the reserved keywords.
+- 25 new tests (428 total).
+
 ## v0.12.0 — 2026-10-18
 
 - SDL2 support, shown end to end. `examples/sdl_window.vnt` opens a window
