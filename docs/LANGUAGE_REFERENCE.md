@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.10.0)
+# Vanta Language Reference (v0.11.0)
 
-This is the reference for the language as implemented at tag `v0.10.0`. Every
+This is the reference for the language as implemented at tag `v0.11.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -40,6 +40,7 @@ Assigning to a `let` binding is a compile-time error.
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
 | `StrBuilder` | arena-backed string builder; append pieces, then `to_str()` (see [String building](#string-building-strbuilder-v0100)) |
+| `Name` (enum) | named integer members; `Name.Member`, `==`/`!=`, `enum_to_i32` (see [Enums](#enums-v0110)) |
 
 Integer literals default to `i32`; float literals default to `f32`.
 
@@ -138,6 +139,56 @@ let p = Position(0, 0)         # error: struct construction requires named argum
 
 The built-in types are the exception and take positional arguments:
 `Vec2(x, y)`, `Vec3(x, y, z)`, `Quat(x, y, z, w)`, `Matrix4()` (identity).
+
+## Enums (v0.11.0)
+
+`enum` declares a fixed set of named members, numbered from `0` in
+declaration order. A member is written `Name.Member`, and the enum is an
+ordinary type — variables, struct fields, parameters, returns, arrays,
+`List<T>`, function values, and imported modules all accept it:
+
+```vanta
+enum State:
+    Menu
+    Playing
+    Paused
+    GameOver
+
+struct Game:
+    state: State
+
+func is_over(s: State) -> bool:
+    return s == State.GameOver
+
+func main() -> void:
+    let g = Game(state: State.Menu)
+    if g.state == State.Menu:
+        print_str("menu")               # menu
+    mut s = State.Playing
+    s = State.Paused
+    print_i32(enum_to_i32(s))           # 2
+    print_bool(is_over(s))              # false
+```
+
+```
+menu
+2
+false
+```
+
+- Members are numbered `0`, `1`, `2`, ... in declaration order; there are no
+  explicit member values.
+- `==` and `!=` compare values of the same enum. Ordering comparisons
+  (`<`, `<=`, `>`, `>=`) are compile errors, as are compares between two
+  different enums or between an enum and a number.
+- `enum_to_i32(v)` returns a member's number — the bridge to printing,
+  arithmetic, and `extern` calls (extern signatures cannot take enum types
+  directly yet).
+- An enum cannot be constructed: `State(1)` is an error. Enum types have no
+  fields either — `s.Menu` is rejected with a hint to write `State.Menu`.
+- Type names share one namespace: an enum cannot reuse the name of a struct,
+  function, or constant. `List` and `FnPtrN` are reserved.
+- `enum` is a reserved keyword.
 
 ## Arrays
 
@@ -523,6 +574,7 @@ let r = from_quat(q)
 | `file_write` | `(str, str) -> i32` | bytes written, or `-1` on failure |
 | `file_read` | `(str) -> str` | reads into the string pool; `""` on any failure |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
+| `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different
@@ -635,6 +687,8 @@ extern "demo" {
 - Stick to C-compatible types: `i32`, `u32`, `f32`, `f64`, `bool`, `str`
   (`const char*`), and `ptr<T>` of those. Vanta struct types can appear in a
   signature if the C++ side understands them, but a plain C library cannot.
+  Enum types cannot appear in an `extern` signature yet — pass
+  `enum_to_i32(v)` instead.
 - A name declared twice — in one block, across blocks, or colliding with a
   Vanta function, builtin, or type — is a compile error.
 

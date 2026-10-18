@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.10.0)
+# Vanta - a game-oriented systems language (v0.11.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,7 +69,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (341 tests) |
+| `tests/` | `unittest` suite (383 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -93,6 +93,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`, checked access |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
+| `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 
 ## Tests
 
@@ -119,8 +120,8 @@ Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
 output, read and write files, build 2D grids, pass functions around,
 bounds-check array access with `xs.at(i)`, grow arena-backed lists
-(`List<T>`), and assemble strings with `StrBuilder` — but the remaining gaps
-are real:
+(`List<T>`), assemble strings with `StrBuilder`, and name states and modes
+with enums — but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -132,5 +133,8 @@ are real:
   `Arena` non-copyable rule is enforced)
 - `List<T>` is arena-backed: there is no `insert`/`remove`/`sort`, and
   `arena.reset()` invalidates the lists made from that arena
+- enums are plain named constants: no explicit member values, no associated
+  data, and no `match`/`switch` — compare with `==`/`!=` and branch with
+  `if`/`elif`
 - windowing and audio are now reachable through `extern` (SDL2 and friends),
   but nothing ships in the box

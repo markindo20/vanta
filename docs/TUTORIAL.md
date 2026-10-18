@@ -119,6 +119,39 @@ func main() -> void:
 25
 ```
 
+## Enums
+
+An `enum` names a fixed set of states. Members are numbered from zero and
+written `Type.Member`; compare with `==`/`!=` and branch with `if`/`elif`.
+`enum_to_i32` turns a member into its number when you need to print it.
+
+```vanta
+enum State:
+    Menu
+    Playing
+    Paused
+
+func label(s: State) -> str:
+    if s == State.Menu:
+        return "menu"
+    elif s == State.Playing:
+        return "playing"
+    return "paused"
+
+func main() -> void:
+    mut s = State.Menu
+    print_str(label(s))           # menu
+    s = State.Playing
+    print_str(label(s))           # playing
+    print_i32(enum_to_i32(s))     # 1
+```
+
+```
+menu
+playing
+1
+```
+
 ## Arrays and checked access
 
 Fixed-size arrays carry their length in the type: `[i32, 4]`. `len(xs)`
@@ -323,4 +356,4 @@ garbage.
   `physics.vnt` to `boids.vnt` and `grid.vnt`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (341 tests).
+- `python -m unittest discover -s tests` — run the test suite (383 tests).

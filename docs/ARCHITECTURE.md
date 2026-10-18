@@ -18,9 +18,9 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    once (cycles and missing files are errors), and every AST position is
    stamped with its source file so diagnostics name the right file.
 5. `typesys.py` — the type model (`PrimType`, `PtrType`, `ArrayType`,
-   `StructType`, `FuncType`, ...).
-6. `type_checker.py` — two passes: register structs, builtins, and function
-   signatures; then check bodies with scoped symbol tables. Annotates every
+   `StructType`, `EnumType`, `FuncType`, ...).
+6. `type_checker.py` — two passes: register structs, enums, builtins, and
+   function signatures; then check bodies with scoped symbol tables. Annotates every
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`), where `extern` functions are registered
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
@@ -39,6 +39,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    them skip the `fn_` prefix user functions get. Each distinct function type
    is emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
    namespace, innermost first, with raw declarators never written inline.
+   Enum declarations are emitted before the aliases, since signatures and
+   fields may name them.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -101,7 +103,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 341 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 383 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 
