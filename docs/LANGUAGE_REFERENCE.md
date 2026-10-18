@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.2.6)
+# Vanta Language Reference (v0.3.0)
 
 This is the reference for the language as implemented at tag `v0.2.6`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -345,6 +345,38 @@ print_fmt("{} has {} chars", label, str_len(label))
 - `to_str_bool` returns a literal and allocates nothing.
 
 There is no string indexing and no per-value ownership.
+
+## Extern declarations (v0.3.0)
+
+`extern` declares functions implemented in C and linked into the program:
+
+```vanta
+extern "demo" {
+    func demo_clamp(v: i32, lo: i32, hi: i32) -> i32
+    func demo_cube(x: f32) -> f32
+}
+```
+
+- The block lists signatures only — no bodies. A `func` without `-> type`
+  returns `void`.
+- The string names the library for the reader. Linking is decided on the
+  command line, not by the string: `--lib-dir` adds a library search path and
+  `--link` adds a library (both repeatable, on `build` and `run`).
+- Extern functions are called like any other function and type-checked the
+  same way. The generated C++ declares them in an `extern "C" {}` block outside
+  `namespace vanta_user`, and calls keep the original (unmangled) name.
+- Stick to C-compatible types: `i32`, `u32`, `f32`, `f64`, `bool`, `str`
+  (`const char*`), and `ptr<T>` of those. Vanta struct types can appear in a
+  signature if the C++ side understands them, but a plain C library cannot.
+- A name declared twice — in one block, across blocks, or colliding with a
+  Vanta function, builtin, or type — is a compile error.
+
+```powershell
+python main.py run examples/extern_demo.vnt --lib-dir build --link demo
+```
+
+`examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
+buildable example.
 
 ## Operators
 

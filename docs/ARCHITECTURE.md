@@ -16,16 +16,22 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 5. `type_checker.py` — two passes: register structs, builtins, and function
    signatures; then check bodies with scoped symbol tables. Annotates every
    expression node with `expr.type`. This is where the builtins are declared
-   (`_register_builtins`) and where the `Arena` non-copyable rule is enforced.
+   (`_register_builtins`), where `extern` functions are registered
+   (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
 6. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
-   `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions.
+   `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions. `extern` declarations
+   are emitted as an `extern "C" {}` block before the namespace, and calls to
+   them skip the `fn_` prefix user functions get.
 7. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
 8. `driver.py` — orchestrates the frontend and native compilation, detects
    `clang++`/`g++`/`cl` (honouring `$CXX`), and implements `check`/`build`/`run`.
+   `--include-dir`/`--lib-dir`/`--link` (repeatable, on `build` and `run`) pass
+   `-I`/`-L`/`-l` — or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents —
+   through to the C++ compiler.
 
 Note that `component` and `system` are parsed as flags on the struct and
 function declarations respectively (`parse_struct(is_component)`,
@@ -69,7 +75,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 143 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 158 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 
