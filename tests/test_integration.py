@@ -151,6 +151,31 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+    def test_life_example(self):
+        name, path = find_cxx_compiler()
+        source = os.path.join(EXAMPLES, 'life.vnt')
+        prog, tc = _frontend_only(source)
+        tmp = tempfile.mkdtemp(prefix='vanta_life_')
+        try:
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            lines = r.stdout.splitlines()
+            # 20 rows of 40 columns
+            self.assertEqual(len(lines), 20)
+            for ln in lines:
+                self.assertEqual(len(ln), 40)
+            # a glider (5 cells) plus a blinker (3) always total 8
+            self.assertEqual(sum(ln.count('#') for ln in lines), 8)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_grid_output(self):
         # The point of write_* + print_newline: build a row without newlines.
         src = (
