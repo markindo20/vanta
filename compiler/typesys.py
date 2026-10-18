@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 class Type:
@@ -49,6 +49,17 @@ class StructType(Type):
         return isinstance(other, StructType) and self.name == other.name
     def __hash__(self): return hash(self.name)
     def __repr__(self): return self.name
+
+
+@dataclass(frozen=True)
+class FuncType(Type):
+    params: Tuple[Type, ...]
+    ret: Type
+    def __repr__(self):
+        inner = ", ".join(repr(p) for p in self.params)
+        if self.ret is VOID:
+            return f"func({inner})"
+        return f"func({inner}) -> {self.ret}"
 
 
 I32 = PrimType("i32")

@@ -1,0 +1,46 @@
+# dispatch.vnt — first-class functions: pointers to named functions stored
+# in variables, arrays, struct fields, and passed as arguments.
+#
+# Usage:
+#   python main.py run examples/dispatch.vnt
+#
+# `func(i32) -> i32` is the type of any function taking an i32 and returning
+# one. A `func` type without an arrow returns void: `func(str)`.
+# Function values carry no captured state — they always point at a named
+# function (including externs and builtins like print_str).
+
+func square(x: i32) -> i32:
+    return x * x
+
+func negate(x: i32) -> i32:
+    return 0 - x
+
+func apply(f: func(i32) -> i32, x: i32) -> i32:
+    return f(x)
+
+func pick(name: str) -> func(i32) -> i32:
+    if name == "square":
+        return square
+    return negate
+
+struct Op:
+    name: str
+    run: func(i32) -> i32
+
+func main() -> void:
+    # An array of function values, called through an index.
+    let ops: [func(i32) -> i32, 2] = [square, negate]
+    for i in range(0, len(ops)):
+        print_i32(ops[i](5))
+
+    # A function passed as an argument.
+    print_i32(apply(square, 7))
+
+    # A struct field holding a function, chosen by a function-returning
+    # function.
+    let op = Op(name: "square op", run: pick("square"))
+    print_fmt("{}: {}", op.name, op.run(4))
+
+    # Void-returning function values work too.
+    let logger: func(str) = print_str
+    logger("done")

@@ -439,6 +439,209 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaises(CheckError):
             run('extern "c" {\n    func print_i32(v: i32)\n}\n')
 
+    def test_function_value_annotated(self):
+        from compiler.typesys import FuncType, I32
+        prog, tc = run("func sq(x: i32) -> i32:\n    return x\n"
+                       "func f() -> void:\n"
+                       "    let g: func(i32) -> i32 = sq\n")
+        v = prog.decls[1].body[0]
+        self.assertEqual(v.var_type, FuncType((I32,), I32))
+        self.assertTrue(getattr(v.value, 'is_func_ref', False))
+
+    def test_function_value_inferred(self):
+        from compiler.typesys import FuncType, I32
+        prog, tc = run("func sq(x: i32) -> i32:\n    return x\n"
+                       "func f() -> void:\n    let g = sq\n")
+        self.assertEqual(prog.decls[1].body[0].var_type, FuncType((I32,), I32))
+
+    def test_function_value_from_builtin(self):
+        from compiler.typesys import FuncType, F32
+        prog, tc = run("func f() -> void:\n"
+                       "    let sq: func(f32) -> f32 = sqrt_f32\n"
+                       "    print_f32(sq(4.0))\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, FuncType((F32,), F32))
+
+    def test_function_value_from_extern(self):
+        run('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+            'func f() -> void:\n'
+            '    let op: func(i32, i32) -> i32 = add\n'
+            '    print_i32(op(1, 2))\n')
+
+    def test_function_value_void_shorthand(self):
+        run("func f() -> void:\n"
+            "    let logger: func(str) = print_str\n"
+            "    logger(\"hi\")\n")
+
+    def test_indirect_call_return_type(self):
+        from compiler.typesys import I32
+        prog, tc = run("func sq(x: i32) -> i32:\n    return x\n"
+                       "func f() -> i32:\n"
+                       "    let g: func(i32) -> i32 = sq\n"
+                       "    return g(3)\n")
+        self.assertEqual(prog.decls[1].body[1].value.type, I32)
+
+    def test_indirect_call_arity_error(self):
+        with self.assertRaises(CheckError):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func f() -> void:\n"
+                "    let g: func(i32) -> i32 = sq\n"
+                "    g(1, 2)\n")
+
+    def test_indirect_call_type_error(self):
+        with self.assertRaises(CheckError):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func f() -> void:\n"
+                "    let g: func(i32) -> i32 = sq\n"
+                "    g(true)\n")
+
+    def test_indirect_call_named_args_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func f() -> void:\n"
+                "    let g: func(i32) -> i32 = sq\n"
+                "    g(x: 1)\n")
+
+    def test_indirect_call_type_args_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func f() -> void:\n"
+                "    let g: func(i32) -> i32 = sq\n"
+                "    g::<i32>(1)\n")
+
+    def test_len_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'len' as a value"):
+            run("func f() -> void:\n    let g = len\n")
+
+    def test_format_builtins_as_values_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'print_fmt' as a value"):
+            run("func f() -> void:\n    let g = print_fmt\n")
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'write_fmt' as a value"):
+            run("func f() -> void:\n    let g = write_fmt\n")
+
+    def test_assert_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'assert' as a value"):
+            run("func f() -> void:\n    let g = assert\n")
+
+    def test_type_name_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use type 'Vec3' as a value"):
+            run("func f() -> void:\n    let g = Vec3\n")
+
+    def test_function_equality_rejected(self):
+        with self.assertRaisesRegex(CheckError, "function values cannot be compared"):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func f() -> void:\n"
+                "    let a = sq\n"
+                "    let b = sq\n"
+                "    print_bool(a == b)\n")
+
+    def test_const_function_rejected(self):
+        with self.assertRaisesRegex(CheckError, "constant cannot hold a function value"):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "const G = sq\n"
+                "func f() -> void:\n    print_i32(G(1))\n")
+
+    def test_extern_function_type_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                                    "extern function 'go' cannot use function types"):
+            run('extern "c" {\n    func go(cb: func(i32) -> i32)\n}\n'
+                'func f() -> void:\n    return\n')
+        with self.assertRaisesRegex(CheckError,
+                                    "extern function 'get' cannot use function types"):
+            run('extern "c" {\n    func get() -> func(i32) -> i32\n}\n'
+                'func f() -> void:\n    return\n')
+
+    def test_reserved_fnptr_struct_name_rejected(self):
+        with self.assertRaisesRegex(CheckError,
+                                    "reserved for generated function-pointer aliases"):
+            run("struct FnPtr0:\n    x: i32\n"
+                "func f() -> void:\n    return\n")
+
+    def test_call_non_function_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot call a value of type i32"):
+            run("func f() -> void:\n    let x = 3\n    x()\n")
+
+    def test_function_value_argument_mismatch_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func takes(x: i32) -> void:\n    return\n"
+                "func f() -> void:\n    takes(sq)\n")
+
+    def test_function_as_param_and_return(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func apply(f: func(i32) -> i32, x: i32) -> i32:\n    return f(x)\n"
+            "func pick() -> func(i32) -> i32:\n    return inc\n"
+            "func f() -> i32:\n"
+            "    let h = pick()\n"
+            "    return apply(h, 1)\n")
+
+    def test_struct_field_function_value(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "struct H:\n    cb: func(i32) -> i32\n"
+            "func f() -> i32:\n"
+            "    let h = H(cb: inc)\n"
+            "    return h.cb(2)\n")
+
+    def test_struct_non_function_field_call_rejected(self):
+        with self.assertRaisesRegex(CheckError, "field 'x' is not callable"):
+            run("struct P:\n    x: i32\n"
+                "func f() -> void:\n    let p = P(x: 1)\n    p.x()\n")
+
+    def test_array_of_functions_index_call(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func dec(x: i32) -> i32:\n    return x - 1\n"
+            "func f() -> i32:\n"
+            "    let fs: [func(i32) -> i32, 2] = [inc, dec]\n"
+            "    return fs[0](10) + fs[1](10)\n")
+
+    def test_mutable_function_variable_reassign(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func dec(x: i32) -> i32:\n    return x - 1\n"
+            "func f() -> i32:\n"
+            "    mut g: func(i32) -> i32 = inc\n"
+            "    g = dec\n"
+            "    return g(5)\n")
+
+    def test_immutable_function_variable_assignment_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func inc(x: i32) -> i32:\n    return x + 1\n"
+                "func dec(x: i32) -> i32:\n    return x - 1\n"
+                "func f() -> void:\n"
+                "    let g: func(i32) -> i32 = inc\n"
+                "    g = dec\n")
+
+    def test_function_value_before_inference_rejected(self):
+        with self.assertRaisesRegex(CheckError, "before its return type is inferred"):
+            run("func f() -> void:\n"
+                "    let g = helper\n"
+                "func helper(x: i32):\n    return x\n")
+
+    def test_function_value_condition_rejected(self):
+        with self.assertRaises(CheckError):
+            run("func inc(x: i32) -> i32:\n    return x + 1\n"
+                "func f() -> void:\n"
+                "    let g = inc\n"
+                "    if g:\n        print_i32(1)\n")
+
+    def test_alloc_of_function_type(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func f() -> i32:\n"
+            "    let a = Arena(256)\n"
+            "    let slots = a.alloc::<func(i32) -> i32>(2)\n"
+            "    slots[0] = inc\n"
+            "    return slots[0](3)\n")
+
+    def test_nested_function_type(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func twice(f: func(i32) -> i32, x: i32) -> i32:\n    return f(f(x))\n"
+            "func f() -> i32:\n"
+            "    let t: func(func(i32) -> i32, i32) -> i32 = twice\n"
+            "    return t(inc, 1)\n")
+
+    def test_func_types_registered_for_codegen(self):
+        prog, tc = run("func inc(x: i32) -> i32:\n    return x + 1\n"
+                       "func f() -> void:\n    let g = inc\n")
+        self.assertEqual(list(tc.func_types.values()), ['FnPtr0'])
+
 
 if __name__ == '__main__':
     unittest.main()

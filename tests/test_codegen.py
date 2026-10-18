@@ -205,6 +205,82 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('int32_t fn_add(int32_t v_a, int32_t v_b);', cpp)
         self.assertIn('vanta::print_i32(fn_add(1, 2))', cpp)
 
+    def test_function_pointer_alias_emitted(self):
+        cpp = gen("func sq(x: i32) -> i32:\n    return x\n"
+                  "func main() -> void:\n    let g = sq\n")
+        self.assertIn('using FnPtr0 = int32_t(*)(int32_t);', cpp)
+        self.assertLess(cpp.index('using FnPtr0'), cpp.index('fn_sq'))
+
+    def test_function_value_reference_prefixed(self):
+        cpp = gen("func sq(x: i32) -> i32:\n    return x\n"
+                  "func main() -> void:\n    let g: func(i32) -> i32 = sq\n")
+        self.assertIn('FnPtr0 v_g = fn_sq;', cpp)
+
+    def test_builtin_function_value(self):
+        cpp = gen("func main() -> void:\n    let logger: func(str) = print_str\n")
+        self.assertIn('using FnPtr0 = void(*)(const char*);', cpp)
+        self.assertIn('FnPtr0 v_logger = vanta::print_str;', cpp)
+
+    def test_indirect_call_emit(self):
+        cpp = gen("func sq(x: i32) -> i32:\n    return x\n"
+                  "func main() -> void:\n"
+                  "    let g: func(i32) -> i32 = sq\n"
+                  "    print_i32(g(3))\n")
+        self.assertIn('vanta::print_i32(v_g(3))', cpp)
+
+    def test_struct_field_function_type(self):
+        cpp = gen("func sq(x: i32) -> i32:\n    return x\n"
+                  "struct H:\n    cb: func(i32) -> i32\n"
+                  "func main() -> void:\n"
+                  "    let h = H(cb: sq)\n"
+                  "    print_i32(h.cb(2))\n")
+        self.assertIn('FnPtr0 v_cb;', cpp)
+        self.assertIn('vanta::print_i32(v_h.v_cb(2))', cpp)
+
+    def test_array_of_function_pointers(self):
+        cpp = gen("func inc(x: i32) -> i32:\n    return x + 1\n"
+                  "func dec(x: i32) -> i32:\n    return x - 1\n"
+                  "func main() -> void:\n"
+                  "    let fs: [func(i32) -> i32, 2] = [inc, dec]\n"
+                  "    print_i32(fs[1](4))\n")
+        self.assertIn('std::array<FnPtr0, 2>{fn_inc, fn_dec}', cpp)
+        self.assertIn('vanta::print_i32(v_fs[1](4))', cpp)
+
+    def test_function_return_type(self):
+        cpp = gen("func inc(x: i32) -> i32:\n    return x + 1\n"
+                  "func pick() -> func(i32) -> i32:\n    return inc\n"
+                  "func main() -> void:\n    let g = pick()\n")
+        self.assertIn('FnPtr0 fn_pick();', cpp)
+        self.assertIn('return fn_inc;', cpp)
+
+    def test_nested_function_type_alias_order(self):
+        cpp = gen("func inc(x: i32) -> i32:\n    return x + 1\n"
+                  "func twice(f: func(i32) -> i32, x: i32) -> i32:\n"
+                  "    return f(f(x))\n"
+                  "func main() -> void:\n"
+                  "    let t: func(func(i32) -> i32, i32) -> i32 = twice\n")
+        self.assertIn('using FnPtr1 = int32_t(*)(FnPtr0, int32_t);', cpp)
+        self.assertLess(cpp.index('using FnPtr0'), cpp.index('using FnPtr1'))
+
+    def test_extern_function_value_unprefixed(self):
+        cpp = gen('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+                  'func main() -> void:\n'
+                  '    let op: func(i32, i32) -> i32 = add\n'
+                  '    print_i32(op(1, 2))\n')
+        self.assertIn('FnPtr0 v_op = add;', cpp)
+        self.assertIn('vanta::print_i32(v_op(1, 2))', cpp)
+        self.assertNotIn('fn_add', cpp)
+
+    def test_alloc_of_function_pointer(self):
+        cpp = gen("func inc(x: i32) -> i32:\n    return x + 1\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(64)\n"
+                  "    let s = a.alloc::<func(i32) -> i32>(2)\n"
+                  "    s[0] = inc\n"
+                  "    print_i32(s[0](1))\n")
+        self.assertIn('FnPtr0* v_s = v_a.alloc<FnPtr0>(2);', cpp)
+        self.assertIn('vanta::print_i32(v_s[0](1))', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

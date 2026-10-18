@@ -2,6 +2,27 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.6.0 — 2026-10-18
+
+- Functions are first-class values. A `func(P1, P2) -> R` type names any
+  function with that signature (omit the arrow for `void`), and values can be
+  stored in variables, passed as arguments, returned, kept in struct fields and
+  arrays, or allocated from an arena. The same call syntax invokes them:
+  `f(x)`, `handlers[0](x)`, `op.run(x)`, `pick()(x)`.
+- Values are plain function pointers — there are no closures, so nothing is
+  captured. Vanta functions (emitted with their `fn_` prefix), `extern`
+  functions, and builtins like `print_str` all work as values.
+- Rejected on purpose: `len`/`print_fmt`/`write_fmt`/`assert` and type names as
+  values, `==`/`!=` on function values, function values in `const`
+  initializers, and function types in `extern` signatures (C callbacks come
+  later).
+- Local bindings now shadow functions of the same name in call position, so
+  the canonical `func apply(f: func(i32) -> i32, ...)` works even when a
+  function named `f` exists.
+- Codegen emits one `using FnPtrN = R(*)(...)` alias per distinct function
+  type, innermost first; type names matching `FnPtr<digits>` are reserved.
+- Added `examples/dispatch.vnt`, plus 51 tests (238 total).
+
 ## v0.5.0 — 2026-10-18
 
 - 2D arrays work end to end. Nested array types and literals (`[[i32, 8], 4]`)

@@ -1,11 +1,20 @@
 from . import ast_nodes as A
 from .typesys import (
     Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType,
-    StructType,
+    StructType, FuncType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
 from .formats import parse_format
+
+
+def _contains_func_type(t) -> bool:
+    """True when t is a function type or wraps one (pointer/array)."""
+    if isinstance(t, FuncType):
+        return True
+    if isinstance(t, (PtrType, ArrayType)):
+        return _contains_func_type(t.inner)
+    return False
 
 
 class CheckError(Exception):
@@ -27,6 +36,9 @@ class TypeChecker:
         self.structs: dict[str, StructType] = {}
         self.functions: dict[str, FuncSig] = {}
         self.constants: dict[str, Type] = {}
+        # Function types seen anywhere in the program, mapped to the C++
+        # alias name codegen will emit for them.
+        self.func_types: dict[FuncType, str] = {}
         self.scopes = []
         self.current_ret: Type = VOID
         self.loop_depth = 0
@@ -95,12 +107,22 @@ class TypeChecker:
             if te.size is None or te.size <= 0:
                 raise CheckError("array size must be a positive integer", self.filename, te.pos)
             return ArrayType(self._resolve_type(te.inner), te.size)
+        if te.kind == 'func':
+            params = tuple(self._resolve_type(p) for p in (te.params or []))
+            ret = self._resolve_type(te.inner) if te.inner is not None else VOID
+            return self._func_type(params, ret)
         n = te.name
         if n in PRIM_TYPES:
             return PRIM_TYPES[n]
         if n in self.structs:
             return self.structs[n]
         raise CheckError(f"unknown type '{n}'", self.filename, te.pos)
+
+    def _func_type(self, params, ret) -> FuncType:
+        ft = FuncType(tuple(params), ret)
+        if ft not in self.func_types:
+            self.func_types[ft] = f'FnPtr{len(self.func_types)}'
+        return ft
 
     def register(self):
         for d in self.program.decls:
@@ -116,6 +138,10 @@ class TypeChecker:
     def _register_struct(self, d):
         if d.name in self.structs:
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
+        if d.name.startswith('FnPtr') and d.name[5:].isdigit():
+            raise CheckError(
+                f"type name '{d.name}' is reserved for generated function-pointer aliases",
+                self.filename, d.pos)
         fields = {}
         for (fname, ftype, fpos) in d.fields:
             if fname in fields:
@@ -154,6 +180,8 @@ class TypeChecker:
             vt = self._default_type(vt, c.value)
         if vt is VOID:
             raise CheckError("constant cannot be void", self.filename, c.pos)
+        if _contains_func_type(vt):
+            raise CheckError("constant cannot hold a function value", self.filename, c.pos)
         self.constants[c.name] = vt
 
     def _register_extern(self, d: A.ExternDecl):
@@ -166,6 +194,11 @@ class TypeChecker:
             for p in fd.params:
                 params.append((p.name, self._resolve_type(p.type)))
             ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
+            if _contains_func_type(ret) or any(_contains_func_type(t) for (_, t) in params):
+                raise CheckError(
+                    f"extern function '{fd.name}' cannot use function types; "
+                    f"C callbacks are not supported yet",
+                    self.filename, fd.pos)
             self.functions[fd.name] = FuncSig(fd.name, params, ret, is_extern=True)
 
     def _is_constexpr(self, expr) -> bool:
@@ -406,10 +439,28 @@ class TypeChecker:
             return self._check_array_lit(expr)
         if isinstance(expr, A.Name):
             ent = self._lookup(expr.name)
-            if ent is None:
-                raise CheckError(f"unknown name '{expr.name}'", self.filename, expr.pos)
-            expr.type = ent[0]
-            return ent[0]
+            if ent is not None:
+                expr.type = ent[0]
+                return ent[0]
+            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert'):
+                raise CheckError(f"cannot use builtin '{expr.name}' as a value",
+                                 self.filename, expr.pos)
+            if expr.name in self.structs:
+                raise CheckError(f"cannot use type '{expr.name}' as a value",
+                                 self.filename, expr.pos)
+            if expr.name in self.functions:
+                sig = self.functions[expr.name]
+                if isinstance(sig.ret, InferType):
+                    raise CheckError(
+                        f"cannot use '{expr.name}' as a value before its return "
+                        f"type is inferred; add explicit '-> T' or move its "
+                        f"declaration before this use",
+                        self.filename, expr.pos)
+                ft = self._func_type(tuple(t for (_, t) in sig.params), sig.ret)
+                expr.type = ft
+                expr.is_func_ref = True
+                return ft
+            raise CheckError(f"unknown name '{expr.name}'", self.filename, expr.pos)
         if isinstance(expr, A.BinOp):
             lt = self._check_expr(expr.left)
             rt = self._check_expr(expr.right)
@@ -485,6 +536,9 @@ class TypeChecker:
                 raise CheckError(f"'{op}' requires bool operands", self.filename, expr.pos)
             return BOOL
         if op in ('==', '!=', '<', '<=', '>', '>='):
+            if isinstance(lt, FuncType) or isinstance(rt, FuncType):
+                raise CheckError("function values cannot be compared",
+                                 self.filename, expr.pos)
             if isinstance(lt, StructType) or isinstance(rt, StructType):
                 if (op in ('==', '!=') and isinstance(lt, StructType)
                         and lt == rt and lt.name in ("Vec2", "Vec3")):
@@ -584,6 +638,14 @@ class TypeChecker:
         f = call.func
         if isinstance(f, A.Name):
             name = f.name
+            # A local binding (parameter or variable) shadows any function
+            # or constructor of the same name.
+            ent = self._lookup(name)
+            if ent is not None:
+                if isinstance(ent[0], FuncType):
+                    return self._check_indirect_call(call, ent[0])
+                raise CheckError(f"cannot call a value of type {ent[0]}",
+                                 self.filename, call.pos)
             if name == 'len':
                 return self._check_len(call)
             if name in ('print_fmt', 'write_fmt'):
@@ -599,9 +661,40 @@ class TypeChecker:
         if isinstance(f, A.Member):
             ot = self._check_expr(f.obj)
             if isinstance(ot, StructType):
+                if f.field in ot.fields:
+                    ft = ot.fields[f.field]
+                    if isinstance(ft, FuncType):
+                        return self._check_indirect_call(call, ft)
+                    raise CheckError(f"field '{f.field}' is not callable (type {ft})",
+                                     self.filename, call.pos)
                 return self._check_method(ot, f.field, call)
             raise CheckError(f"type {ot} has no methods", self.filename, call.pos)
-        raise CheckError("cannot call expression", self.filename, call.pos)
+        # Any other expression evaluating to a function value, such as an
+        # indexed element of an array of functions.
+        t = self._default_type(self._check_expr(f), f)
+        if isinstance(t, FuncType):
+            return self._check_indirect_call(call, t)
+        raise CheckError(f"cannot call a value of type {t}", self.filename, call.pos)
+
+    def _check_indirect_call(self, call: A.Call, ft: FuncType) -> Type:
+        call.is_indirect_call = True
+        if call.type_args:
+            raise CheckError("function values do not take type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("function values do not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != len(ft.params):
+            raise CheckError(
+                f"function value expects {len(ft.params)} argument(s), got {len(call.args)}",
+                self.filename, call.pos)
+        for arg, ptype in zip(call.args, ft.params):
+            at = self._check_expr(arg)
+            if isinstance(at, StructType) and at.name == "Arena":
+                raise CheckError("cannot pass Arena to a function", self.filename, call.pos)
+            self._coerce_value(arg, at, ptype, call.pos, "argument")
+        call.type = ft.ret
+        return ft.ret
 
     def _check_len(self, call: A.Call) -> Type:
         if len(call.args) != 1:

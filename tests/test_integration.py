@@ -307,6 +307,41 @@ class IntegrationTests(unittest.TestCase):
                             ['#.#.#.#.', '.#.#.#.#', '#.#.#.#.', '.#.#.#.#',
                              '9', '168'])
 
+    def test_dispatch_example(self):
+        # First-class functions: array of function values, higher-order
+        # apply, struct-held callback, and a void function value.
+        self._build_and_run(os.path.join(EXAMPLES, 'dispatch.vnt'),
+                            ['25', '-5', '49', 'square op: 16', 'done'])
+
+    def test_function_value_runtime(self):
+        # Nested function types, arena-stored function pointers, and copies
+        # of function values executed for real.
+        src = (
+            "func twice(f: func(i32) -> i32, x: i32) -> i32:\n"
+            "    return f(f(x))\n"
+            "func inc(x: i32) -> i32:\n"
+            "    return x + 1\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(256)\n"
+            "    let slots = arena.alloc::<func(func(i32) -> i32, i32) -> i32>(1)\n"
+            "    slots[0] = twice\n"
+            "    let t: func(i32) -> i32 = inc\n"
+            "    print_i32(slots[0](t, 3))\n"
+            "    let a: [func(i32) -> i32, 2] = [inc, t]\n"
+            "    mut acc = 0\n"
+            "    for i in range(0, len(a)):\n"
+            "        acc += a[i](10)\n"
+            "    print_i32(acc)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_fcf_')
+        try:
+            path = os.path.join(tmp, 'fcf.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['5', '22'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_extern_link_end_to_end(self):
         # Build the C side of examples/extern_demo.vnt into a static library,
         # link the generated program against it, run it, and check the output.

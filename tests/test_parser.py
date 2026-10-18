@@ -183,6 +183,58 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(ed, A.ExternDecl)
         self.assertEqual(ed.funcs, [])
 
+    def test_func_type_annotation(self):
+        prog = parse("func f() -> void:\n    let cb: func(i32, f32) -> f32 = g\n")
+        ann = prog.decls[0].body[0].type_ann
+        self.assertEqual(ann.kind, 'func')
+        self.assertEqual([p.name for p in ann.params], ['i32', 'f32'])
+        self.assertEqual(ann.inner.name, 'f32')
+
+    def test_func_type_void_shorthand(self):
+        prog = parse("func f() -> void:\n    let cb: func(i32) = g\n")
+        ann = prog.decls[0].body[0].type_ann
+        self.assertEqual(ann.kind, 'func')
+        self.assertIsNone(ann.inner)
+
+    def test_func_type_no_params(self):
+        prog = parse("func f() -> void:\n    let cb: func() -> i32 = g\n")
+        ann = prog.decls[0].body[0].type_ann
+        self.assertEqual(ann.kind, 'func')
+        self.assertEqual(ann.params, [])
+        self.assertEqual(ann.inner.name, 'i32')
+
+    def test_func_type_nested_return(self):
+        prog = parse("func f() -> void:\n"
+                     "    let cb: func(i32) -> func(i32) -> i32 = g\n")
+        ann = prog.decls[0].body[0].type_ann
+        self.assertEqual(ann.kind, 'func')
+        self.assertEqual(ann.inner.kind, 'func')
+        self.assertEqual(ann.inner.inner.name, 'i32')
+
+    def test_func_param_type(self):
+        prog = parse("func apply(f: func(i32) -> i32, x: i32) -> i32:\n    return x\n")
+        ft = prog.decls[0].params[0].type
+        self.assertEqual(ft.kind, 'func')
+        self.assertEqual(len(ft.params), 1)
+
+    def test_indexed_call_parses(self):
+        prog = parse("func f() -> void:\n    g[0](1)\n")
+        call = prog.decls[0].body[0].expr
+        self.assertIsInstance(call, A.Call)
+        self.assertIsInstance(call.func, A.Index)
+
+    def test_member_call_parses(self):
+        prog = parse("func f() -> void:\n    s.cb(1)\n")
+        call = prog.decls[0].body[0].expr
+        self.assertIsInstance(call, A.Call)
+        self.assertIsInstance(call.func, A.Member)
+
+    def test_chained_call_parses(self):
+        prog = parse("func f() -> void:\n    g(1)(2)\n")
+        call = prog.decls[0].body[0].expr
+        self.assertIsInstance(call, A.Call)
+        self.assertIsInstance(call.func, A.Call)
+
 
 if __name__ == '__main__':
     unittest.main()

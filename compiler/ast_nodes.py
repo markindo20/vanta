@@ -21,6 +21,9 @@ class TypeExpr:
     inner: Optional['TypeExpr'] = None
     size: Optional[int] = None
     pos: Optional[Pos] = None
+    # For kind == 'func': the parameter type expressions. `inner` holds the
+    # return type, or None for void.
+    params: Optional[List['TypeExpr']] = None
 
 
 @dataclass

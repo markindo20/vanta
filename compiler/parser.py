@@ -183,6 +183,21 @@ class Parser:
                 self.error("array size must be a positive integer", size_tok)
             self.expect(TT.RBRACKET)
             return A.TypeExpr('array', inner=inner, size=size_tok.value, pos=A.Pos(t.line, t.col))
+        if t.type == TT.FUNC:
+            self.advance()
+            self.expect(TT.LPAREN)
+            params = []
+            if not self.check(TT.RPAREN):
+                while True:
+                    params.append(self.parse_type())
+                    if self.match(TT.COMMA):
+                        continue
+                    break
+            self.expect(TT.RPAREN)
+            ret = None
+            if self.match(TT.ARROW):
+                ret = self.parse_type()
+            return A.TypeExpr('func', params=params, inner=ret, pos=A.Pos(t.line, t.col))
         if t.type != TT.IDENT:
             self.error("expected type name")
         self.advance()
@@ -371,6 +386,13 @@ class Parser:
                 idx = self.parse_expr()
                 self.expect(TT.RBRACKET)
                 expr = A.Index(expr, idx, A.Pos(t.line, t.col))
+            elif t.type == TT.LPAREN:
+                # Calling a non-name expression: an indexed element, a
+                # parenthesized value, or the result of another call.
+                self.advance()
+                args, names = self._parse_args_until_rparen()
+                self.expect(TT.RPAREN)
+                expr = A.Call(expr, args, names, None, A.Pos(t.line, t.col))
             else:
                 break
         return expr
