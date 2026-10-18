@@ -344,12 +344,19 @@ class CodeGen:
             return f'v_{expr.name}'
         if isinstance(expr, A.Member):
             obj_t = expr.obj.type if hasattr(expr.obj, 'type') else None
-            base = self._expr(expr.obj)
+            # Recurse through _lvalue, not _expr: a checked at() receiver
+            # must be emitted as a reference so writes reach the array.
+            base = self._lvalue(expr.obj)
             if isinstance(obj_t, StructType) and obj_t.builtin:
                 return f'{base}.{expr.field}'
             return f'{base}.v_{expr.field}'
         if isinstance(expr, A.Index):
-            return f'{self._expr(expr.obj)}[{self._expr(expr.index)}]'
+            return f'{self._lvalue(expr.obj)}[{self._expr(expr.index)}]'
+        if isinstance(expr, A.Call) and getattr(expr, 'is_checked_at', False):
+            f = expr.func
+            line = expr.pos.line if expr.pos else 0
+            return (f'vanta::at_checked_ref({self._lvalue(f.obj)}, '
+                    f'{self._expr(expr.args[0])}, {line})')
         raise RuntimeError(f"invalid lvalue {type(expr).__name__}")
 
     def _expr(self, e) -> str:
@@ -465,6 +472,10 @@ class CodeGen:
             prefix = '' if fn_sig.is_extern else 'fn_'
             return f'{prefix}{name}({args})'
         if isinstance(f, A.Member):
+            if getattr(c, 'is_checked_at', False):
+                line = c.pos.line if c.pos else 0
+                return (f'vanta::at_checked({self._expr(f.obj)}, '
+                        f'{self._expr(c.args[0])}, {line})')
             ot = getattr(f.obj, 'type', None)
             base = self._expr(f.obj)
             m = f.field

@@ -1,0 +1,32 @@
+# bounds.vnt — checked array access with xs.at(i).
+#
+# `xs.at(i)` is `xs[i]` with a runtime bounds check: an out-of-bounds index
+# prints `vanta: index I out of bounds (size N) at line L` and exits 1
+# instead of touching memory. Reads and writes are both checked, so
+# `xs.at(i) = v` is a checked write. Plain `xs[i]` stays unchecked.
+#
+# Usage:
+#   python main.py run examples/bounds.vnt
+
+func sum(xs: [i32, 5]) -> i32:
+    mut total = 0
+    for i in range(0, len(xs)):
+        total += xs.at(i)
+    return total
+
+func main() -> void:
+    mut xs: [i32, 5] = [4, 8, 15, 16, 23]
+    print_i32(sum(xs))
+
+    # Checked writes land in the array just like xs[i] = v.
+    xs.at(0) = 1
+    print_i32(xs.at(0))
+    xs.at(2) += 10
+    print_i32(xs.at(2))
+
+    # The index may be any i32 expression: a computed one, or even another
+    # checked read. Both of these are in range; an out-of-range one would
+    # stop the program with the array's size and the line number.
+    let i = sum(xs) % len(xs)
+    print_i32(xs.at(i))
+    print_i32(xs.at(xs.at(0) + 1))

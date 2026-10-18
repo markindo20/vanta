@@ -204,6 +204,30 @@ inline void assert_impl(bool cond, int32_t line) {
     }
 }
 
+// ---------- Bounds-checked array access ----------
+// xs.at(i) compiles down to these. Unlike xs[i], the index is checked first:
+// an out-of-bounds read or write stops the program with the array size and
+// the source line of the access. at_checked returns a copy so it also works
+// on temporary (prvalue) receivers; at_checked_ref returns the real element
+// so writes land in the array.
+inline void index_fail(int32_t index, int32_t size, int32_t line) {
+    std::fprintf(stderr, "vanta: index %d out of bounds (size %d) at line %d\n",
+                 (int)index, (int)size, (int)line);
+    std::exit(1);
+}
+
+template <typename T, size_t N>
+inline T at_checked(const std::array<T, N>& xs, int32_t index, int32_t line) {
+    if (index < 0 || (size_t)index >= N) index_fail(index, (int32_t)N, line);
+    return xs[(size_t)index];
+}
+
+template <typename T, size_t N>
+inline T& at_checked_ref(std::array<T, N>& xs, int32_t index, int32_t line) {
+    if (index < 0 || (size_t)index >= N) index_fail(index, (int32_t)N, line);
+    return xs[(size_t)index];
+}
+
 // ---------- Built-in IO / math ----------
 inline void print_i32(int32_t v) { std::printf("%d\n", (int)v); }
 inline void print_u32(uint32_t v) { std::printf("%u\n", (unsigned)v); }

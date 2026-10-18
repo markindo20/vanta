@@ -52,6 +52,24 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def _build_and_run_expect_error(self, source_path, message):
+        name, path = find_cxx_compiler()
+        prog, tc = _frontend_only(source_path)
+        tmp = tempfile.mkdtemp(prefix='vanta_it_')
+        try:
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn(message, r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_vector_example(self):
         self._build_and_run(os.path.join(EXAMPLES, 'vector_math.vnt'),
                             ['5.000000', '7.000000', '9.000000', '32.000000'])
@@ -313,6 +331,12 @@ class IntegrationTests(unittest.TestCase):
         self._build_and_run(os.path.join(EXAMPLES, 'dispatch.vnt'),
                             ['25', '-5', '49', 'square op: 16', 'done'])
 
+    def test_bounds_example(self):
+        # Bounds-checked access: checked reads and writes, including a
+        # computed index and a nested checked read as the index.
+        self._build_and_run(os.path.join(EXAMPLES, 'bounds.vnt'),
+                            ['66', '1', '25', '16', '25'])
+
     def test_function_value_runtime(self):
         # Nested function types, arena-stored function pointers, and copies
         # of function values executed for real.
@@ -477,6 +501,69 @@ class IntegrationTests(unittest.TestCase):
             r = subprocess.run([exe], capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('string pool exhausted', r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_checked_index_runtime(self):
+        # Reads and writes through xs.at(i): plain, compound, nested 2D, and
+        # a pointer-backed row.
+        src = (
+            "func main() -> void:\n"
+            "    mut xs: [i32, 4] = [10, 20, 30, 40]\n"
+            "    print_i32(xs.at(1))\n"
+            "    xs.at(2) = 99\n"
+            "    print_i32(xs.at(2))\n"
+            "    xs.at(3) += 1\n"
+            "    print_i32(xs.at(3))\n"
+            "    mut g: [[i32, 2], 2] = [[1, 2], [3, 4]]\n"
+            "    g.at(1).at(0) = 30\n"
+            "    print_i32(g.at(1).at(0))\n"
+            "    let n = len(xs)\n"
+            "    print_i32(xs.at(n - 1))\n"
+            "    let a = Arena(256)\n"
+            "    let rows = a.alloc::<[i32, 2]>(1)\n"
+            "    rows[0].at(0) = 7\n"
+            "    print_i32(rows[0].at(0))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_at_')
+        try:
+            path = os.path.join(tmp, 'at.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['20', '99', '41', '30', '41', '7'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_checked_index_out_of_bounds_read_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let xs: [i32, 3] = [1, 2, 3]\n"
+            "    let i = 5 - 2\n"
+            "    print_i32(xs.at(i))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_at_oob_')
+        try:
+            path = os.path.join(tmp, 'oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: index 3 out of bounds (size 3) at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_checked_index_out_of_bounds_write_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    mut xs: [i32, 3] = [1, 2, 3]\n"
+            "    xs.at(-1) = 9\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_at_oobw_')
+        try:
+            path = os.path.join(tmp, 'oobw.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: index -1 out of bounds (size 3) at line 3')
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

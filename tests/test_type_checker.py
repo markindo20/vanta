@@ -642,6 +642,136 @@ class TypeCheckerTests(unittest.TestCase):
                        "func f() -> void:\n    let g = inc\n")
         self.assertEqual(list(tc.func_types.values()), ['FnPtr0'])
 
+    def test_at_read_returns_element_type(self):
+        from compiler.typesys import I32
+        prog, tc = run("func f() -> i32:\n"
+                       "    let xs: [i32, 3] = [1, 2, 3]\n"
+                       "    return xs.at(1)\n")
+        self.assertEqual(prog.decls[0].body[1].value.type, I32)
+
+    def test_at_marks_checked_call(self):
+        prog, tc = run("func f() -> i32:\n"
+                       "    let xs: [i32, 3] = [1, 2, 3]\n"
+                       "    return xs.at(1)\n")
+        self.assertTrue(getattr(prog.decls[0].body[1].value, 'is_checked_at', False))
+
+    def test_at_nested_array_read(self):
+        run("func f() -> i32:\n"
+            "    let g: [[i32, 2], 2] = [[1, 2], [3, 4]]\n"
+            "    return g.at(1).at(0)\n")
+
+    def test_at_read_on_field_and_row(self):
+        run("struct S:\n    arr: [i32, 2]\n"
+            "func f() -> i32:\n"
+            "    let s = S(arr: [1, 2])\n"
+            "    return s.arr.at(1)\n"
+            "func g() -> i32:\n"
+            "    let a = Arena(256)\n"
+            "    let rows = a.alloc::<[i32, 2]>(2)\n"
+            "    return rows[1].at(0)\n")
+
+    def test_at_write_mut_array(self):
+        run("func f() -> void:\n"
+            "    mut xs: [i32, 3] = [1, 2, 3]\n"
+            "    xs.at(0) = 9\n")
+
+    def test_at_compound_write(self):
+        run("func f() -> void:\n"
+            "    mut xs: [i32, 3] = [1, 2, 3]\n"
+            "    xs.at(0) += 2\n")
+
+    def test_at_write_rejected_on_let(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    xs.at(0) = 9\n")
+
+    def test_at_write_rejected_on_param(self):
+        with self.assertRaises(CheckError):
+            run("func f(xs: [i32, 3]) -> void:\n"
+                "    xs.at(0) = 9\n"
+                "func main() -> void:\n    return\n")
+
+    def test_at_write_rejected_on_temp(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    [1, 2].at(0) = 9\n")
+
+    def test_at_write_through_mut_struct_field(self):
+        run("struct S:\n    arr: [i32, 2]\n"
+            "func f() -> void:\n"
+            "    mut s = S(arr: [1, 2])\n"
+            "    s.arr.at(0) = 9\n")
+
+    def test_at_write_through_pointer_row(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let rows = a.alloc::<[i32, 2]>(2)\n"
+            "    rows[0].at(1) = 7\n")
+
+    def test_at_write_nested_arrays(self):
+        run("func f() -> void:\n"
+            "    mut g: [[i32, 2], 2] = [[1, 2], [3, 4]]\n"
+            "    g.at(0).at(1) = 7\n")
+
+    def test_at_rejected_on_pointer(self):
+        with self.assertRaisesRegex(CheckError, "a pointer has no length"):
+            run("func f() -> void:\n"
+                "    let a = Arena(64)\n"
+                "    let p = a.alloc::<i32>(4)\n"
+                "    print_i32(p.at(0))\n")
+
+    def test_at_rejected_on_non_array(self):
+        with self.assertRaisesRegex(CheckError, "'at' requires a fixed-size array"):
+            run("func f() -> void:\n"
+                "    let x = 1\n"
+                "    print_i32(x.at(0))\n")
+
+    def test_at_arity_error(self):
+        with self.assertRaisesRegex(CheckError, "'at' expects one index"):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    print_i32(xs.at(0, 1))\n")
+
+    def test_at_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'at' does not accept named arguments"):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    print_i32(xs.at(i: 0))\n")
+
+    def test_at_type_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'at' does not accept type arguments"):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    print_i32(xs.at::<i32>(0))\n")
+
+    def test_at_index_must_be_i32(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    print_i32(xs.at(1.5))\n")
+
+    def test_at_value_use_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'at' must be called with an index"):
+            run("func f() -> void:\n"
+                "    let xs: [i32, 3] = [1, 2, 3]\n"
+                "    let f = xs.at\n")
+
+    def test_at_field_name_still_wins_on_struct(self):
+        run("struct Op:\n    at: func(i32) -> i32\n"
+            "func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func f() -> i32:\n"
+            "    let o = Op(at: inc)\n"
+            "    return o.at(41)\n")
+
+    def test_at_field_call_result_not_assignable(self):
+        with self.assertRaisesRegex(CheckError, "invalid assignment target"):
+            run("struct Op:\n    at: func(i32) -> i32\n"
+                "func inc(x: i32) -> i32:\n    return x + 1\n"
+                "func f() -> void:\n"
+                "    let o = Op(at: inc)\n"
+                "    o.at(1) = 2\n")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -334,20 +334,23 @@ class TypeChecker:
         v.var_type = vt
 
     def _check_assign(self, a: A.AssignStmt):
+        # Check the target first: that marks checked at() accesses and
+        # indirect calls, which _is_assignable relies on.
+        tt = self._check_expr(a.target)
         if not self._is_assignable(a.target):
             raise CheckError("invalid assignment target", self.filename, a.pos)
-        tt = self._check_expr(a.target)
         vt = self._check_expr(a.value)
         self._coerce_value(a.value, vt, tt, a.pos, "assignment")
         if isinstance(tt, StructType) and tt.name == "Arena":
             raise CheckError("Arena values cannot be assigned", self.filename, a.pos)
 
     def _is_assignable(self, expr) -> bool:
-        # Walk the storage chain (field accesses and indexes) down to its
-        # root. An index applied to a pointer makes the chain writable no
-        # matter how the binding was declared — pointer memory is mutable
-        # through a plain `let`. In every other case the root binding must be
-        # `mut`; parameters and `let` bindings are immutable at any depth.
+        # Walk the storage chain (field accesses, indexes, and checked at()
+        # accesses) down to its root. An index applied to a pointer makes the
+        # chain writable no matter how the binding was declared — pointer
+        # memory is mutable through a plain `let`. In every other case the
+        # root binding must be `mut`; parameters and `let` bindings are
+        # immutable at any depth.
         node = expr
         while True:
             if isinstance(node, A.Index):
@@ -356,6 +359,13 @@ class TypeChecker:
                     return True
                 node = node.obj
                 continue
+            if isinstance(node, A.Call):
+                # A checked xs.at(i) is a storage location: keep walking
+                # through its receiver. Any other call is a temporary.
+                if getattr(node, 'is_checked_at', False):
+                    node = node.func.obj
+                    continue
+                return False
             if isinstance(node, A.Member):
                 node = node.obj
                 continue
@@ -488,6 +498,9 @@ class TypeChecker:
                 t = ot.fields[expr.field]
                 expr.type = t
                 return t
+            if expr.field == 'at' and isinstance(ot, ArrayType):
+                raise CheckError("'at' must be called with an index: xs.at(i)",
+                                 self.filename, expr.pos)
             raise CheckError(f"type {ot} has no field '{expr.field}'", self.filename, expr.pos)
         if isinstance(expr, A.Index):
             ot = self._check_expr(expr.obj)
@@ -668,6 +681,16 @@ class TypeChecker:
                     raise CheckError(f"field '{f.field}' is not callable (type {ft})",
                                      self.filename, call.pos)
                 return self._check_method(ot, f.field, call)
+            if f.field == 'at':
+                if isinstance(ot, PtrType):
+                    raise CheckError(
+                        "'at' is not available on pointers (a pointer has no "
+                        "length); use p[i] for unchecked access",
+                        self.filename, call.pos)
+                if isinstance(ot, ArrayType):
+                    return self._check_at(call, ot)
+                raise CheckError(f"'at' requires a fixed-size array, got {ot}",
+                                 self.filename, call.pos)
             raise CheckError(f"type {ot} has no methods", self.filename, call.pos)
         # Any other expression evaluating to a function value, such as an
         # indexed element of an array of functions.
@@ -704,6 +727,22 @@ class TypeChecker:
             raise CheckError(f"len expects an array, got {at}", self.filename, call.pos)
         call.type = I32
         return I32
+
+    def _check_at(self, call: A.Call, arr: ArrayType) -> Type:
+        if call.type_args:
+            raise CheckError("'at' does not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("'at' does not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != 1:
+            raise CheckError(f"'at' expects one index, got {len(call.args)}",
+                             self.filename, call.pos)
+        it = self._check_expr(call.args[0])
+        self._coerce_value(call.args[0], it, I32, call.pos, "index")
+        call.is_checked_at = True
+        call.type = arr.inner
+        return arr.inner
 
     def _check_fmt(self, call: A.Call, name: str) -> Type:
         if call.arg_names and any(x is not None for x in call.arg_names):

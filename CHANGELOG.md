@@ -2,6 +2,22 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.7.0 — 2026-10-18
+
+- Added bounds-checked array access: `xs.at(i)` checks the index against the
+  fixed size of `xs` before touching memory. Reads return the element, and
+  writes (`xs.at(i) = v`, including compound forms) obey the normal mutability
+  rules. An out-of-range or negative index prints
+  `vanta: index I out of bounds (size N) at line L` to stderr and exits 1.
+  Plain `xs[i]` stays unchecked.
+- `at` composes with nested arrays — `g.at(y).at(x)` reads and
+  `g.at(y).at(x) = v` writes — and rejects `ptr<T>` receivers with "a pointer
+  has no length", since pointers have no size to check against.
+- Codegen emits `vanta::at_checked` for reads and `vanta::at_checked_ref` (a
+  real reference, so writes land in the array) for writes, carrying the
+  access's source line into the failure message.
+- Added `examples/bounds.vnt`, plus 29 tests (267 total).
+
 ## v0.6.0 — 2026-10-18
 
 - Functions are first-class values. A `func(P1, P2) -> R` type names any

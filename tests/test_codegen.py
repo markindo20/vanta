@@ -281,6 +281,32 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('FnPtr0* v_s = v_a.alloc<FnPtr0>(2);', cpp)
         self.assertIn('vanta::print_i32(v_s[0](1))', cpp)
 
+    def test_at_read_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let xs: [i32, 3] = [1, 2, 3]\n"
+                  "    print_i32(xs.at(1))\n")
+        self.assertIn('vanta::print_i32(vanta::at_checked(v_xs, 1, 3))', cpp)
+
+    def test_at_write_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    mut xs: [i32, 3] = [1, 2, 3]\n"
+                  "    xs.at(0) = 9\n")
+        self.assertIn('vanta::at_checked_ref(v_xs, 0, 3) = 9;', cpp)
+
+    def test_at_nested_chain_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    mut g: [[i32, 2], 2] = [[1, 2], [3, 4]]\n"
+                  "    g.at(0).at(1) = 7\n"
+                  "    print_i32(g.at(1).at(0))\n")
+        self.assertIn('vanta::at_checked_ref(vanta::at_checked_ref(v_g, 0, 3), 1, 3) = 7;', cpp)
+        self.assertIn('vanta::print_i32(vanta::at_checked(vanta::at_checked(v_g, 1, 4), 0, 4))', cpp)
+
+    def test_at_compound_write_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    mut xs: [i32, 3] = [1, 2, 3]\n"
+                  "    xs.at(1) += 2\n")
+        self.assertIn('vanta::at_checked_ref(v_xs, 1, 3) = (vanta::at_checked(v_xs, 1, 3) + 2);', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()
