@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.9.0 — 2026-10-18
+
+- Added dynamic lists: `List<T>`, a growable array backed by an `Arena`.
+  `arena.list::<T>()` creates an empty list, `xs.push(v)` appends (growing by
+  doubling from a capacity of 4), `xs.pop()` removes the last element, and
+  `len(xs)` reads the size. Element access reuses the v0.7.0 checked
+  `xs.at(i)` — reads and writes, with out-of-bounds errors naming the list
+  size and source line — plus the unchecked `xs[i]` form.
+- A list is a handle: copies alias the same storage, and passing one to a
+  function lets the function append to the caller's list. Since a list is an
+  indirection like `ptr<T>`, element writes and `push`/`pop` work through a
+  plain `let`; `mut` only controls rebinding. `List<void>` and `List<Arena>`
+  are compile errors, and `arena.reset()` invalidates the arena's lists.
+- New example `examples/lists.vnt`: particles in a list, integrated through a
+  function call, with checked reads and writes and a pop; plus 39 tests
+  (313 total).
+
 ## v0.8.0 — 2026-10-18
 
 - Added trigonometry: `sin`, `cos`, and `tan` for `f32` and `f64`, plus

@@ -2,8 +2,8 @@ from . import ast_nodes as A
 from . import VERSION
 from .formats import parse_format
 from .typesys import (
-    PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType, StructType,
-    FuncType,
+    PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType, InferType,
+    StructType, FuncType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
 )
 
@@ -98,6 +98,7 @@ def cpp_type(t):
         raise ValueError("internal: function types must go through CodeGen._ctype")
     if isinstance(t, PtrType): return cpp_type(t.inner) + '*'
     if isinstance(t, ArrayType): return f'std::array<{cpp_type(t.inner)}, {t.size}>'
+    if isinstance(t, ListType): return f'vanta::List<{cpp_type(t.inner)}>'
     if isinstance(t, StructType):
         if t.builtin: return 'vanta::' + t.name
         return t.name
@@ -111,6 +112,8 @@ def _func_types_in(t):
     elif isinstance(t, PtrType):
         yield from _func_types_in(t.inner)
     elif isinstance(t, ArrayType):
+        yield from _func_types_in(t.inner)
+    elif isinstance(t, ListType):
         yield from _func_types_in(t.inner)
 
 
@@ -151,6 +154,8 @@ class CodeGen:
             return self._ctype(t.inner) + '*'
         if isinstance(t, ArrayType):
             return f'std::array<{self._ctype(t.inner)}, {t.size}>'
+        if isinstance(t, ListType):
+            return f'vanta::List<{self._ctype(t.inner)}>'
         return cpp_type(t)
 
     def _ordered_func_types(self):
@@ -355,11 +360,18 @@ class CodeGen:
                 return f'{base}.{expr.field}'
             return f'{base}.v_{expr.field}'
         if isinstance(expr, A.Index):
+            if isinstance(getattr(expr.obj, 'type', None), ListType):
+                return (f'{self._lvalue(expr.obj)}.h->data'
+                        f'[{self._expr(expr.index)}]')
             return f'{self._lvalue(expr.obj)}[{self._expr(expr.index)}]'
         if isinstance(expr, A.Call) and getattr(expr, 'is_checked_at', False):
             f = expr.func
             line = expr.pos.line if expr.pos else 0
-            return (f'vanta::at_checked_ref({self._lvalue(f.obj)}, '
+            recv = f.obj
+            if isinstance(getattr(recv, 'type', None), ListType):
+                return (f'vanta::list_at_checked_ref({self._lvalue(recv)}, '
+                        f'{self._expr(expr.args[0])}, {line})')
+            return (f'vanta::at_checked_ref({self._lvalue(recv)}, '
                     f'{self._expr(expr.args[0])}, {line})')
         raise RuntimeError(f"invalid lvalue {type(expr).__name__}")
 
@@ -415,6 +427,8 @@ class CodeGen:
                 return f'{base}.{e.field}'
             return f'{base}.v_{e.field}'
         if isinstance(e, A.Index):
+            if isinstance(getattr(e.obj, 'type', None), ListType):
+                return f'{self._expr(e.obj)}.h->data[{self._expr(e.index)}]'
             return f'{self._expr(e.obj)}[{self._expr(e.index)}]'
         if isinstance(e, A.Call):
             return self._call(e)
@@ -448,6 +462,8 @@ class CodeGen:
         if isinstance(f, A.Name):
             name = f.name
             if name == 'len':
+                if isinstance(getattr(c.args[0], 'type', None), ListType):
+                    return f'int32_t(({self._expr(c.args[0])}).h->len)'
                 return f'int32_t(({self._expr(c.args[0])}).size())'
             if name in ('print_fmt', 'write_fmt'):
                 return self._fmt_call(c, name)
@@ -478,6 +494,9 @@ class CodeGen:
         if isinstance(f, A.Member):
             if getattr(c, 'is_checked_at', False):
                 line = c.pos.line if c.pos else 0
+                if isinstance(getattr(f.obj, 'type', None), ListType):
+                    return (f'vanta::list_at_checked({self._expr(f.obj)}, '
+                            f'{self._expr(c.args[0])}, {line})')
                 return (f'vanta::at_checked({self._expr(f.obj)}, '
                         f'{self._expr(c.args[0])}, {line})')
             ot = getattr(f.obj, 'type', None)
@@ -490,6 +509,16 @@ class CodeGen:
                     ta = c.type_args[0]
                     inner = self.tc._resolve_type(ta)
                     return f'{base}.alloc<{self._ctype(inner)}>({self._expr(c.args[0])})'
+                if m == 'list':
+                    ta = c.type_args[0]
+                    inner = self.tc._resolve_type(ta)
+                    return f'vanta::list_new<{self._ctype(inner)}>({base})'
+            if isinstance(ot, ListType):
+                if m == 'push':
+                    return f'vanta::list_push({base}, {self._expr(c.args[0])})'
+                if m == 'pop':
+                    line = c.pos.line if c.pos else 0
+                    return f'vanta::list_pop({base}, {line})'
             if isinstance(ot, StructType) and ot.name in ('Vec2', 'Vec3'):
                 if m == 'dot':
                     return f'vanta::dot({base}, {self._expr(c.args[0])})'

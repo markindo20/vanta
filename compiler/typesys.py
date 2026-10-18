@@ -36,6 +36,12 @@ class ArrayType(Type):
 
 
 @dataclass(frozen=True)
+class ListType(Type):
+    inner: Type
+    def __repr__(self): return f"List<{self.inner}>"
+
+
+@dataclass(frozen=True)
 class InferType(Type):
     def __repr__(self): return "<infer>"
 

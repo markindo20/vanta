@@ -361,6 +361,115 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_lists_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'lists.vnt'),
+                            ['5', '0.000000', '1.000000', '2.000000', '3.000000',
+                             '4.000000', '4.000000', '4'])
+
+    def test_list_grow_and_iterate(self):
+        # Pushing past the initial capacity exercises arena-backed growth.
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(65536)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    for i in range(0, 20):\n"
+            "        xs.push(i * i)\n"
+            "    mut total = 0\n"
+            "    for i in range(0, len(xs)):\n"
+            "        total += xs.at(i)\n"
+            "    print_i32(len(xs))\n"
+            "    print_i32(total)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'grow.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['20', '2470'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_push_pop_alias(self):
+        # A List is a handle: helpers and copies see the same underlying list.
+        src = (
+            "func fill(xs: List<i32>):\n"
+            "    for i in range(1, 4):\n"
+            "        xs.push(i)\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    fill(xs)\n"
+            "    let ys = xs\n"
+            "    ys.push(4)\n"
+            "    print_i32(len(xs))\n"
+            "    print_i32(xs.pop())\n"
+            "    print_i32(xs.at(0))\n"
+            "    print_i32(len(xs))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'alias.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['4', '4', '1', '3'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_unchecked_index(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    for i in range(0, 3):\n"
+            "        xs.push(i * 10)\n"
+            "    xs[1] += 5\n"
+            "    print_i32(xs[1])\n"
+            "    print_i32(xs[2])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'index.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['15', '20'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_at_oob_fails(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(1)\n"
+            "    print_i32(xs.at(4))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: index 4 out of bounds (size 1) at line 5')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_pop_empty_fails(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    print_i32(xs.pop())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_list_')
+        try:
+            path = os.path.join(tmp, 'pop.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: pop from empty list at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_function_value_runtime(self):
         # Nested function types, arena-stored function pointers, and copies
         # of function values executed for real.

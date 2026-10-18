@@ -327,6 +327,59 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('using FnPtr0 = float(*)(float);', cpp)
         self.assertIn('FnPtr0 v_g = vanta::sin_f32;', cpp)
 
+    def test_list_create_push_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let xs = a.list::<i32>()\n"
+                  "    xs.push(7)\n")
+        self.assertIn('vanta::List<int32_t> v_xs = vanta::list_new<int32_t>(v_a);', cpp)
+        self.assertIn('vanta::list_push(v_xs, 7);', cpp)
+
+    def test_list_len_and_pop_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let xs = a.list::<i32>()\n"
+                  "    print_i32(len(xs))\n"
+                  "    print_i32(xs.pop())\n")
+        self.assertIn('vanta::print_i32(int32_t((v_xs).h->len));', cpp)
+        self.assertIn('vanta::print_i32(vanta::list_pop(v_xs, 5));', cpp)
+
+    def test_list_at_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let xs = a.list::<i32>()\n"
+                  "    print_i32(xs.at(1))\n"
+                  "    xs.at(1) = 5\n")
+        self.assertIn('vanta::print_i32(vanta::list_at_checked(v_xs, 1, 4));', cpp)
+        self.assertIn('vanta::list_at_checked_ref(v_xs, 1, 5) = 5;', cpp)
+
+    def test_list_index_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let xs = a.list::<i32>()\n"
+                  "    print_i32(xs[0])\n"
+                  "    xs[1] = 9\n")
+        self.assertIn('vanta::print_i32(v_xs.h->data[0]);', cpp)
+        self.assertIn('v_xs.h->data[1] = 9;', cpp)
+
+    def test_list_of_struct_emit(self):
+        cpp = gen("struct P:\n    x: i32\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let ps = a.list::<P>()\n"
+                  "    ps.push(P(x: 1))\n")
+        self.assertIn('vanta::List<P> v_ps = vanta::list_new<P>(v_a);', cpp)
+        self.assertIn('vanta::list_push(v_ps, P{1});', cpp)
+
+    def test_list_param_emit(self):
+        cpp = gen("func fill(xs: List<i32>):\n    xs.push(1)\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(1024)\n"
+                  "    let xs = a.list::<i32>()\n"
+                  "    fill(xs)\n")
+        self.assertIn('void fn_fill(vanta::List<int32_t> v_xs)', cpp)
+        self.assertIn('fn_fill(v_xs);', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

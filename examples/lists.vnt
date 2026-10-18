@@ -1,0 +1,22 @@
+# Dynamic lists: grow from an Arena, pass across calls, checked access, pop.
+struct Particle:
+    x: f32
+    vx: f32
+
+func integrate(ps: List<Particle>):
+    for i in range(0, len(ps)):
+        let p = ps.at(i)
+        ps.at(i) = Particle(x: p.x + p.vx, vx: p.vx)
+
+func main() -> void:
+    let arena = Arena(4096)
+    let ps = arena.list::<Particle>()
+    for i in range(0, 5):
+        ps.push(Particle(x: 0.0, vx: i32_to_f32(i)))
+    integrate(ps)
+    print_i32(len(ps))              # 5
+    for i in range(0, len(ps)):
+        print_f32(ps.at(i).x)       # 0.000000 ... 4.000000
+    let last = ps.pop()
+    print_f32(last.x)               # 4.000000
+    print_i32(len(ps))              # 4

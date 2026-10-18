@@ -722,7 +722,7 @@ class TypeCheckerTests(unittest.TestCase):
                 "    print_i32(p.at(0))\n")
 
     def test_at_rejected_on_non_array(self):
-        with self.assertRaisesRegex(CheckError, "'at' requires a fixed-size array"):
+        with self.assertRaisesRegex(CheckError, "'at' requires an array or a List"):
             run("func f() -> void:\n"
                 "    let x = 1\n"
                 "    print_i32(x.at(0))\n")
@@ -795,6 +795,199 @@ class TypeCheckerTests(unittest.TestCase):
         run("func f() -> void:\n"
             "    let g: func(f32) -> f32 = sin_f32\n"
             "    print_f32(g(1.5707964))\n")
+
+    def test_list_create_and_type(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(1024)\n"
+            "    let xs: List<i32> = a.list::<i32>()\n"
+            "    print_i32(len(xs))\n")
+
+    def test_list_requires_type_argument(self):
+        with self.assertRaisesRegex(CheckError, "list requires a type argument"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let xs = a.list()\n")
+
+    def test_list_takes_no_arguments(self):
+        with self.assertRaisesRegex(CheckError, "takes no arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let xs = a.list::<i32>(8)\n")
+
+    def test_list_type_requires_brackets(self):
+        with self.assertRaisesRegex(CheckError, "List requires an element type"):
+            run("func f() -> void:\n"
+                "    let x: List = 1\n")
+
+    def test_list_cannot_hold_void_or_arena(self):
+        with self.assertRaisesRegex(CheckError, "cannot hold void"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let xs = a.list::<void>()\n")
+        with self.assertRaisesRegex(CheckError, "cannot hold Arena"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let xs = a.list::<Arena>()\n")
+
+    def test_list_reserved_struct_name(self):
+        with self.assertRaisesRegex(CheckError, "reserved built-in type name"):
+            run("struct List:\n    x: i32\n")
+
+    def test_list_ctor_hint(self):
+        with self.assertRaisesRegex(CheckError, "a List is created from an Arena"):
+            run("func f() -> void:\n"
+                "    let a = Arena(1024)\n"
+                "    let xs = List(a)\n")
+
+    def test_list_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use type 'List' as a value"):
+            run("func f() -> void:\n"
+                "    let x = List\n")
+
+    def test_list_push_len_at(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(1)\n"
+            "    xs.push(2)\n"
+            "    print_i32(len(xs))\n"
+            "    print_i32(xs.at(1))\n"
+            "    print_i32(xs[0])\n")
+
+    def test_list_write_through_let(self):
+        # A List is an indirection: writes need no `mut`.
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(1)\n"
+            "    xs[0] = 5\n"
+            "    xs.at(0) += 1\n"
+            "    xs.push(2)\n"
+            "    print_i32(xs.pop())\n")
+
+    def test_list_pop_is_element_typed(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<f32>()\n"
+            "    xs.push(1.5)\n"
+            "    print_f32(xs.pop())\n")
+
+    def test_list_rebind_requires_mut(self):
+        with self.assertRaisesRegex(CheckError, "invalid assignment target"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs = a.list::<i32>()\n")
+
+    def test_list_rebind_with_mut_ok(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    mut xs = a.list::<i32>()\n"
+            "    xs.push(1)\n"
+            "    xs = a.list::<i32>()\n"
+            "    print_i32(len(xs))\n")
+
+    def test_list_element_type_mismatch(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.push(1.5)\n")
+
+    def test_list_push_arity(self):
+        with self.assertRaisesRegex(CheckError, "'push' expects one value"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.push(1, 2)\n")
+
+    def test_list_push_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'push' does not accept named arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.push(v: 1)\n")
+
+    def test_list_pop_takes_no_args(self):
+        with self.assertRaisesRegex(CheckError, "'pop' takes no arguments"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    print_i32(xs.pop(1))\n")
+
+    def test_list_len_method_hint(self):
+        with self.assertRaisesRegex(CheckError, "write len\\(xs\\)"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    print_i32(xs.len())\n")
+
+    def test_list_unknown_method(self):
+        with self.assertRaisesRegex(CheckError, "List has no method 'nope'"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    xs.nope()\n")
+
+    def test_list_member_value_use_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'push' must be called"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    let p = xs.push\n")
+
+    def test_list_at_value_use_rejected(self):
+        with self.assertRaisesRegex(CheckError, "'at' must be called with an index"):
+            run("func f() -> void:\n"
+                "    let a = Arena(4096)\n"
+                "    let xs = a.list::<i32>()\n"
+                "    let f = xs.at\n")
+
+    def test_len_of_non_list(self):
+        with self.assertRaisesRegex(CheckError, "len expects an array or a List"):
+            run("func f() -> void:\n"
+                "    print_i32(len(1))\n")
+
+    def test_list_as_function_param(self):
+        run("func fill(xs: List<i32>):\n"
+            "    xs.push(1)\n"
+            "func main() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    fill(xs)\n")
+
+    def test_list_handle_copy(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let xs = a.list::<i32>()\n"
+            "    let ys = xs\n"
+            "    ys.push(1)\n"
+            "    print_i32(len(xs))\n")
+
+    def test_list_of_lists(self):
+        run("func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let rows = a.list::<List<i32>>()\n"
+            "    rows.push(a.list::<i32>())\n"
+            "    rows.at(0).push(42)\n"
+            "    rows.at(0).at(0) = 43\n"
+            "    print_i32(rows[0].at(0))\n")
+
+    def test_list_in_struct(self):
+        run("struct Bag:\n    xs: List<i32>\n"
+            "func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let b = Bag(xs: a.list::<i32>())\n"
+            "    b.xs.push(1)\n"
+            "    print_i32(len(b.xs))\n")
+
+    def test_list_of_func_values(self):
+        run("func inc(x: i32) -> i32:\n    return x + 1\n"
+            "func f() -> void:\n"
+            "    let a = Arena(4096)\n"
+            "    let gs = a.list::<func(i32) -> i32>()\n"
+            "    gs.push(inc)\n"
+            "    print_i32(gs.at(0)(41))\n")
 
 
 if __name__ == '__main__':

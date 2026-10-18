@@ -228,6 +228,77 @@ inline T& at_checked_ref(std::array<T, N>& xs, int32_t index, int32_t line) {
     return xs[(size_t)index];
 }
 
+// ---------- Dynamic lists (List<T>) ----------
+// A List<T> is a handle: the value holds a pointer to a small header living
+// in an Arena (data pointer, length, capacity). Copying a List copies the
+// handle, so every copy sees the same elements. Like ptr<T>, a List is an
+// indirection — its elements and its methods are writable through a plain
+// `let`; `mut` only controls rebinding. Growth allocates a new block from
+// the same arena and copies; nothing is ever freed, so arena.reset()
+// invalidates every List that was created from it.
+template <typename T>
+struct List {
+    struct Hdr {
+        T* data;
+        int32_t len;
+        int32_t cap;
+        Arena* arena;
+    };
+    Hdr* h;
+};
+
+template <typename T>
+inline List<T> list_new(Arena& arena) {
+    List<T> xs;
+    xs.h = arena.alloc<typename List<T>::Hdr>(1);
+    xs.h->data = nullptr;
+    xs.h->len = 0;
+    xs.h->cap = 0;
+    xs.h->arena = &arena;
+    return xs;
+}
+
+template <typename T>
+inline void list_reserve(List<T> xs, int32_t need) {
+    if (need <= xs.h->cap) return;
+    int32_t cap = xs.h->cap > 0 ? xs.h->cap : 4;
+    while (cap < need) cap = (cap > 1073741824) ? need : cap * 2;
+    Arena* arena = xs.h->arena;
+    T* fresh = arena->alloc<T>(cap);
+    for (int32_t i = 0; i < xs.h->len; i++) fresh[i] = xs.h->data[i];
+    xs.h->data = fresh;
+    xs.h->cap = cap;
+}
+
+template <typename T>
+inline void list_push(List<T> xs, T value) {
+    if (xs.h->len == xs.h->cap) list_reserve<T>(xs, xs.h->len + 1);
+    xs.h->data[xs.h->len] = value;
+    xs.h->len += 1;
+}
+
+template <typename T>
+inline T list_pop(List<T> xs, int32_t line) {
+    if (xs.h->len == 0) {
+        std::fprintf(stderr, "vanta: pop from empty list at line %d\n", (int)line);
+        std::exit(1);
+    }
+    xs.h->len -= 1;
+    return xs.h->data[xs.h->len];
+}
+
+template <typename T>
+inline T list_at_checked(List<T> xs, int32_t index, int32_t line) {
+    if (index < 0 || index >= xs.h->len) index_fail(index, xs.h->len, line);
+    return xs.h->data[index];
+}
+
+template <typename T>
+inline T& list_at_checked_ref(List<T> xs, int32_t index, int32_t line) {
+    if (index < 0 || index >= xs.h->len) index_fail(index, xs.h->len, line);
+    return xs.h->data[index];
+}
+
 // ---------- Built-in IO / math ----------
 inline void print_i32(int32_t v) { std::printf("%d\n", (int)v); }
 inline void print_u32(uint32_t v) { std::printf("%u\n", (unsigned)v); }

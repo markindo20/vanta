@@ -1,7 +1,7 @@
 from . import ast_nodes as A
 from .typesys import (
-    Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, InferType,
-    StructType, FuncType,
+    Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType,
+    InferType, StructType, FuncType,
     I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, is_int, is_float, is_numeric,
 )
@@ -111,6 +111,8 @@ class TypeChecker:
     def _resolve_type(self, te: A.TypeExpr) -> Type:
         if te.kind == 'ptr':
             return PtrType(self._resolve_type(te.inner))
+        if te.kind == 'list':
+            return self._make_list_type(self._resolve_type(te.inner), te.pos)
         if te.kind == 'array':
             if te.size is None or te.size <= 0:
                 raise CheckError("array size must be a positive integer", self.filename, te.pos)
@@ -124,7 +126,17 @@ class TypeChecker:
             return PRIM_TYPES[n]
         if n in self.structs:
             return self.structs[n]
+        if n == 'List':
+            raise CheckError("List requires an element type: List<T>", self.filename, te.pos)
         raise CheckError(f"unknown type '{n}'", self.filename, te.pos)
+
+    def _make_list_type(self, inner: Type, pos) -> ListType:
+        if inner is VOID:
+            raise CheckError("a List cannot hold void", self.filename, pos)
+        if isinstance(inner, StructType) and inner.name == "Arena":
+            raise CheckError("a List cannot hold Arena (it is non-copyable)",
+                             self.filename, pos)
+        return ListType(inner)
 
     def _func_type(self, params, ret) -> FuncType:
         ft = FuncType(tuple(params), ret)
@@ -150,6 +162,8 @@ class TypeChecker:
             raise CheckError(
                 f"type name '{d.name}' is reserved for generated function-pointer aliases",
                 self.filename, d.pos)
+        if d.name == 'List':
+            raise CheckError("'List' is a reserved built-in type name", self.filename, d.pos)
         fields = {}
         for (fname, ftype, fpos) in d.fields:
             if fname in fields:
@@ -363,15 +377,20 @@ class TypeChecker:
         while True:
             if isinstance(node, A.Index):
                 ot = self._check_expr(node.obj)
-                if isinstance(ot, PtrType):
+                if isinstance(ot, (PtrType, ListType)):
                     return True
                 node = node.obj
                 continue
             if isinstance(node, A.Call):
                 # A checked xs.at(i) is a storage location: keep walking
-                # through its receiver. Any other call is a temporary.
+                # through its receiver. Any other call is a temporary. A
+                # List is an indirection, so its elements are writable
+                # through a plain `let` — like pointer memory.
                 if getattr(node, 'is_checked_at', False):
-                    node = node.func.obj
+                    recv = node.func.obj
+                    if isinstance(self._check_expr(recv), ListType):
+                        return True
+                    node = recv
                     continue
                 return False
             if isinstance(node, A.Member):
@@ -463,7 +482,7 @@ class TypeChecker:
             if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
-            if expr.name in self.structs:
+            if expr.name in self.structs or expr.name == 'List':
                 raise CheckError(f"cannot use type '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.functions:
@@ -506,21 +525,27 @@ class TypeChecker:
                 t = ot.fields[expr.field]
                 expr.type = t
                 return t
-            if expr.field == 'at' and isinstance(ot, ArrayType):
+            if expr.field == 'at' and isinstance(ot, (ArrayType, ListType)):
                 raise CheckError("'at' must be called with an index: xs.at(i)",
+                                 self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'push':
+                raise CheckError("'push' must be called: xs.push(v)",
+                                 self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'pop':
+                raise CheckError("'pop' must be called: xs.pop()",
+                                 self.filename, expr.pos)
+            if isinstance(ot, ListType) and expr.field == 'len':
+                raise CheckError("'len' is not a field of a List; write len(xs)",
                                  self.filename, expr.pos)
             raise CheckError(f"type {ot} has no field '{expr.field}'", self.filename, expr.pos)
         if isinstance(expr, A.Index):
             ot = self._check_expr(expr.obj)
             it = self._check_expr(expr.index)
             self._coerce_value(expr.index, it, I32, expr.pos, "index")
-            if isinstance(ot, PtrType):
+            if isinstance(ot, (PtrType, ArrayType, ListType)):
                 expr.type = ot.inner
                 return ot.inner
-            if isinstance(ot, ArrayType):
-                expr.type = ot.inner
-                return ot.inner
-            raise CheckError(f"cannot index non-pointer/non-array type {ot}", self.filename, expr.pos)
+            raise CheckError(f"cannot index a value of type {ot}", self.filename, expr.pos)
         raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename,
                          getattr(expr, 'pos', A.Pos(0, 0)))
 
@@ -678,6 +703,9 @@ class TypeChecker:
                 return self._check_user_struct_ctor(st, call)
             if name in self.functions:
                 return self._check_func_call(name, call)
+            if name == 'List':
+                raise CheckError("a List is created from an Arena: arena.list::<T>()",
+                                 self.filename, call.pos)
             raise CheckError(f"unknown callable '{name}'", self.filename, call.pos)
         if isinstance(f, A.Member):
             ot = self._check_expr(f.obj)
@@ -695,10 +723,12 @@ class TypeChecker:
                         "'at' is not available on pointers (a pointer has no "
                         "length); use p[i] for unchecked access",
                         self.filename, call.pos)
-                if isinstance(ot, ArrayType):
+                if isinstance(ot, (ArrayType, ListType)):
                     return self._check_at(call, ot)
-                raise CheckError(f"'at' requires a fixed-size array, got {ot}",
+                raise CheckError(f"'at' requires an array or a List, got {ot}",
                                  self.filename, call.pos)
+            if isinstance(ot, ListType):
+                return self._check_list_method(ot, f.field, call)
             raise CheckError(f"type {ot} has no methods", self.filename, call.pos)
         # Any other expression evaluating to a function value, such as an
         # indexed element of an array of functions.
@@ -731,8 +761,8 @@ class TypeChecker:
         if len(call.args) != 1:
             raise CheckError("len takes one argument", self.filename, call.pos)
         at = self._check_expr(call.args[0])
-        if not isinstance(at, ArrayType):
-            raise CheckError(f"len expects an array, got {at}", self.filename, call.pos)
+        if not isinstance(at, (ArrayType, ListType)):
+            raise CheckError(f"len expects an array or a List, got {at}", self.filename, call.pos)
         call.type = I32
         return I32
 
@@ -751,6 +781,38 @@ class TypeChecker:
         call.is_checked_at = True
         call.type = arr.inner
         return arr.inner
+
+    def _check_list_method(self, lt: ListType, method: str, call: A.Call) -> Type:
+        if method == 'push':
+            if call.type_args:
+                raise CheckError("'push' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.arg_names and any(x is not None for x in call.arg_names):
+                raise CheckError("'push' does not accept named arguments",
+                                 self.filename, call.pos)
+            if len(call.args) != 1:
+                raise CheckError(f"'push' expects one value, got {len(call.args)}",
+                                 self.filename, call.pos)
+            at = self._check_expr(call.args[0])
+            if isinstance(at, StructType) and at.name == "Arena":
+                raise CheckError("cannot store Arena in a List (it is non-copyable)",
+                                 self.filename, call.pos)
+            self._coerce_value(call.args[0], at, lt.inner, call.pos, "list element")
+            call.type = VOID
+            return VOID
+        if method == 'pop':
+            if call.type_args:
+                raise CheckError("'pop' does not accept type arguments",
+                                 self.filename, call.pos)
+            if call.args:
+                raise CheckError(f"'pop' takes no arguments, got {len(call.args)}",
+                                 self.filename, call.pos)
+            call.type = lt.inner
+            return lt.inner
+        if method == 'len':
+            raise CheckError("'len' is not a List method; write len(xs)",
+                             self.filename, call.pos)
+        raise CheckError(f"List has no method '{method}'", self.filename, call.pos)
 
     def _check_fmt(self, call: A.Call, name: str) -> Type:
         if call.arg_names and any(x is not None for x in call.arg_names):
@@ -886,6 +948,17 @@ class TypeChecker:
                 self._coerce_value(call.args[0], at, I32, call.pos, "alloc count")
                 inner = self._resolve_type(call.type_args[0])
                 t = PtrType(inner)
+                call.type = t
+                return t
+            if method == "list":
+                if not call.type_args or len(call.type_args) != 1:
+                    raise CheckError("list requires a type argument: list::<T>()",
+                                     self.filename, call.pos)
+                if call.args:
+                    raise CheckError("list::<T>() takes no arguments",
+                                     self.filename, call.pos)
+                inner = self._resolve_type(call.type_args[0])
+                t = self._make_list_type(inner, call.pos)
                 call.type = t
                 return t
             raise CheckError(f"Arena has no method '{method}'", self.filename, call.pos)

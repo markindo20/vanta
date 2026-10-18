@@ -206,6 +206,11 @@ class Parser:
             inner = self.parse_type()
             self.expect(TT.GT)
             return A.TypeExpr('ptr', inner=inner, pos=A.Pos(t.line, t.col))
+        if t.value == 'List' and self.check(TT.LT):
+            self.advance()
+            inner = self.parse_type()
+            self.expect(TT.GT)
+            return A.TypeExpr('list', inner=inner, pos=A.Pos(t.line, t.col))
         return A.TypeExpr('named', name=t.value, pos=A.Pos(t.line, t.col))
 
     def parse_block(self):
