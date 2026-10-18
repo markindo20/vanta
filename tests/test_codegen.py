@@ -84,6 +84,21 @@ class CodegenTests(unittest.TestCase):
         cpp = gen("func main() -> void:\n    let xs = [1, 2, 3]\n    let n = len(xs)\n")
         self.assertIn('.size()', cpp)
 
+    def test_arena_rows_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let arena = Arena(1024)\n"
+                  "    let rows = arena.alloc::<[i32, 4]>(2)\n"
+                  "    rows[0][1] = 5\n")
+        self.assertIn('.alloc<std::array<int32_t, 4>>(2)', cpp)
+        self.assertIn('v_rows[0][1] = 5;', cpp)
+
+    def test_struct_grid_field_write_emit(self):
+        cpp = gen("struct B:\n    cells: [[i32, 2], 2]\n"
+                  "func main() -> void:\n"
+                  "    mut b = B(cells: [[1, 2], [3, 4]])\n"
+                  "    b.cells[1][0] = 5\n")
+        self.assertIn('v_b.v_cells[1][0] = 5;', cpp)
+
     def test_quat_mul_emit(self):
         cpp = gen("func main() -> void:\n    let q = Quat(0.0, 0.0, 0.0, 1.0)\n    let r = q * q\n")
         self.assertIn('(v_q * v_q)', cpp)

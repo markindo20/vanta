@@ -2,6 +2,18 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.5.0 — 2026-10-18
+
+- 2D arrays work end to end. Nested array types and literals (`[[i32, 8], 4]`)
+  already parsed, but writes through pointers and struct fields were rejected;
+  assignment targets are now validated by walking the whole storage chain, so
+  arena-backed grids (`arena.alloc::<[i32, 8]>(h)`) and `mut` struct grids are
+  writable at any depth while `let` bindings and parameters stay immutable.
+- Array literals and call argument lists may span lines: the lexer ignores
+  newlines inside `[...]` and `(...)`.
+- Added `examples/grid.vnt`: a stack checkerboard, a struct-held heightmap,
+  and an arena-backed dynamic grid, plus 11 tests (187 total).
+
 ## v0.4.0 — 2026-10-18
 
 - Added `import "path.vnt"`. An import merges another file's declarations

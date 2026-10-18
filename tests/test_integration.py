@@ -301,6 +301,12 @@ class IntegrationTests(unittest.TestCase):
         self._build_and_run(os.path.join(EXAMPLES, 'imports_demo.vnt'),
                             ['sprite pixel 35 tile_id 35', '16'])
 
+    def test_grid_example(self):
+        # 2D arrays: stack grid, struct-held grid, and an arena-backed grid.
+        self._build_and_run(os.path.join(EXAMPLES, 'grid.vnt'),
+                            ['#.#.#.#.', '.#.#.#.#', '#.#.#.#.', '.#.#.#.#',
+                             '9', '168'])
+
     def test_extern_link_end_to_end(self):
         # Build the C side of examples/extern_demo.vnt into a static library,
         # link the generated program against it, run it, and check the output.

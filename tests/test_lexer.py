@@ -56,6 +56,13 @@ class LexerTests(unittest.TestCase):
         self.assertIn(TT.INDENT, kinds)
         self.assertIn(TT.DEDENT, kinds)
 
+    def test_newlines_ignored_inside_brackets(self):
+        toks = lex("let g = [[1, 2],\n"
+                   "         [3, 4]]\n"
+                   "print_i32(1)\n")
+        self.assertEqual(sum(1 for t in toks if t.type == TT.NEWLINE), 2)
+        self.assertFalse(any(t.type in (TT.INDENT, TT.DEDENT) for t in toks))
+
     def test_invalid_char(self):
         with self.assertRaises(LexError):
             lex("x = @\n")

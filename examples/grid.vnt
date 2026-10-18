@@ -1,0 +1,59 @@
+# grid.vnt — 2D arrays: fixed grids on the stack, struct-held grids, and
+# arena-backed dynamic grids.
+#
+# Usage:
+#   python main.py run examples/grid.vnt
+#
+# Type sizes are integer literals, so [[i32, 8], 4] is "4 rows of 8 i32";
+# the W/H constants are only usable in loop bounds.
+
+const W: i32 = 8
+const H: i32 = 4
+
+func checkerboard() -> [[i32, 8], 4]:
+    mut g = [[0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0],
+             [0, 0, 0, 0, 0, 0, 0, 0]]
+    for y in range(0, H):
+        for x in range(0, W):
+            if (x + y) % 2 == 0:
+                g[y][x] = 1
+    return g
+
+func draw(g: [[i32, 8], 4]) -> void:
+    for y in range(0, H):
+        for x in range(0, W):
+            if g[y][x] == 1:
+                write_str("#")
+            else:
+                write_str(".")
+        print_newline()
+
+struct Heightmap:
+    cells: [[i32, 8], 4]
+
+func main() -> void:
+    let board = checkerboard()
+    draw(board)
+
+    # A `mut` struct's grid is writable in place.
+    mut map = Heightmap(cells: [[0, 0, 0, 0, 0, 0, 0, 0],
+                                [0, 0, 0, 0, 0, 0, 0, 0],
+                                [0, 0, 0, 0, 0, 0, 0, 0],
+                                [0, 0, 0, 0, 0, 0, 0, 0]])
+    map.cells[2][3] = 9
+    print_i32(map.cells[2][3])
+
+    # A dynamic grid: ptr<[i32, 8]> is any number of fixed-width rows.
+    # Cells are written through the pointer; no `mut` binding is needed.
+    let arena = Arena(4096)
+    let rows = arena.alloc::<[i32, 8]>(H)
+    for y in range(0, H):
+        for x in range(0, W):
+            rows[y][x] = x * y
+    mut total = 0
+    for y in range(0, H):
+        for x in range(0, W):
+            total += rows[y][x]
+    print_i32(total)

@@ -15,6 +15,7 @@ class Lexer:
         self.line = 1
         self.col = 1
         self.indent_stack = [0]
+        self.bracket_depth = 0  # depth of ( and [ — newlines are ignored inside
         self.tokens: list[Token] = []
 
     def _err(self, msg, line=None, col=None):
@@ -57,6 +58,11 @@ class Lexer:
                     if self.pos < len(self.source):
                         self._adv()
                     continue
+                if self.bracket_depth > 0:
+                    # Inside (...) or [...]: continuation lines are just more
+                    # of the same logical line, so no indentation tokens.
+                    at_line_start = False
+                    continue
                 if indent > self.indent_stack[-1]:
                     self.indent_stack.append(indent)
                     self._emit(TT.INDENT, indent, self.line, 1)
@@ -71,7 +77,9 @@ class Lexer:
 
             ch = self._peek()
             if ch == '\n':
-                self._emit(TT.NEWLINE, '\n'); self._adv(); at_line_start = True; continue
+                if self.bracket_depth == 0:
+                    self._emit(TT.NEWLINE, '\n')
+                self._adv(); at_line_start = True; continue
             if ch in (' ', '\t'):
                 self._adv(); continue
             if ch == '#':
@@ -148,6 +156,10 @@ class Lexer:
     def _lex_op(self):
         line, col = self.line, self.col
         ch = self._adv()
+        if ch in '([':
+            self.bracket_depth += 1
+        elif ch in ')]' and self.bracket_depth > 0:
+            self.bracket_depth -= 1
         two = ch + self._peek()
         two_map = {
             '->': TT.ARROW, '==': TT.EQ, '!=': TT.NEQ,

@@ -310,31 +310,26 @@ class TypeChecker:
             raise CheckError("Arena values cannot be assigned", self.filename, a.pos)
 
     def _is_assignable(self, expr) -> bool:
-        if isinstance(expr, A.Name):
-            ent = self._lookup(expr.name)
+        # Walk the storage chain (field accesses and indexes) down to its
+        # root. An index applied to a pointer makes the chain writable no
+        # matter how the binding was declared — pointer memory is mutable
+        # through a plain `let`. In every other case the root binding must be
+        # `mut`; parameters and `let` bindings are immutable at any depth.
+        node = expr
+        while True:
+            if isinstance(node, A.Index):
+                ot = self._check_expr(node.obj)
+                if isinstance(ot, PtrType):
+                    return True
+                node = node.obj
+                continue
+            if isinstance(node, A.Member):
+                node = node.obj
+                continue
+            break
+        if isinstance(node, A.Name):
+            ent = self._lookup(node.name)
             return ent is not None and ent[1]
-        if isinstance(expr, A.Member):
-            base = expr.obj
-            if isinstance(base, A.Name):
-                ent = self._lookup(base.name)
-                return ent is not None and ent[1]
-            if isinstance(base, A.Index):
-                bt = self._check_expr(base.obj)
-                return isinstance(bt, PtrType)
-            return False
-        if isinstance(expr, A.Index):
-            ot = self._check_expr(expr.obj)
-            if isinstance(ot, PtrType):
-                return True
-            if isinstance(ot, ArrayType):
-                base = expr.obj
-                while isinstance(base, A.Index):
-                    base = base.obj
-                if isinstance(base, A.Name):
-                    ent = self._lookup(base.name)
-                    return ent is not None and ent[1]
-                return False
-            return False
         return False
 
     def _check_return(self, r: A.ReturnStmt):

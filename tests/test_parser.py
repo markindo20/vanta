@@ -37,6 +37,25 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParseError):
             parse('import math\n')
 
+    def test_multiline_array_literal(self):
+        prog = parse("func f() -> void:\n"
+                     "    let g = [[1, 2],\n"
+                     "             [3, 4]]\n")
+        lit = prog.decls[0].body[0].value
+        self.assertIsInstance(lit, A.ArrayLit)
+        self.assertEqual(len(lit.elements), 2)
+        self.assertEqual(len(lit.elements[0].elements), 2)
+
+    def test_multiline_call_arguments(self):
+        prog = parse("func f() -> void:\n"
+                     "    g(\n"
+                     "        1,\n"
+                     "        2\n"
+                     "    )\n")
+        call = prog.decls[0].body[0].expr
+        self.assertIsInstance(call, A.Call)
+        self.assertEqual(len(call.args), 2)
+
     def test_operator_precedence(self):
         prog = parse("func f() -> i32:\n    return 1 + 2 * 3\n")
         ret = prog.decls[0].body[0]

@@ -47,6 +47,37 @@ class TypeCheckerTests(unittest.TestCase):
     def test_ok_arena(self):
         run("func f() -> void:\n    let a = Arena(64)\n    let p = a.alloc::<i32>(4)\n    p[0] = 7\n")
 
+    def test_nested_index_write_through_ptr(self):
+        run("func f() -> void:\n"
+            "    let arena = Arena(1024)\n"
+            "    let rows = arena.alloc::<[i32, 4]>(2)\n"
+            "    rows[0][1] = 5\n")
+
+    def test_nested_index_write_through_mut_struct(self):
+        run("struct B:\n    cells: [[i32, 2], 2]\n"
+            "func f() -> void:\n"
+            "    mut b = B(cells: [[1, 2], [3, 4]])\n"
+            "    b.cells[1][0] = 5\n")
+
+    def test_nested_index_write_rejected_on_let_array(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let xs = [[1, 2], [3, 4]]\n"
+                "    xs[0][1] = 5\n")
+
+    def test_field_array_write_rejected_on_param(self):
+        with self.assertRaises(CheckError):
+            run("struct B:\n    cells: [[i32, 2], 2]\n"
+                "func f(b: B) -> void:\n"
+                "    b.cells[0][0] = 1\n")
+
+    def test_deep_field_write_through_mut(self):
+        run("struct In:\n    x: i32\n"
+            "struct Out:\n    inner: In\n"
+            "func f() -> void:\n"
+            "    mut o = Out(inner: In(x: 1))\n"
+            "    o.inner.x = 2\n")
+
     def test_void_func_no_value_return(self):
         with self.assertRaises(CheckError):
             run("func f() -> void:\n    return 3\n")
