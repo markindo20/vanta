@@ -21,6 +21,7 @@ BUILTIN_FN = {
     'floor_f32': 'vanta::floor_f32', 'ceil_f32': 'vanta::ceil_f32',
     'i32_to_f32': 'vanta::i32_to_f32', 'f32_to_i32': 'vanta::f32_to_i32',
     'rand_f32': 'vanta::rand_f32', 'rand_seed': 'vanta::rand_seed',
+    'arg_count': 'vanta::arg_count', 'arg_str': 'vanta::arg_str',
 }
 
 BUILTIN_MATH_CTOR = {
@@ -107,8 +108,9 @@ class CodeGen:
         self.emit('')
         main = next((f for f in funcs if f.name == 'main'), None)
         if main is not None:
-            self.emit('int main() {')
+            self.emit('int main(int argc, char** argv) {')
             self.indent += 1
+            self.emit('vanta::set_args(argc, argv);')
             self.emit('vanta_user::fn_main();')
             self.emit('return 0;')
             self.indent -= 1

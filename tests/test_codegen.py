@@ -20,7 +20,7 @@ class CodegenTests(unittest.TestCase):
     def test_hello(self):
         cpp = gen("func main() -> void:\n    print_i32(42)\n")
         self.assertIn('vanta::print_i32(42)', cpp)
-        self.assertIn('int main()', cpp)
+        self.assertIn('int main(int argc, char** argv)', cpp)
 
     def test_struct(self):
         cpp = gen("struct P:\n    x: i32\n"
@@ -125,6 +125,13 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('vanta::print_newline()', cpp)
         self.assertIn('vanta::min_i32(1, 2)', cpp)
         self.assertIn('vanta::floor_f32(1.5f)', cpp)
+
+
+    def test_main_receives_args(self):
+        cpp = gen("func main() -> void:\n    print_i32(arg_count())\n")
+        self.assertIn('int main(int argc, char** argv)', cpp)
+        self.assertIn('vanta::set_args(argc, argv);', cpp)
+        self.assertIn('vanta::arg_count()', cpp)
 
 
 if __name__ == '__main__':

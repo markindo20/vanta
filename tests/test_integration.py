@@ -198,5 +198,38 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+    def test_command_line_args(self):
+        src = (
+            "func main() -> void:\n"
+            "    print_i32(arg_count())\n"
+            "    for i in range(1, arg_count()):\n"
+            "        print_str(arg_str(i))\n"
+            "    write_str(\"missing=[\")\n"
+            "    write_str(arg_str(999))\n"
+            "    write_str(\"]\")\n"
+            "    print_newline()\n"
+        )
+        name, path = find_cxx_compiler()
+        tmp = tempfile.mkdtemp(prefix='vanta_args_')
+        try:
+            src_path = os.path.join(tmp, 'args.vnt')
+            with open(src_path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            prog, tc = _frontend_only(src_path)
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True)
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe, 'alpha', 'beta'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['3', 'alpha', 'beta', 'missing=[]'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()

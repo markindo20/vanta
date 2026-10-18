@@ -286,5 +286,16 @@ class TypeCheckerTests(unittest.TestCase):
         self.assertEqual(prog.decls[0].body[0].var_type, F32)
 
 
+    def test_arg_builtins(self):
+        from compiler.typesys import I32, STR
+        prog, tc = run("func f() -> void:\n    let n = arg_count()\n    let a = arg_str(0)\n")
+        self.assertEqual(prog.decls[0].body[0].var_type, I32)
+        self.assertEqual(prog.decls[0].body[1].var_type, STR)
+
+    def test_arg_str_rejects_float(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n    arg_str(1.5)\n")
+
+
 if __name__ == '__main__':
     unittest.main()

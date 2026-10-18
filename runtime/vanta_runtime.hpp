@@ -255,4 +255,15 @@ inline float rand_f32() {
     return (float)(s & 0xFFFFFFu) / (float)0x1000000u;
 }
 
+// ---------- Command-line arguments ----------
+// Populated by the generated int main(argc, argv).
+inline int32_t g_argc = 0;
+inline char** g_argv = nullptr;
+inline void set_args(int32_t argc, char** argv) { g_argc = argc; g_argv = argv; }
+inline int32_t arg_count() { return g_argc; }
+inline const char* arg_str(int32_t i) {
+    if (g_argv == nullptr || i < 0 || i >= g_argc) return "";
+    return g_argv[i];
+}
+
 }

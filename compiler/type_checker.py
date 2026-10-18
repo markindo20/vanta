@@ -68,6 +68,8 @@ class TypeChecker:
         bf("f32_to_i32", [("v", F32)], I32)
         bf("rand_f32", [], F32)
         bf("rand_seed", [("seed", I32)], VOID)
+        bf("arg_count", [], I32)
+        bf("arg_str", [("i", I32)], STR)
         bf("assert", [("cond", BOOL)], VOID)
         bf("translation", [("x", F32), ("y", F32), ("z", F32)], self.structs["Matrix4"])
         bf("scale", [("s", F32)], self.structs["Matrix4"])

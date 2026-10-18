@@ -152,7 +152,7 @@ def cmd_run(args):
         sys.stderr.write("error: C++ compilation failed\n")
         sys.stderr.write(proc.stdout + '\n' + proc.stderr + '\n')
         return 1
-    run = subprocess.run([exe])
+    run = subprocess.run([exe] + list(args.prog_args))
     shutil.rmtree(tmpdir, ignore_errors=True)
     return run.returncode
 
@@ -174,6 +174,8 @@ def main(argv):
     p_run = sub.add_parser('run', help='build and run')
     p_run.add_argument('source')
     p_run.add_argument('--release', action='store_true')
+    p_run.add_argument('prog_args', nargs='*',
+                       help='arguments passed through to the program')
 
     args = ap.parse_args(argv)
     if args.cmd == 'check':
