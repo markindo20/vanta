@@ -48,7 +48,10 @@ distinct semantics.
 - `write_*` variants of the `print_*` functions (no trailing newline)
 - `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
 - `str_eq` (`strcmp`-backed string equality), `str_len`, and `str_to_i32`/`str_to_f32`
-- a 64 KiB process-lifetime string pool backing `str_concat` and `to_str_*`
+- a 64 KiB process-lifetime string pool backing `str_concat`, `to_str_*`, and
+  `file_read`
+- `file_exists` / `file_read` / `file_write` — byte-exact file I/O; `file_read`
+  allocates from the string pool and `file_write` returns the byte count or `-1`
 - `rand_state` / `rand_seed` / `rand_f32` — xorshift32, fixed seed at startup
   so programs are reproducible unless explicitly seeded
 - `g_argc` / `g_argv`, populated by the generated `main`, exposed as
@@ -75,7 +78,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 158 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 164 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.3.0)
+# Vanta — a game-oriented systems language (v0.3.1)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,7 +69,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (158 tests) |
+| `tests/` | `unittest` suite (164 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -86,6 +86,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `life.vnt` | Conway's Game of Life drawn as a character grid (`write_str`, `print_newline`) |
 | `report.vnt` | Formatted output and string building, with a command-line argument |
 | `extern_demo.vnt` | `extern` declarations linking a C library (C side: `extern_demo_lib.c`) |
+| `file_io.vnt` | `file_exists` / `file_read` / `file_write`, with a path from the command line |
 
 ## Tests
 
@@ -106,8 +107,8 @@ compiler, set the `CXX` environment variable.
 ## Status
 
 Vanta is a prototype, not a finished language. Programs can link against C
-libraries, read command-line arguments, and produce formatted output, but the
-remaining gaps are real:
+libraries, read command-line arguments, produce formatted output, and read and
+write files, but the remaining gaps are real:
 
 - no imports or multi-file programs
 - strings come from a fixed 64 KiB pool that is never freed; there is no
@@ -116,7 +117,5 @@ remaining gaps are real:
 - no first-class functions, so no callbacks or ECS dispatch
 - no bounds-checked indexing, and no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
-- no built-in file I/O; `extern` can reach C stdio, but you write those
-  declarations yourself
 - windowing and audio are now reachable through `extern` (SDL2 and friends),
   but nothing ships in the box

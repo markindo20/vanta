@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.3.0)
+# Vanta Language Reference (v0.3.1)
 
 This is the reference for the language as implemented at tag `v0.2.6`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -271,6 +271,9 @@ let r = from_quat(q)
 | `to_str_f32` | `(f32) -> str` | allocates from the string pool |
 | `to_str_bool` | `(bool) -> str` | no allocation |
 | `str_pool_reset` | `() -> void` | reclaims the string pool |
+| `file_exists` | `(str) -> bool` | `false` on any error |
+| `file_write` | `(str, str) -> i32` | bytes written, or `-1` on failure |
+| `file_read` | `(str) -> str` | reads into the string pool; `""` on any failure |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
@@ -328,8 +331,8 @@ There is no integer-argument builtin: read the string and convert with
 ## Strings and the string pool (v0.2.6)
 
 `str` is a `const char*`. Literals need no allocation, but anything built at
-runtime must live somewhere, so `str_concat` and `to_str_i32`/`to_str_f32`
-allocate from a fixed **process-lifetime string pool** of 64 KiB.
+runtime must live somewhere, so `str_concat`, `to_str_i32`/`to_str_f32`, and
+`file_read` allocate from a fixed **process-lifetime string pool** of 64 KiB.
 
 ```vanta
 let label = str_concat("scale", to_str_i32(3))
@@ -377,6 +380,37 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 
 `examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
 buildable example.
+
+## File I/O (v0.3.1)
+
+Three builtins read and write files as raw bytes:
+
+```vanta
+let path = arg_str(1)
+if file_exists(path):
+    let contents = file_read(path)
+    print_fmt("{} bytes", str_len(contents))
+    file_write(str_concat(path, ".copy"), contents)
+```
+
+- `file_exists(path) -> bool` — `true` when the file can be opened for
+  reading; `false` on any error, including permission problems.
+- `file_write(path, data) -> i32` — creates or truncates `path` and writes the
+  bytes of `data`; returns the byte count, or `-1` if the file cannot be
+  created or written.
+- `file_read(path) -> str` — reads the whole file into the string pool, so the
+  result stays valid until `str_pool_reset()`; returns `""` on any failure. A
+  file too large for the pool is a hard error:
+  `vanta: file '<path>' (<n> bytes) does not fit the 65536-byte string pool`,
+  exit code 1 — nothing is truncated silently.
+
+An empty file and a missing file both read as `""`; use `file_exists` when the
+difference matters. Reads and writes are byte-exact (`"rb"`/`"wb"`), but Vanta
+strings are NUL-terminated, so a file containing NUL bytes is cut short at the
+first NUL when its contents are passed to string operations.
+
+`examples/file_io.vnt` reads a file named on the command line and writes a copy
+to `<path>.copy`.
 
 ## Operators
 
