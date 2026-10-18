@@ -1,2 +1,0 @@
-﻿func main() -> void:
-    let x: i32 = 3.5
