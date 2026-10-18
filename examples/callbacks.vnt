@@ -1,0 +1,32 @@
+# callbacks.vnt — passing Vanta functions into C, so C can call them back.
+#
+# The C side is in callbacks_lib.c. Build it once, then run:
+#
+#     gcc -c examples/callbacks_lib.c -o build/callbacks_lib.o
+#     ar rcs build/libcallback.a build/callbacks_lib.o
+#     python main.py run examples/callbacks.vnt --lib-dir build --link callback
+#
+# A parameter typed func(...) is a C function pointer in the generated
+# signature: the C side calls through it and lands back in Vanta code.
+
+extern "callback demo" {
+    func cbk_apply_twice(f: func(i32) -> i32, x: i32) -> i32
+    func cbk_each(n: i32, visit: func(i32, ptr<i32>), acc: ptr<i32>)
+}
+
+func double_it(x: i32) -> i32:
+    return x * 2
+
+func add_squares(i: i32, acc: ptr<i32>):
+    acc[0] += i * i
+
+func main() -> void:
+    # C calls double_it twice: double_it(double_it(3)) == 12.
+    print_i32(cbk_apply_twice(double_it, 3))
+
+    # C walks 0..3 and calls add_squares(i, acc) with our arena pointer.
+    let arena = Arena(1024)
+    let acc = arena.alloc::<i32>(1)
+    acc[0] = 0
+    cbk_each(4, add_squares, acc)       # 0*0 + 1*1 + 2*2 + 3*3
+    print_i32(acc[0])

@@ -540,14 +540,44 @@ class TypeCheckerTests(unittest.TestCase):
                 "const G = sq\n"
                 "func f() -> void:\n    print_i32(G(1))\n")
 
-    def test_extern_function_type_rejected(self):
+    def test_extern_callback_params_ok(self):
+        run('extern "c" {\n'
+            '    func on_event(cb: func(i32) -> bool) -> void\n'
+            '    func run_all(cb: func()) -> void\n'
+            '    func is_big_ext(x: i32) -> bool\n'
+            '    func forward(cb: func(i32) -> bool) -> void\n'
+            '}\n'
+            'func is_big(x: i32) -> bool:\n'
+            '    return x > 10\n'
+            'func tick():\n'
+            '    return\n'
+            'func f() -> void:\n'
+            '    on_event(is_big)\n'
+            '    run_all(tick)\n'
+            '    forward(is_big_ext)\n')
+
+    def test_extern_callback_wrong_signature(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                r"argument: cannot assign func\(i32\) -> bool to func\(i32\) -> i32"):
+            run('extern "c" {\n    func on(cb: func(i32) -> i32) -> void\n}\n'
+                'func bad(x: i32) -> bool:\n    return x > 0\n'
+                'func f() -> void:\n    on(bad)\n')
+
+    def test_extern_callback_needs_function(self):
+        with self.assertRaisesRegex(
+                CheckError, r"argument: cannot assign i32 to func\(i32\) -> i32"):
+            run('extern "c" {\n    func on(cb: func(i32) -> i32) -> void\n}\n'
+                'func f() -> void:\n    let n: i32 = 3\n    on(n)\n')
+
+    def test_extern_func_return_rejected(self):
         with self.assertRaisesRegex(CheckError,
-                                    "extern function 'go' cannot use function types"):
-            run('extern "c" {\n    func go(cb: func(i32) -> i32)\n}\n'
+                                    "extern function 'get' cannot return a function type"):
+            run('extern "c" {\n    func get() -> func(i32) -> i32\n}\n'
                 'func f() -> void:\n    return\n')
         with self.assertRaisesRegex(CheckError,
-                                    "extern function 'get' cannot use function types"):
-            run('extern "c" {\n    func get() -> func(i32) -> i32\n}\n'
+                                    "extern function 'get2' cannot return a function type"):
+            run('extern "c" {\n    func get2() -> ptr<func()>\n}\n'
                 'func f() -> void:\n    return\n')
 
     def test_reserved_fnptr_struct_name_rejected(self):

@@ -9,10 +9,10 @@ from .formats import parse_format
 
 
 def _contains_func_type(t) -> bool:
-    """True when t is a function type or wraps one (pointer/array)."""
+    """True when t is a function type or wraps one (pointer/array/list)."""
     if isinstance(t, FuncType):
         return True
-    if isinstance(t, (PtrType, ArrayType)):
+    if isinstance(t, (PtrType, ArrayType, ListType)):
         return _contains_func_type(t.inner)
     return False
 
@@ -253,10 +253,10 @@ class TypeChecker:
             for p in fd.params:
                 params.append((p.name, self._resolve_type(p.type)))
             ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
-            if _contains_func_type(ret) or any(_contains_func_type(t) for (_, t) in params):
+            if _contains_func_type(ret):
                 raise CheckError(
-                    f"extern function '{fd.name}' cannot use function types; "
-                    f"C callbacks are not supported yet",
+                    f"extern function '{fd.name}' cannot return a function type yet; "
+                    f"wrap it in a C shim that calls it",
                     self.filename, fd.pos)
             if _contains_enum_type(ret) or any(_contains_enum_type(t) for (_, t) in params):
                 raise CheckError(

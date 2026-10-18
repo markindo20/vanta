@@ -273,6 +273,34 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('void log(const char* v_msg);', cpp)
         self.assertIn('log("hi")', cpp)
 
+    def test_extern_callback_param_declarator(self):
+        cpp = gen('extern "c" {\n'
+                  '    func on(f: func(i32) -> i32, x: i32) -> i32\n'
+                  '    func run(cb: func())\n'
+                  '}\n'
+                  'func sq(x: i32) -> i32:\n    return x * x\n'
+                  'func main() -> void:\n    print_i32(on(sq, 2))\n')
+        self.assertIn('int32_t on(int32_t(*v_f)(int32_t), int32_t v_x);', cpp)
+        self.assertIn('void run(void(*v_cb)());', cpp)
+        self.assertIn('on(fn_sq, 2)', cpp)
+
+    def test_extern_ptr_to_callback_param(self):
+        cpp = gen('extern "c" {\n'
+                  '    func set_slot(slot: ptr<func(i32) -> i32>) -> void\n'
+                  '}\n'
+                  'func f() -> void:\n'
+                  '    return\n')
+        self.assertIn('void set_slot(int32_t(**v_slot)(int32_t));', cpp)
+
+    def test_extern_struct_param_qualified(self):
+        cpp = gen("struct Point:\n    x: i32\n"
+                  "extern \"c\" {\n    func sum(p: ptr<Point>) -> i32\n}\n"
+                  "func main() -> void:\n    print_i32(1)\n")
+        self.assertIn('namespace vanta_user {\n    struct Point;\n}', cpp)
+        self.assertIn('int32_t sum(vanta_user::Point* v_p);', cpp)
+        self.assertLess(cpp.index('namespace vanta_user {\n    struct Point;'),
+                        cpp.index('extern "C" {'))
+
     def test_user_function_still_prefixed(self):
         cpp = gen('func add(a: i32, b: i32) -> i32:\n    return a + b\n'
                   'func main() -> void:\n    print_i32(add(1, 2))\n')

@@ -798,6 +798,67 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_callback_atexit(self):
+        # atexit is a libc function taking a callback: the Vanta function
+        # farewell runs after main returns. No C fixture needed, so this
+        # exercises callbacks everywhere (MSVC included).
+        tmp = tempfile.mkdtemp(prefix='vanta_atexit_')
+        try:
+            path = os.path.join(tmp, 'atexit.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('extern "C" {\n'
+                        '    func atexit(cb: func()) -> i32\n'
+                        '}\n'
+                        '\n'
+                        'func farewell():\n'
+                        '    print_str("goodbye from the callback")\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    atexit(farewell)\n'
+                        '    print_str("main is done")\n')
+            self._build_and_run(path, ['main is done', 'goodbye from the callback'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_callbacks_example(self):
+        # Build the C side of examples/callbacks.vnt into a static library,
+        # link the generated program against it, and check that C calls back
+        # into Vanta functions — including one with pointer user data.
+        ar = shutil.which('ar')
+        if ar is None:
+            self.skipTest('ar not available (needed to archive the C fixture)')
+        cc = shutil.which('gcc') or shutil.which('clang') or shutil.which('cc')
+        if cc is None:
+            self.skipTest('no C compiler available for the fixture')
+        name, path = find_cxx_compiler()
+        if _is_msvc(name):
+            self.skipTest('fixture is a GNU archive (libcallback.a); '
+                          'MSVC would need a .lib fixture')
+        tmp = tempfile.mkdtemp(prefix='vanta_callbacks_')
+        try:
+            obj = os.path.join(tmp, 'callbacks_lib.o')
+            p = subprocess.run([cc, '-c', os.path.join(EXAMPLES, 'callbacks_lib.c'),
+                                '-o', obj], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            lib = os.path.join(tmp, 'libcallback.a')
+            p = subprocess.run([ar, 'rcs', lib, obj], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            prog, tc = _frontend_only(os.path.join(EXAMPLES, 'callbacks.vnt'))
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True,
+                                lib_dirs=[tmp], libs=['callback'])
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['12', '14'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_file_io_example(self):
         # Build examples/file_io.vnt and exercise all three branches:
         # missing argument, missing file, and a real read/write round-trip

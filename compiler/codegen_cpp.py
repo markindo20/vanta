@@ -159,6 +159,45 @@ class CodeGen:
             return f'vanta::List<{self._ctype(t.inner)}>'
         return cpp_type(t)
 
+    def _funcptr_parts(self, t):
+        """(return spelling, pointer-star count, parameter list) when t is a
+        function type or a chain of pointers to one, else None."""
+        stars = 0
+        while isinstance(t, PtrType):
+            stars += 1
+            t = t.inner
+        if not isinstance(t, FuncType):
+            return None
+        params = ', '.join(self._ctype_c(p) for p in t.params)
+        return (self._ctype_c(t.ret), stars, params)
+
+    def _ctype_c(self, t) -> str:
+        """C spelling for extern signatures: function types expand inline
+        (the FnPtr aliases live inside the namespace and come later), and
+        user structs are qualified (their tags are forward-declared above)."""
+        fp = self._funcptr_parts(t)
+        if fp is not None:
+            ret, stars, params = fp
+            return f'{ret}(*{"*" * stars})({params})'
+        if isinstance(t, PtrType):
+            return self._ctype_c(t.inner) + '*'
+        if isinstance(t, ArrayType):
+            return f'std::array<{self._ctype_c(t.inner)}, {t.size}>'
+        if isinstance(t, ListType):
+            return f'vanta::List<{self._ctype_c(t.inner)}>'
+        if isinstance(t, StructType) and not t.builtin:
+            return f'vanta_user::{t.name}'
+        return cpp_type(t)
+
+    def _declarator_c(self, t, name: str) -> str:
+        """A C parameter declarator: the name folds into function-pointer
+        stars — 'int32_t (*v_f)(int32_t)', never 'int32_t(*)(int32_t) v_f'."""
+        fp = self._funcptr_parts(t)
+        if fp is not None:
+            ret, stars, params = fp
+            return f'{ret}(*{"*" * stars}{name})({params})'
+        return f'{self._ctype_c(t)} {name}'
+
     def _ordered_func_types(self):
         """Registered function types, innermost first so aliases can nest."""
         ordered, seen = [], set()
@@ -187,6 +226,20 @@ class CodeGen:
 
         # Extern declarations (outside namespace)
         externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
+        structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
+
+        # Struct tags ahead of the extern block: an extern signature may
+        # mention a user struct (a callback carrying a ptr<State>, say), and
+        # the definitions live inside the namespace below.
+        if externs and structs:
+            self.emit('namespace vanta_user {')
+            self.indent += 1
+            for sd in structs:
+                self.emit(f'struct {sd.name};')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('')
+
         for ed in externs:
             self._gen_extern(ed)
         if externs:
@@ -203,7 +256,6 @@ class CodeGen:
         # mention a struct by value (a comparator func(Item, Item) -> i32),
         # and the struct definitions come after the aliases because a struct
         # field may hold a function value.
-        structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
         for sd in structs:
             self.emit(f'struct {sd.name};')
         self.emit('')
@@ -244,14 +296,20 @@ class CodeGen:
             self.emit('}')
         return '\n'.join(self.lines) + '\n'
 
-    def _func_sig(self, fn: A.FuncDecl):
+    def _func_sig(self, fn: A.FuncDecl, extern=False):
         sig = self.tc.functions[fn.name]
         ret = sig.ret
         if isinstance(ret, InferType):
             raise RuntimeError(f"internal: return type of '{fn.name}' was not inferred")
-        ret_s = self._ctype(ret)
-        params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
-                           for i, p in enumerate(fn.params))
+        if extern:
+            # Extern signatures are spelled in plain C terms: no aliases.
+            ret_s = self._ctype_c(ret)
+            params = ', '.join(self._declarator_c(sig.params[i][1], f'v_{p.name}')
+                               for i, p in enumerate(fn.params))
+        else:
+            ret_s = self._ctype(ret)
+            params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
+                               for i, p in enumerate(fn.params))
         prefix = '' if sig.is_extern else 'fn_'
         return f'{ret_s} {prefix}{fn.name}({params})'
 
@@ -293,7 +351,7 @@ class CodeGen:
         self.emit(f'extern "C" {{')
         self.indent += 1
         for fd in ed.funcs:
-            sig = self._func_sig(fd)
+            sig = self._func_sig(fd, extern=True)
             self.emit(sig + ';')
         self.indent -= 1
         self.emit('}')
