@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.11.0)
+# Vanta Language Reference (v0.12.0)
 
-This is the reference for the language as implemented at tag `v0.11.0`. Every
+This is the reference for the language as implemented at tag `v0.12.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -33,7 +33,7 @@ Assigning to a `let` binding is a compile-time error.
 | `bool` | `true` / `false` |
 | `void` | function return only |
 | `str` | string literal type (see [Strings](#strings)) |
-| `ptr<T>` | raw pointer, function parameter type only |
+| `ptr<T>` | raw pointer: locals, parameters, and returns; `ptr<void>` is the untyped C-style handle (see [Pointers and the Arena](#pointers-and-the-arena)) |
 | `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array; checked access with `xs.at(i)` (see [Checked indexing](#checked-indexing-at-v070)) |
 | `List<T>` | growable list whose storage lives in an `Arena`; `push`/`pop`/`len`/`at`/`xs[i]` (see [Dynamic lists](#dynamic-lists-listt-v090)) |
 | `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
@@ -305,6 +305,17 @@ arena.reset()               # rewinds the allocation offset to 0
 - Indexing a `ptr<T>` uses `p[i]`.
 - `arena.reset()` rewinds the allocation offset; it does not zero memory.
 
+Pointer values can also come from `extern` calls and live in locals. A pointer
+local can be reassigned with `mut`, user functions may take and return
+pointers, and any `ptr<T>` is accepted where `ptr<void>` is expected — C's
+license to pass `T*` as `void*`. The narrowing direction stays an error, and a
+`ptr<void>` cannot be indexed: declare the pointer with its element type
+(`ptr<i32>`, ...) if you need `p[i]`. `ptr<void>` is how opaque C handles such
+as `SDL_Window` are typed.
+
+Because there is no `nil` literal, `ptr_is_null(p)` is the null test (see
+[SDL2](#sdl2-and-a-window-v0120) for it in real use).
+
 **Arena is non-copyable.** `let b = a`, `return a`, and passing an `Arena` as a
 function argument are all rejected at compile time:
 
@@ -575,6 +586,7 @@ let r = from_quat(q)
 | `file_read` | `(str) -> str` | reads into the string pool; `""` on any failure |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 | `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
+| `ptr_is_null` | `(ptr<T>) -> bool` | `true` when the pointer is null; `T` may be `void` |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different
@@ -685,7 +697,11 @@ extern "demo" {
   same way. The generated C++ declares them in an `extern "C" {}` block outside
   `namespace vanta_user`, and calls keep the original (unmangled) name.
 - Stick to C-compatible types: `i32`, `u32`, `f32`, `f64`, `bool`, `str`
-  (`const char*`), and `ptr<T>` of those. Vanta struct types can appear in a
+  (`const char*`), and `ptr<T>`. Opaque C handles are `ptr<void>`; a typed
+  `ptr<T>` (e.g. `ptr<i32>`) is for C pointers you intend to index, and it
+  widens to `ptr<void>` implicitly where that is declared. A C parameter
+  narrower than `i32` (`Uint8` channels, for instance) is declared `i32`:
+  the callee reads the low byte. Vanta struct types can appear in a
   signature if the C++ side understands them, but a plain C library cannot.
   Enum types cannot appear in an `extern` signature yet — pass
   `enum_to_i32(v)` instead.
@@ -698,6 +714,122 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 
 `examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
 buildable example.
+
+## SDL2 and a window (v0.12.0)
+
+SDL2 is the worked example of `extern`. Two programs ship:
+`examples/sdl_window.vnt` opens a window and clears it to a colour, and
+`examples/sdl_game.vnt` is the first playable Vanta game — move the paddle
+with Left/Right (or A/D) to catch falling coins; Esc or the close button
+quits. Both are pure `extern` declarations: no SDL headers are involved at
+compile time, only the library at link time:
+
+```powershell
+python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
+
+A complete window in one program — event loop, one drawn rectangle, cleanup:
+
+```vanta
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_RenderFillRect(renderer: ptr<void>, rect: ptr<i32>) -> i32
+    func SDL_RenderPresent(renderer: ptr<void>) -> void
+    func SDL_PollEvent(event: ptr<i32>) -> i32
+}
+
+const EV_QUIT: i32 = 256
+const EV_KEYDOWN: i32 = 768
+const KEY_ESCAPE: i32 = 27
+
+func main() -> void:
+    if SDL_Init(32) != 0:                 # SDL_INIT_VIDEO
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta", 100, 100, 480, 320, 4)
+    if ptr_is_null(window):
+        print_str("SDL_CreateWindow failed")
+        SDL_Quit()
+        return
+    mut renderer = SDL_CreateRenderer(window, -1, 6)   # accelerated + vsync
+    if ptr_is_null(renderer):
+        renderer = SDL_CreateRenderer(window, -1, 0)   # any renderer (headless)
+    if ptr_is_null(renderer):
+        print_str("SDL_CreateRenderer failed")
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
+
+    let arena = Arena(256)
+    let ev = arena.alloc::<i32>(16)        # room for one SDL_Event
+    let rect = arena.alloc::<i32>(4)       # an SDL_Rect: x, y, w, h
+    mut running = true
+    mut frames = 0
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            let t = ev[0]
+            if t == EV_QUIT:
+                running = false
+            elif t == EV_KEYDOWN and ev[5] == KEY_ESCAPE:
+                running = false
+        SDL_SetRenderDrawColor(renderer, 30, 90, 160, 255)
+        SDL_RenderClear(renderer)
+        rect[0] = 140                       # x
+        rect[1] = 148                       # y
+        rect[2] = 200                       # w
+        rect[3] = 24                        # h
+        SDL_SetRenderDrawColor(renderer, 240, 200, 60, 255)
+        SDL_RenderFillRect(renderer, rect)
+        SDL_RenderPresent(renderer)
+        frames += 1
+        if frames >= 3:                     # short demo; the shipped examples
+            running = false                 # take the limit from the command line
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    print_fmt("frames {}", frames)
+```
+
+```
+frames 3
+```
+
+What the moving parts mean:
+
+- **Flags are `u32` numbers.** `SDL_INIT_VIDEO` is 32; `SDL_WINDOW_SHOWN`
+  is 4; `SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC` is 6. When 6
+  fails — and it does under SDL's "dummy" video driver — 0 asks for any
+  renderer, which is the software one.
+- **Narrow C parameters are declared `i32`.** `SDL_SetRenderDrawColor` takes
+  `Uint8` channels in C; the callee reads the low byte, so 255 works.
+- **`SDL_Rect*` is a `ptr<i32>`.** A rectangle is four `i32`s (x, y, w, h),
+  so an `arena.alloc::<i32>(4)` doubles as one — the same trick applies to
+  any simple C struct, as long as you get the layout right.
+- **An `SDL_Event` is read as `i32`s.** It is 56 bytes on 64-bit builds and
+  starts with the event type; a key event's key symbol sits at byte 20. The
+  buffer here holds 64 bytes of `i32`s: `ev[0]` is the type (256 quit, 768
+  key down, 769 key up) and `ev[5]` is the key symbol (Esc 27, Left
+  1073741904, Right 1073741903). `SDL_PollEvent` returns 1 while events
+  remain.
+- **`ptr_is_null` before trusting a handle**, and the `mut` on `renderer` is
+  what lets the second creation attempt overwrite the first.
+
+Both examples take an optional frame-limit argument, so a smoke run needs no
+display at all — this is how the test suite exercises them (CI installs SDL2
+on Linux, macOS, and Windows and runs the same smoke tests):
+
+```powershell
+$env:SDL_VIDEODRIVER = "dummy"
+python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
 
 ## File I/O (v0.3.1)
 

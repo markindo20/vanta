@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.11.0)
+# Vanta - a game-oriented systems language (v0.12.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -61,6 +61,18 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 
 See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 
+SDL2 is the worked example of all this. `examples/sdl_window.vnt` opens a
+window; `examples/sdl_game.vnt` is the first playable Vanta game — catch the
+falling coins with Left/Right (or A/D), Esc or the close button quits:
+
+```powershell
+python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
+
+Both are pure `extern` declarations, so no SDL headers are needed to compile
+them, and both take an optional frame-limit argument for headless smoke runs
+(`SDL_VIDEODRIVER=dummy`).
+
 ## Project layout
 
 | Path | Contents |
@@ -69,7 +81,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (383 tests) |
+| `tests/` | `unittest` suite (403 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -94,6 +106,8 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`, checked access |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
+| `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
+| `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
 
 ## Tests
 
@@ -120,8 +134,9 @@ Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
 output, read and write files, build 2D grids, pass functions around,
 bounds-check array access with `xs.at(i)`, grow arena-backed lists
-(`List<T>`), assemble strings with `StrBuilder`, and name states and modes
-with enums — but the remaining gaps are real:
+(`List<T>`), assemble strings with `StrBuilder`, name states and modes
+with enums, and open real windows with SDL2 (two examples, one of them a
+playable game) — but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -136,5 +151,8 @@ with enums — but the remaining gaps are real:
 - enums are plain named constants: no explicit member values, no associated
   data, and no `match`/`switch` — compare with `==`/`!=` and branch with
   `if`/`elif`
-- windowing and audio are now reachable through `extern` (SDL2 and friends),
-  but nothing ships in the box
+- windowing is shipped as SDL2 examples only: there is no audio/gamepad
+  wrapper, no text rendering, and events are read by hand (an `SDL_Event`
+  is viewed as raw `i32`s); nothing else ships in the box
+- pointers have no null safety beyond `ptr_is_null`; `ptr<void>` widening
+  is the only implicit pointer conversion

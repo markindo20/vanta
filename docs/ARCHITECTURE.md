@@ -30,7 +30,11 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    `mut`. Function values are
    resolved here too: `func(...)` types are registered under the `FnPtrN`
    alias names codegen will use, and a local binding shadows a function of the
-   same name in call position.
+   same name in call position. The pointer rules live here as well: `_coerce_value`
+   performs the C-style `ptr<T>` → `ptr<void>` widening (and only that
+   direction), `ptr_is_null` is checked in `_check_ptr_is_null`, a
+   `ptr<void>` cannot be indexed, and `alloc::<void>` is rejected with its
+   own message.
 7. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
@@ -40,7 +44,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    is emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
    namespace, innermost first, with raw declarators never written inline.
    Enum declarations are emitted before the aliases, since signatures and
-   fields may name them.
+   fields may name them. A function that can fall through gets a
+   type-appropriate default return: `""` for `str`, `nullptr` for pointers,
+   value-initialization for everything else (`T{}` cannot be written for a
+   raw `T*`, which is why pointers are special-cased).
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -98,14 +105,19 @@ compilation failure to `build/vanta_failed.cpp`.
 The only rule enforced is that **`Arena` is non-copyable**: `let a2 = a1` (where
 `a1: Arena`), `return a1`, and passing an `Arena` as an argument are all
 rejected. `ptr<T>` has no borrow checking, lifetime tracking, or aliasing
-analysis, so dangling and aliased pointers are not detected. Broader ownership
-analysis is out of scope.
+analysis, so dangling and aliased pointers are not detected; the checker only
+guards the conversions (widening to `ptr<void>` is implicit, the reverse is
+an error) and offers `ptr_is_null`. Broader ownership analysis is out of
+scope.
 
 ## Tests
 
-`tests/` holds 383 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 403 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
-real binaries and skip automatically when no C++17 compiler is present:
+real binaries and skip automatically when no C++17 compiler is present. The
+SDL2 tests build, link, and run the two SDL examples headless
+(`SDL_VIDEODRIVER=dummy` plus a frame-limit argument) and skip when SDL2 is
+not installed; CI installs SDL2 on Linux, macOS, and Windows.
 
 ```powershell
 python -m unittest discover -s tests

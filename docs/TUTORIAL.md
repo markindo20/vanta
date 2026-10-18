@@ -1,12 +1,15 @@
 # Vanta in 30 minutes
 
-A hands-on introduction that ends with a small project: an ASCII terrain
-generator. Every code block below is a complete program that was run to
-produce the output shown — copy it into a file with a `.vnt` extension and
-run it.
+A hands-on introduction that builds from `print_str` to a small project — an
+ASCII terrain generator — and then leaves the terminal behind: the last
+section opens a real window with SDL2. Every code block below is a complete
+program that was run to produce the output shown — copy it into a file with a
+`.vnt` extension and run it.
 
 **Prerequisites:** Python 3.10+ and a C++17 compiler (`g++`, `clang++`, or
-MSVC `cl`). See the Quick start in the [README](../README.md).
+MSVC `cl`). See the Quick start in the [README](../README.md). The SDL2
+section at the end additionally needs the SDL2 library, but everything
+before it does not.
 
 ```powershell
 python main.py run hello.vnt     # compile and run
@@ -348,12 +351,90 @@ coordinate slipped past the grid, the program would stop loudly with
 `vanta: index ... out of bounds (size ...) at line ...` instead of printing
 garbage.
 
+## SDL2: a real window
+
+Printing to the terminal is where Vanta starts, not where it stops. `extern`
+blocks declare C functions and the driver links the library in; SDL2 — the
+game windowing library — is the worked example. This program opens a window,
+clears it to a blue, shows it for 600 ms, and quits:
+
+```vanta
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_RenderPresent(renderer: ptr<void>) -> void
+    func SDL_Delay(ms: u32) -> void
+}
+
+func main() -> void:
+    if SDL_Init(32) != 0:              # SDL_INIT_VIDEO
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta", 100, 100, 480, 320, 4)
+    if ptr_is_null(window):
+        print_str("SDL_CreateWindow failed")
+        SDL_Quit()
+        return
+    mut renderer = SDL_CreateRenderer(window, -1, 6)
+    if ptr_is_null(renderer):
+        renderer = SDL_CreateRenderer(window, -1, 0)
+    SDL_SetRenderDrawColor(renderer, 30, 90, 160, 255)
+    SDL_RenderClear(renderer)
+    SDL_RenderPresent(renderer)
+    SDL_Delay(600)                     # hold the window open for 600 ms
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    print_str("a blue window, then gone")
+```
+
+```
+a blue window, then gone
+```
+
+Run it with the library on the command line (Windows / MSYS2 paths — on
+Linux and macOS SDL2 lives in the default search path, so `--link SDL2`
+alone is enough):
+
+```powershell
+python main.py run window.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
+
+Things worth noticing:
+
+- The block declares only the functions used, with C-compatible types;
+  SDL's headers never enter the picture. `func` without `-> type` returns
+  `void`.
+- `SDL_CreateWindow` and friends return opaque handles typed `ptr<void>`.
+  `ptr_is_null` tests one for failure, and any `ptr<T>` is accepted where
+  `ptr<void>` is expected — never the other way around.
+- Flags like `SDL_INIT_VIDEO` (32) and `SDL_WINDOW_SHOWN` (4) are plain
+  numbers at the call site. The renderer fallback exists because flags 6
+  (`SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC`) fails on SDL's
+  "dummy" video driver, which is how the examples run headless in CI:
+  `SDL_VIDEODRIVER=dummy` plus a frame limit makes these programs testable
+  without a display.
+
+`examples/sdl_window.vnt` picks up from here with the event loop — quit on
+Esc or the close button — and `examples/sdl_game.vnt` turns it into the
+first playable Vanta game: move the paddle with Left/Right to catch the
+falling coins. The event numbers (type at `ev[0]`, key symbol at `ev[5]`)
+and the rest of the API are documented in the reference's
+[SDL2 walkthrough](LANGUAGE_REFERENCE.md#sdl2-and-a-window-v0120).
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
-  including imports, `extern` C linking, file I/O, and the builtin list.
+  including imports, `extern` C linking, the SDL2 walkthrough, file I/O,
+  and the builtin list.
 - [`../examples/`](../examples) — one sample per feature area, from
-  `physics.vnt` to `boids.vnt` and `grid.vnt`.
+  `physics.vnt` to `boids.vnt`, `grid.vnt`, and the playable `sdl_game.vnt`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (383 tests).
+- `python -m unittest discover -s tests` — run the test suite (403 tests).
