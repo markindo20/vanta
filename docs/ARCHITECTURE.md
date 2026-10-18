@@ -8,7 +8,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 
 1. `tokens.py` — token types and the keyword table.
 2. `lexer.py` — hand-written tokenizer producing `INDENT`/`DEDENT`/`NEWLINE`.
-   Tabs are rejected.
+   Newlines are suppressed inside `(...)` and `[...]`, so array literals and
+   argument lists can span lines. Tabs are rejected.
 3. `parser.py` — recursive descent for declarations, Pratt for expressions.
    Produces `ast_nodes.py` nodes.
 4. `loader.py` — expands `import` declarations into one merged `Program`: the
@@ -23,6 +24,9 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`), where `extern` functions are registered
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
+   Assignment targets are validated by walking the storage chain (fields and
+   indexes) to its root: an index on a pointer is writable regardless of the
+   binding, otherwise the root binding must be `mut`.
 7. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
@@ -83,7 +87,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 176 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 187 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

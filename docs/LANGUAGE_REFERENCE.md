@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.4.0)
+# Vanta Language Reference (v0.5.0)
 
-This is the reference for the language as implemented at tag `v0.2.6`. Every
+This is the reference for the language as implemented at tag `v0.5.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -9,7 +9,9 @@ surprise is called out explicitly.
 - `#` starts a line comment.
 - Blocks are delimited by indentation, not braces. The lexer emits `INDENT` and
   `DEDENT` tokens. **Tabs are rejected** — indent with spaces.
-- One statement per line.
+- One statement per line, except inside `(...)` and `[...]`: newlines there are
+  ignored, so array literals and argument lists may span lines.
+- Statement bodies use `:` blocks; only `extern` uses `{` `}`.
 
 ## Values and mutability
 
@@ -32,7 +34,7 @@ Assigning to a `let` binding is a compile-time error.
 | `void` | function return only |
 | `str` | string literal type (see [Strings](#strings)) |
 | `ptr<T>` | raw pointer, function parameter type only |
-| `[T, N]` | fixed-size array of `N` elements |
+| `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array |
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
 
@@ -152,6 +154,40 @@ counts[3] = 7               # element assignment
 - The size is part of the type: the literal must have exactly `N` elements.
 - Empty array literals are rejected.
 - An `f32` array accepts integer literals, which are coerced.
+- Sizes in type annotations are integer literals; `const` names cannot appear
+  there.
+
+### Nested arrays (v0.5.0)
+
+`T` may itself be an array type — that is how 2D grids are written:
+
+```vanta
+# 4 rows of 8 i32, indexed rows first: g[y][x]
+mut g: [[i32, 8], 4] = [[0, 0, 0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0, 0, 0],
+                        [0, 0, 0, 0, 0, 0, 0, 0]]
+g[1][3] = 9
+print_i32(g[1][3])          # 9
+```
+
+- Grid literals may span lines: newlines inside `[...]` are ignored.
+- Writes follow the binding rules at any depth: a `mut` binding makes its
+  grid cells writable, a `let` binding does not, and parameters are immutable
+  — including fields of structs passed by value.
+- Writing **through a pointer** ignores binding mutability: pointer memory is
+  always writable. `arena.alloc::<[T, W]>(h)` allocates a dynamic grid of `h`
+  rows, each `W` wide:
+
+```vanta
+let arena = Arena(4096)
+let rows = arena.alloc::<[i32, 8]>(4)   # 4 rows of 8
+rows[0][0] = 1
+print_i32(rows[3][7])
+```
+
+  The row width is fixed by the type argument; the row count is yours to
+  track.
 
 ## Pointers and the Arena
 

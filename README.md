@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.4.0)
+# Vanta — a game-oriented systems language (v0.5.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,7 +69,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (176 tests) |
+| `tests/` | `unittest` suite (187 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -88,6 +88,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `extern_demo.vnt` | `extern` declarations linking a C library (C side: `extern_demo_lib.c`) |
 | `file_io.vnt` | `file_exists` / `file_read` / `file_write`, with a path from the command line |
 | `imports_demo.vnt` | A multi-file program: `import "imports_demo_lib.vnt"` |
+| `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
 
 ## Tests
 
@@ -109,11 +110,11 @@ compiler, set the `CXX` environment variable.
 
 Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
-output, and read and write files, but the remaining gaps are real:
+output, read and write files, and build 2D grids, but the remaining gaps are
+real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from it
-- no 2D arrays (flatten by hand)
 - no first-class functions, so no callbacks or ECS dispatch
 - no bounds-checked indexing, and no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
