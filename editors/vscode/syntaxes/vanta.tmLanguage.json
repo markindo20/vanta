@@ -1,0 +1,95 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Vanta",
+  "scopeName": "source.vanta",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#function-definition" },
+    { "include": "#type-definition" },
+    { "include": "#keywords" },
+    { "include": "#booleans" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.number-sign.vanta", "match": "#.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.vanta",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.vanta", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "function-definition": {
+      "patterns": [
+        {
+          "name": "entity.name.function.vanta",
+          "match": "(?<=\\bfunc\\s+)[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "type-definition": {
+      "patterns": [
+        {
+          "name": "entity.name.type.vanta",
+          "match": "(?<=\\b(?:struct|component)\\s+)[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.vanta",
+          "match": "\\b(func|let|mut|const|struct|component|system|extern|import|if|elif|else|while|for|in|break|continue|return|and|or|not)\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "name": "constant.language.vanta",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.vanta",
+          "match": "\\b(i32|u32|f32|f64|bool|str|void|ptr|Vec2|Vec3|Quat|Matrix4|Arena)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.vanta",
+          "match": "\\b(print|write|sqrt|sin|cos|tan|atan2|abs|min|max|floor|ceil|rand|to_str)_[a-z0-9_]+\\b"
+        },
+        {
+          "name": "support.function.builtin.vanta",
+          "match": "\\b(len|assert|range|arg_count|arg_str|str_len|str_concat|str_to_i32|str_to_f32|str_pool_reset|file_exists|file_read|file_write|i32_to_f32|f32_to_i32|translation|scale|from_quat)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.vanta",
+          "match": "\\b\\d+(\\.\\d+)?\\b"
+        }
+      ]
+    }
+  }
+}

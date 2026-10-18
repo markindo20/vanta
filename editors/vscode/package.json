@@ -1,0 +1,36 @@
+{
+  "name": "vanta-language",
+  "displayName": "Vanta",
+  "description": "Syntax highlighting for the Vanta language (.vnt).",
+  "version": "0.1.0",
+  "publisher": "vanta",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "vanta",
+        "aliases": [
+          "Vanta",
+          "vanta"
+        ],
+        "extensions": [
+          ".vnt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vanta",
+        "scopeName": "source.vanta",
+        "path": "./syntaxes/vanta.tmLanguage.json"
+      }
+    ]
+  }
+}
