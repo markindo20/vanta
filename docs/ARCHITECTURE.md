@@ -24,9 +24,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`), where `extern` functions are registered
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
-   Assignment targets are validated by walking the storage chain (fields and
-   indexes) to its root: an index on a pointer is writable regardless of the
-   binding, otherwise the root binding must be `mut`. Function values are
+   Assignment targets are validated by walking the storage chain (fields,
+   indexes, and checked `at()` calls) to its root: an index on a pointer is
+   writable regardless of the binding, otherwise the root binding must be
+   `mut`. Function values are
    resolved here too: `func(...)` types are registered under the `FnPtrN`
    alias names codegen will use, and a local binding shadows a function of the
    same name in call position.
@@ -58,6 +59,9 @@ distinct semantics.
 
 - `Vec2`, `Vec3`, `Quat`, `Matrix4` (row-major) with their operators
 - the `Arena` bump allocator
+- `at_checked` / `at_checked_ref` (plus `index_fail`) — the bounds-checked
+  access behind `xs.at(i)`; a bad index reports the array size and the
+  access's source line
 - IO, `sqrt`, `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
 - `write_*` variants of the `print_*` functions (no trailing newline)
 - `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
@@ -92,7 +96,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 238 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 267 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

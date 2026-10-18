@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.6.0)
+# Vanta Language Reference (v0.7.0)
 
-This is the reference for the language as implemented at tag `v0.6.0`. Every
+This is the reference for the language as implemented at tag `v0.7.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -34,7 +34,7 @@ Assigning to a `let` binding is a compile-time error.
 | `void` | function return only |
 | `str` | string literal type (see [Strings](#strings)) |
 | `ptr<T>` | raw pointer, function parameter type only |
-| `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array |
+| `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array; checked access with `xs.at(i)` (see [Checked indexing](#checked-indexing-at-v070)) |
 | `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
@@ -189,6 +189,51 @@ print_i32(rows[3][7])
 
   The row width is fixed by the type argument; the row count is yours to
   track.
+
+### Checked indexing: `at()` (v0.7.0)
+
+`xs[i]` is unchecked. When an index cannot be trusted — it comes from data,
+user input, or arithmetic — `xs.at(i)` checks it against the array's size
+before touching memory:
+
+```vanta
+mut xs: [i32, 4] = [10, 20, 30, 40]
+print_i32(xs.at(1))         # 20
+xs.at(2) = 99               # checked write
+print_i32(xs.at(2))         # 99
+xs.at(3) += 1               # compound assignment works too
+print_i32(xs.at(3))         # 41
+
+let j = len(xs) - 2         # the index may be any i32 expression
+print_i32(xs.at(j))         # 99
+```
+
+An out-of-bounds access — including a negative index — is a loud failure, not
+a silent memory error. This program:
+
+```vanta
+func main() -> void:
+    let xs: [i32, 4] = [10, 20, 30, 40]
+    print_i32(xs.at(4))
+```
+
+prints to stderr and exits with status 1:
+
+```
+vanta: index 4 out of bounds (size 4) at line 3
+```
+
+- `at` works on fixed-size arrays `[T, N]`, including nested ones:
+  `g.at(y).at(x)` reads an element and `g.at(y).at(x) = v` writes one.
+  A read returns the element, so a function result can be a receiver too:
+  `make_grid().at(0)`.
+- Writes obey the normal mutability rules: the storage chain must reach a
+  `mut` binding, or index through a `ptr<T>` — pointer memory is always
+  writable.
+- `at` is **not** available on `ptr<T>`: a pointer has no length, so there is
+  nothing to check against — use `p[i]`. There is no checked access for
+  pointers yet.
+- `at` is a call, not a value: `xs.at` alone is an error.
 
 ## Pointers and the Arena
 
