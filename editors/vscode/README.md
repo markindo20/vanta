@@ -2,7 +2,10 @@
 
 Syntax highlighting for `.vnt` files: comments, strings, keywords, built-in
 types, the builtin function families (`print_*`, `sin_*`, `str_*`, ...), and
-function / struct names.
+function / struct names. `.vnt` files also show the Vanta mark in the
+Explorer (light and dark variants) — this needs a file icon theme with
+specific icons, like the default Seti; the generic-only Minimal theme does
+not show language icons.
 
 ## Install (unpacked)
 
@@ -15,7 +18,7 @@ function / struct names.
 
 ```powershell
 npx @vscode/vsce package
-code --install-extension vanta-language-0.1.0.vsix
+code --install-extension vanta-language-0.2.0.vsix
 ```
 
 This is highlighting only — no diagnostics or completion yet. An LSP server

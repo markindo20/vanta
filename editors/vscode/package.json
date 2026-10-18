@@ -2,7 +2,7 @@
   "name": "vanta-language",
   "displayName": "Vanta",
   "description": "Syntax highlighting for the Vanta language (.vnt).",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "vanta",
   "license": "MIT",
   "engines": {
@@ -22,7 +22,11 @@
         "extensions": [
           ".vnt"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/vanta-light.png",
+          "dark": "./icons/vanta.png"
+        }
       }
     ],
     "grammars": [
