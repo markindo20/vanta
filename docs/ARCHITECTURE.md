@@ -18,7 +18,7 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    once (cycles and missing files are errors), and every AST position is
    stamped with its source file so diagnostics name the right file.
 5. `typesys.py` — the type model (`PrimType`, `PtrType`, `ArrayType`,
-   `StructType`, ...).
+   `StructType`, `FuncType`, ...).
 6. `type_checker.py` — two passes: register structs, builtins, and function
    signatures; then check bodies with scoped symbol tables. Annotates every
    expression node with `expr.type`. This is where the builtins are declared
@@ -26,13 +26,18 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
    Assignment targets are validated by walking the storage chain (fields and
    indexes) to its root: an index on a pointer is writable regardless of the
-   binding, otherwise the root binding must be `mut`.
+   binding, otherwise the root binding must be `mut`. Function values are
+   resolved here too: `func(...)` types are registered under the `FnPtrN`
+   alias names codegen will use, and a local binding shadows a function of the
+   same name in call position.
 7. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
    runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
    `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions. `extern` declarations
    are emitted as an `extern "C" {}` block before the namespace, and calls to
-   them skip the `fn_` prefix user functions get.
+   them skip the `fn_` prefix user functions get. Each distinct function type
+   is emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
+   namespace, innermost first, with raw declarators never written inline.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -87,7 +92,7 @@ analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 187 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 238 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present:
 

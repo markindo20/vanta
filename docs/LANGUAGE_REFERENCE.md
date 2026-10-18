@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.5.0)
+# Vanta Language Reference (v0.6.0)
 
-This is the reference for the language as implemented at tag `v0.5.0`. Every
+This is the reference for the language as implemented at tag `v0.6.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -35,6 +35,7 @@ Assigning to a `let` binding is a compile-time error.
 | `str` | string literal type (see [Strings](#strings)) |
 | `ptr<T>` | raw pointer, function parameter type only |
 | `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array |
+| `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
 
@@ -215,6 +216,75 @@ error: cannot pass Arena to a function
 
 This is the only ownership rule enforced. `ptr<T>` has **no** borrow checking,
 so dangling or aliased pointers are not detected.
+
+## Function values (v0.6.0)
+
+Functions are values. A function type is written `func(P1, P2) -> R`; omit the
+arrow for a `void` return type: `func(str)`.
+
+```vanta
+func square(x: i32) -> i32:
+    return x * x
+
+func apply(f: func(i32) -> i32, x: i32) -> i32:
+    return f(x)
+
+func main() -> void:
+    let f = square              # inferred: func(i32) -> i32
+    print_i32(f(5))             # indirect call: 25
+    print_i32(apply(square, 7)) # a function as an argument: 49
+```
+
+- Values are plain function pointers: a `func` value always points at a named
+  function. **There are no closures** — nothing is captured, so a function
+  value cannot remember surrounding variables.
+- Any named function works as a value: Vanta functions, `extern` functions
+  (used under their C name), and builtins such as `print_str` or `sqrt_f32`.
+- Function values fit anywhere a value fits: variables, parameters, return
+  types, struct fields, arrays, and arena allocations:
+
+```vanta
+func negate(x: i32) -> i32:
+    return 0 - x
+
+func main() -> void:
+    let ops: [func(i32) -> i32, 2] = [square, negate]
+    for i in range(0, len(ops)):
+        print_i32(ops[i](5))
+```
+
+- Indirect calls use the same syntax as direct calls — `f(x)`,
+  `handlers[0](x)`, `op.run(x)`, even `pick()(x)`. Arguments are checked
+  against the type of the value, so a wrong count or type is a compile error.
+- A function-typed binding obeys the normal mutability rules: `let f = square`
+  cannot be reassigned; `mut f: func(i32) -> i32 = square` can.
+
+```vanta
+struct Op:
+    run: func(i32) -> i32
+
+func pick() -> func(i32) -> i32:
+    return square
+
+func main() -> void:
+    let op = Op(run: pick())
+    print_i32(op.run(4))   # 16
+```
+
+Rejected on purpose, with a compile-time error:
+
+- `len`, `print_fmt`, `write_fmt`, and `assert` are call syntax, not values:
+  `cannot use builtin 'len' as a value`. Type names are not values either.
+- `==` and `!=` on function values: `function values cannot be compared`.
+- Function values in `const` initializers.
+- Function types in `extern` signatures — C callbacks are not supported yet.
+- Using a function whose return type is still being inferred (no `-> T`) as a
+  value **before** its declaration is checked; add `-> T` or move the
+  declaration earlier.
+
+Under the hood each distinct function type becomes a `using FnPtrN = R(*)(...)`
+alias in the generated C++, so the C++ spelling of a function type never
+appears in Vanta code.
 
 ## Strings
 

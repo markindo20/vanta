@@ -1,4 +1,4 @@
-# Vanta — a game-oriented systems language (v0.5.0)
+# Vanta — a game-oriented systems language (v0.6.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,7 +69,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (187 tests) |
+| `tests/` | `unittest` suite (238 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -89,6 +89,7 @@ See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 | `file_io.vnt` | `file_exists` / `file_read` / `file_write`, with a path from the command line |
 | `imports_demo.vnt` | A multi-file program: `import "imports_demo_lib.vnt"` |
 | `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
+| `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 
 ## Tests
 
@@ -110,12 +111,13 @@ compiler, set the `CXX` environment variable.
 
 Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries, read command-line arguments, produce formatted
-output, read and write files, and build 2D grids, but the remaining gaps are
-real:
+output, read and write files, build 2D grids, and pass functions around, but
+the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from it
-- no first-class functions, so no callbacks or ECS dispatch
+- function values are plain pointers: no closures, no function-value equality,
+  and C callbacks (function types in `extern`) are not supported yet
 - no bounds-checked indexing, and no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
 - windowing and audio are now reachable through `extern` (SDL2 and friends),
