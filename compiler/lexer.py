@@ -163,6 +163,7 @@ class Lexer:
             '+': TT.PLUS, '-': TT.MINUS, '*': TT.STAR, '/': TT.SLASH,
             '%': TT.PERCENT, '<': TT.LT, '>': TT.GT, '=': TT.ASSIGN,
             '(': TT.LPAREN, ')': TT.RPAREN, '[': TT.LBRACKET, ']': TT.RBRACKET,
+            '{': TT.LBRACE, '}': TT.RBRACE,
             ':': TT.COLON, ',': TT.COMMA, '.': TT.DOT,
         }
         if ch in single:

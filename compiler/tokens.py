@@ -5,7 +5,7 @@ from enum import Enum, auto
 class TT(Enum):
     INT = auto(); FLOAT = auto(); STRING = auto(); IDENT = auto()
     FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto(); CONST = auto()
-    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto()
+    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto()
     IF = auto(); ELIF = auto(); ELSE = auto()
     WHILE = auto(); FOR = auto(); IN = auto()
     BREAK = auto(); CONTINUE = auto()
@@ -16,6 +16,7 @@ class TT(Enum):
     ASSIGN = auto(); PLUS_EQ = auto(); MINUS_EQ = auto(); STAR_EQ = auto(); SLASH_EQ = auto()
     ARROW = auto()
     LPAREN = auto(); RPAREN = auto(); LBRACKET = auto(); RBRACKET = auto()
+    LBRACE = auto(); RBRACE = auto()
     COLON = auto(); COMMA = auto(); DOT = auto(); COLONCOLON = auto()
     NEWLINE = auto(); INDENT = auto(); DEDENT = auto(); EOF = auto()
 
@@ -24,6 +25,7 @@ KEYWORDS = {
     'func': TT.FUNC, 'let': TT.LET, 'mut': TT.MUT, 'return': TT.RETURN,
     'const': TT.CONST,
     'struct': TT.STRUCT, 'component': TT.COMPONENT, 'system': TT.SYSTEM,
+    'extern': TT.EXTERN,
     'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE,
     'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,
     'break': TT.BREAK, 'continue': TT.CONTINUE,

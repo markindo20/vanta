@@ -15,8 +15,8 @@ class CheckError(Exception):
 
 
 class FuncSig:
-    def __init__(self, name, params, ret):
-        self.name = name; self.params = params; self.ret = ret
+    def __init__(self, name, params, ret, is_extern=False):
+        self.name = name; self.params = params; self.ret = ret; self.is_extern = is_extern
 
 
 class TypeChecker:
@@ -40,7 +40,7 @@ class TypeChecker:
         self.structs["Arena"] = StructType("Arena", {}, builtin=True)
 
         def bf(name, params, ret):
-            self.functions[name] = FuncSig(name, params, ret)
+            self.functions[name] = FuncSig(name, params, ret, is_extern=True)
 
         bf("print_i32", [("v", I32)], VOID)
         bf("print_u32", [("v", U32)], VOID)
@@ -106,6 +106,8 @@ class TypeChecker:
                 self._register_func(d)
             elif isinstance(d, A.ConstDecl):
                 self._register_const(d)
+            elif isinstance(d, A.ExternDecl):
+                self._register_extern(d)
 
     def _register_struct(self, d):
         if d.name in self.structs:
@@ -126,7 +128,7 @@ class TypeChecker:
         for p in d.params:
             params.append((p.name, self._resolve_type(p.type)))
         ret = self._resolve_type(d.ret) if d.ret is not None else INFER
-        self.functions[d.name] = FuncSig(d.name, params, ret)
+        self.functions[d.name] = FuncSig(d.name, params, ret, is_extern=False)
 
     def _register_const(self, c):
         if c.name in self.constants:
@@ -149,6 +151,18 @@ class TypeChecker:
         if vt is VOID:
             raise CheckError("constant cannot be void", self.filename, c.pos)
         self.constants[c.name] = vt
+
+    def _register_extern(self, d: A.ExternDecl):
+        for fd in d.funcs:
+            if fd.name in self.functions:
+                raise CheckError(f"duplicate function '{fd.name}'", self.filename, fd.pos)
+            if fd.name in self.structs:
+                raise CheckError(f"function name '{fd.name}' collides with type", self.filename, fd.pos)
+            params = []
+            for p in fd.params:
+                params.append((p.name, self._resolve_type(p.type)))
+            ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
+            self.functions[fd.name] = FuncSig(fd.name, params, ret, is_extern=True)
 
     def _is_constexpr(self, expr) -> bool:
         if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit, A.StringLit)):

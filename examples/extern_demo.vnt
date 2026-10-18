@@ -1,0 +1,21 @@
+# extern_demo.vnt — calling C functions through an extern declaration.
+#
+# The C side is in extern_demo_lib.c. Build it once, then run:
+#
+#     gcc -c examples/extern_demo_lib.c -o build/extern_demo_lib.o
+#     ar rcs build/libdemo.a build/extern_demo_lib.o
+#     python main.py run examples/extern_demo.vnt --lib-dir build --link demo
+#
+# The "demo" string names the library for the reader; linking is decided by
+# --lib-dir and --link on the command line, not by the string.
+
+extern "demo" {
+    func demo_clamp(v: i32, lo: i32, hi: i32) -> i32
+    func demo_cube(x: f32) -> f32
+}
+
+func main() -> void:
+    print_i32(demo_clamp(15, 0, 10))
+    print_i32(demo_clamp(-4, 0, 10))
+    print_i32(demo_clamp(7, 0, 10))
+    print_f32(demo_cube(2.0))

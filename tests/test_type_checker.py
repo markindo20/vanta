@@ -344,6 +344,52 @@ class TypeCheckerTests(unittest.TestCase):
         self.assertEqual(prog.decls[0].body[0].var_type, I32)
         self.assertEqual(prog.decls[0].body[1].var_type, F32)
 
+    def test_extern_registered(self):
+        from compiler.typesys import VOID, I32
+        prog, tc = run('extern "c" {\n'
+                       '    func add(a: i32, b: i32) -> i32\n'
+                       '    func log()\n'
+                       '}\n')
+        add = tc.functions['add']
+        self.assertTrue(add.is_extern)
+        self.assertEqual(add.ret, I32)
+        log = tc.functions['log']
+        self.assertTrue(log.is_extern)
+        self.assertEqual(log.ret, VOID)
+
+    def test_extern_call_ok(self):
+        run('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+            'func f() -> i32:\n    return add(1, 2)\n')
+
+    def test_extern_call_arity_error(self):
+        with self.assertRaises(CheckError):
+            run('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+                'func f() -> i32:\n    return add(1)\n')
+
+    def test_extern_call_type_error(self):
+        with self.assertRaises(CheckError):
+            run('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+                'func f() -> i32:\n    return add(1, 2.5)\n')
+
+    def test_extern_duplicate_name(self):
+        with self.assertRaises(CheckError):
+            run('extern "a" {\n    func f()\n}\n'
+                'extern "b" {\n    func f()\n}\n')
+
+    def test_extern_collides_with_vanta_func(self):
+        with self.assertRaises(CheckError):
+            run('func g() -> void:\n    return\n'
+                'extern "c" {\n    func g()\n}\n')
+
+    def test_extern_collides_with_struct(self):
+        with self.assertRaises(CheckError):
+            run('struct P:\n    x: i32\n'
+                'extern "c" {\n    func P()\n}\n')
+
+    def test_extern_collides_with_builtin(self):
+        with self.assertRaises(CheckError):
+            run('extern "c" {\n    func print_i32(v: i32)\n}\n')
+
 
 if __name__ == '__main__':
     unittest.main()

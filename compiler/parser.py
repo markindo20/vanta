@@ -73,6 +73,8 @@ class Parser:
             return self.parse_struct(False)
         if t.type == TT.COMPONENT:
             return self.parse_struct(True)
+        if t.type == TT.EXTERN:
+            return self.parse_extern()
         if t.type == TT.CONST:
             return self.parse_const()
         self.error(f"expected top-level declaration, got {t.type.name}")
@@ -87,6 +89,42 @@ class Parser:
         val = self.parse_expr()
         self.expect(TT.NEWLINE)
         return A.ConstDecl(name, ann, val, A.Pos(tok.line, tok.col))
+
+    def parse_extern(self):
+        tok = self.advance()
+        lib_name = self.expect(TT.STRING).value
+        self.expect(TT.LBRACE)
+        self.expect(TT.NEWLINE)
+        funcs = []
+        while not self.check(TT.RBRACE) and not self.check(TT.EOF):
+            if self.check(TT.NEWLINE) or self.check(TT.INDENT) or self.check(TT.DEDENT):
+                self.advance()
+                continue
+            funcs.append(self.parse_func_decl())
+        self.expect(TT.RBRACE)
+        self.expect(TT.NEWLINE)
+        return A.ExternDecl(lib_name, funcs, A.Pos(tok.line, tok.col))
+
+    def parse_func_decl(self):
+        tok = self.advance()  # consume FUNC
+        name = self.expect(TT.IDENT).value
+        self.expect(TT.LPAREN)
+        params = []
+        if not self.check(TT.RPAREN):
+            while True:
+                pn = self.expect(TT.IDENT)
+                self.expect(TT.COLON)
+                pt = self.parse_type()
+                params.append(A.Param(pn.value, pt, A.Pos(pn.line, pn.col)))
+                if self.match(TT.COMMA):
+                    continue
+                break
+        self.expect(TT.RPAREN)
+        ret = None
+        if self.match(TT.ARROW):
+            ret = self.parse_type()
+        self.expect(TT.NEWLINE)
+        return A.FuncDecl(name, params, ret, [], False, A.Pos(tok.line, tok.col))
 
     def parse_func(self, is_system):
         tok = self.advance()

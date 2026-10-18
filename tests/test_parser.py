@@ -129,6 +129,30 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(v.value, A.StringLit)
         self.assertEqual(v.value.value, "hi")
 
+    def test_extern_decl(self):
+        src = ('extern "mylib" {\n'
+               '    func add(a: i32, b: i32) -> i32\n'
+               '    func log(msg: str)\n'
+               '}\n')
+        prog = parse(src)
+        ed = prog.decls[0]
+        self.assertIsInstance(ed, A.ExternDecl)
+        self.assertEqual(ed.lib_name, 'mylib')
+        self.assertEqual(len(ed.funcs), 2)
+        add, log = ed.funcs
+        self.assertIsInstance(add, A.FuncDecl)
+        self.assertEqual(add.name, 'add')
+        self.assertEqual([p.name for p in add.params], ['a', 'b'])
+        self.assertEqual(add.ret.name, 'i32')
+        self.assertEqual(add.body, [])
+        self.assertIsNone(log.ret)
+
+    def test_extern_empty_block(self):
+        prog = parse('extern "c" {\n}\n')
+        ed = prog.decls[0]
+        self.assertIsInstance(ed, A.ExternDecl)
+        self.assertEqual(ed.funcs, [])
+
 
 if __name__ == '__main__':
     unittest.main()

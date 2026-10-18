@@ -156,6 +156,31 @@ class CodegenTests(unittest.TestCase):
         cpp = gen('func main() -> void:\n    let a = str_to_i32("12")\n')
         self.assertIn('vanta::str_to_i32("12")', cpp)
 
+    def test_extern_block_emitted_outside_namespace(self):
+        cpp = gen('extern "mylib" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+                  'func main() -> void:\n    print_i32(add(1, 2))\n')
+        self.assertIn('extern "C" {', cpp)
+        self.assertIn('int32_t add(int32_t v_a, int32_t v_b);', cpp)
+        self.assertLess(cpp.index('extern "C"'), cpp.index('namespace vanta_user'))
+
+    def test_extern_call_has_no_prefix(self):
+        cpp = gen('extern "c" {\n    func add(a: i32, b: i32) -> i32\n}\n'
+                  'func main() -> void:\n    print_i32(add(1, 2))\n')
+        self.assertIn('vanta::print_i32(add(1, 2))', cpp)
+        self.assertNotIn('fn_add', cpp)
+
+    def test_extern_void_return_defaults(self):
+        cpp = gen('extern "c" {\n    func log(msg: str)\n}\n'
+                  'func main() -> void:\n    log("hi")\n')
+        self.assertIn('void log(const char* v_msg);', cpp)
+        self.assertIn('log("hi")', cpp)
+
+    def test_user_function_still_prefixed(self):
+        cpp = gen('func add(a: i32, b: i32) -> i32:\n    return a + b\n'
+                  'func main() -> void:\n    print_i32(add(1, 2))\n')
+        self.assertIn('int32_t fn_add(int32_t v_a, int32_t v_b);', cpp)
+        self.assertIn('vanta::print_i32(fn_add(1, 2))', cpp)
+
 
 if __name__ == '__main__':
     unittest.main()

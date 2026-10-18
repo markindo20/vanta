@@ -127,6 +127,14 @@ class CodeGen:
         self.emit('#include <cstdint>')
         self.emit('#include <array>')
         self.emit('')
+
+        # Extern declarations (outside namespace)
+        externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
+        for ed in externs:
+            self._gen_extern(ed)
+        if externs:
+            self.emit('')
+
         self.emit('namespace vanta_user {')
         self.indent += 1
 
@@ -164,13 +172,15 @@ class CodeGen:
         return '\n'.join(self.lines) + '\n'
 
     def _func_sig(self, fn: A.FuncDecl):
-        ret = self.tc.functions[fn.name].ret
+        sig = self.tc.functions[fn.name]
+        ret = sig.ret
         if isinstance(ret, InferType):
             raise RuntimeError(f"internal: return type of '{fn.name}' was not inferred")
         ret_s = cpp_type(ret)
-        params = ', '.join(f'{cpp_type(self.tc.functions[fn.name].params[i][1])} v_{p.name}'
+        params = ', '.join(f'{cpp_type(sig.params[i][1])} v_{p.name}'
                            for i, p in enumerate(fn.params))
-        return f'{ret_s} fn_{fn.name}({params})'
+        prefix = '' if sig.is_extern else 'fn_'
+        return f'{ret_s} {prefix}{fn.name}({params})'
 
     def _gen_struct(self, sd: A.StructDecl):
         st = self.tc.structs[sd.name]
@@ -191,6 +201,16 @@ class CodeGen:
         ret_type = self.tc.functions[fn.name].ret
         if ret_type is not VOID:
             self.emit(f'return {cpp_type(ret_type)}{{}};')
+        self.indent -= 1
+        self.emit('}')
+        self.emit('')
+
+    def _gen_extern(self, ed: A.ExternDecl):
+        self.emit(f'extern "C" {{')
+        self.indent += 1
+        for fd in ed.funcs:
+            sig = self._func_sig(fd)
+            self.emit(sig + ';')
         self.indent -= 1
         self.emit('}')
         self.emit('')
@@ -369,8 +389,11 @@ class CodeGen:
             if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{BUILTIN_FN[name]}({args})'
+            # User-defined or extern function
+            fn_sig = self.tc.functions.get(name)
+            prefix = '' if (fn_sig and fn_sig.is_extern) else 'fn_'
             args = ', '.join(self._expr(a) for a in c.args)
-            return f'fn_{name}({args})'
+            return f'{prefix}{name}({args})'
         if isinstance(f, A.Member):
             ot = getattr(f.obj, 'type', None)
             base = self._expr(f.obj)

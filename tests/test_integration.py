@@ -295,6 +295,42 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_extern_link_end_to_end(self):
+        # Build the C side of examples/extern_demo.vnt into a static library,
+        # link the generated program against it, run it, and check the output.
+        ar = shutil.which('ar')
+        if ar is None:
+            self.skipTest('ar not available (needed to archive the C fixture)')
+        cc = shutil.which('gcc') or shutil.which('clang') or shutil.which('cc')
+        if cc is None:
+            self.skipTest('no C compiler available for the fixture')
+        name, path = find_cxx_compiler()
+        tmp = tempfile.mkdtemp(prefix='vanta_extern_')
+        try:
+            obj = os.path.join(tmp, 'extern_demo_lib.o')
+            p = subprocess.run([cc, '-c', os.path.join(EXAMPLES, 'extern_demo_lib.c'),
+                                '-o', obj], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            lib = os.path.join(tmp, 'libdemo.a')
+            p = subprocess.run([ar, 'rcs', lib, obj], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            prog, tc = _frontend_only(os.path.join(EXAMPLES, 'extern_demo.vnt'))
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True,
+                                lib_dirs=[tmp], libs=['demo'])
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['10', '0', '7', '8.000000'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_string_pool_exhaustion_fails_loudly(self):
         src = (
             "func main() -> void:\n"

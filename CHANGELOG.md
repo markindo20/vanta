@@ -2,6 +2,22 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.3.0 — 2026-10-18
+
+- Added `extern "lib" { ... }` declarations. Extern functions are declared
+  without bodies, type-checked like any other function, and called under their
+  original names; the generated C++ puts them in an `extern "C" {}` block
+  outside `namespace vanta_user`, so the linker sees unmangled symbols.
+- Added `--include-dir`, `--lib-dir`, and `--link` (all repeatable) to `build`
+  and `run`: `-I`/`-L`/`-l` on GCC-style toolchains, `/I`/`/LIBPATH:`/`<lib>.lib`
+  on MSVC.
+- Added `examples/extern_demo.vnt` with its C side in
+  `examples/extern_demo_lib.c`, plus an end-to-end integration test that
+  compiles the C library, links it, and checks the output.
+- Repository history: the tags v0.1.1 through v0.2.5 were re-cut so that each
+  tagged commit reports its own version from `--version`; the stored version
+  string had lagged the tags before v0.2.2's sync and again until v0.2.6.
+
 ## v0.2.6 — 2026-10-18
 
 - Added `print_fmt(fmt, args...)` and `write_fmt(fmt, args...)`. Placeholders are

@@ -37,15 +37,30 @@ def _is_msvc(name):
     return base in ('cl', 'clang-cl')
 
 
-def _compiler_cmd(name, path, src, out, release):
+def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=None, libs=None):
+    include_dirs = include_dirs or []
+    lib_dirs = lib_dirs or []
+    libs = libs or []
     if _is_msvc(name):
         flags = ['/nologo', '/std:c++17', '/EHsc',
-                 '/O2' if release else '/Od', '/I', RUNTIME_DIR,
-                 src, f'/Fe:{out}']
+                 '/O2' if release else '/Od']
+        for d in include_dirs:
+            flags.extend(['/I', d])
+        flags.extend(['/I', RUNTIME_DIR, src, f'/Fe:{out}'])
+        for d in lib_dirs:
+            flags.extend(['/LIBPATH:' + d])
+        for lib in libs:
+            flags.append(lib + '.lib')
         return [path] + flags
     flags = ['-std=c++17', '-Wall', '-Wextra',
-             '-O3' if release else '-O0', '-g' if not release else '-g0',
-             '-I', RUNTIME_DIR, src, '-o', out]
+             '-O3' if release else '-O0', '-g' if not release else '-g0']
+    for d in include_dirs:
+        flags.extend(['-I', d])
+    flags.extend(['-I', RUNTIME_DIR, src, '-o', out])
+    for d in lib_dirs:
+        flags.extend(['-L', d])
+    for lib in libs:
+        flags.extend(['-l', lib])
     return [path] + flags
 
 
@@ -113,7 +128,8 @@ def cmd_build(args):
         shutil.copyfile(cpp_path, args.emit_cpp)
         print(f"wrote {args.emit_cpp}")
 
-    cmd = _compiler_cmd(name, path, cpp_path, os.path.abspath(out_path), args.release)
+    cmd = _compiler_cmd(name, path, cpp_path, os.path.abspath(out_path), args.release,
+                        args.include_dir, args.lib_dir, args.link)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         sys.stderr.write("error: C++ compilation failed\n")
@@ -146,7 +162,8 @@ def cmd_run(args):
     cpp_path = os.path.join(tmpdir, 'main.cpp')
     _emit_source(program, tc, cpp_path)
     exe = os.path.join(tmpdir, 'prog.exe' if os.name == 'nt' else 'prog')
-    cmd = _compiler_cmd(name, path, cpp_path, exe, args.release)
+    cmd = _compiler_cmd(name, path, cpp_path, exe, args.release,
+                        args.include_dir, args.lib_dir, args.link)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         sys.stderr.write("error: C++ compilation failed\n")
@@ -170,10 +187,22 @@ def main(argv):
     p_build.add_argument('-o', '--output')
     p_build.add_argument('--release', action='store_true')
     p_build.add_argument('--emit-cpp')
+    p_build.add_argument('--include-dir', action='append', default=[],
+                         help='add include directory for C++ compilation')
+    p_build.add_argument('--lib-dir', action='append', default=[],
+                         help='add library directory for linking')
+    p_build.add_argument('--link', action='append', default=[],
+                         help='link against library (e.g. SDL2)')
 
     p_run = sub.add_parser('run', help='build and run')
     p_run.add_argument('source')
     p_run.add_argument('--release', action='store_true')
+    p_run.add_argument('--include-dir', action='append', default=[],
+                       help='add include directory for C++ compilation')
+    p_run.add_argument('--lib-dir', action='append', default=[],
+                       help='add library directory for linking')
+    p_run.add_argument('--link', action='append', default=[],
+                       help='link against library (e.g. SDL2)')
     p_run.add_argument('prog_args', nargs='*',
                        help='arguments passed through to the program')
 

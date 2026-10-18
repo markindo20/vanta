@@ -48,6 +48,13 @@ class StructDecl:
 
 
 @dataclass
+class ExternDecl:
+    lib_name: str
+    funcs: List['FuncDecl']
+    pos: Pos
+
+
+@dataclass
 class ConstDecl:
     name: str
     type_ann: Optional[TypeExpr]
