@@ -2,6 +2,41 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.22.0 — 2026-10-19
+
+- Sprite animation. `gamekit/anim.vnt` (a ninth module) is a frame clock over
+  `tex_draw_src` for a horizontal strip of equal frames. `anim_new(count, fw,
+  fh, fps)` describes the strip; `anim_tick(anim, dt)` advances the clock by
+  the time the game hands it and *returns* the updated clock — structs are
+  values, so `anim = anim_tick(anim, dt)` is the idiom — the frame wraps, and
+  `anim_draw` blits the current frame through `tex_draw_src`. Nothing reads a
+  wall clock, a dead texture draws nothing, and an empty strip (zero frames)
+  stays on frame 0. The assets script grows `ball_spin.png` (four 10x10
+  frames, a highlight orbiting the ball), and `examples/breakout.vnt` now
+  spins its ball from it with a fixed 1/60 s step. The animation is purely
+  visual: the physics is untouched, and the frozen headless run still prints
+  exactly `cleared 40 lives 3 frames 2064`.
+- Text sprites. `gamekit/text.vnt` gains `TextSprite` — the render-once path
+  for text that redraws every frame. `text_sprite` renders one string into a
+  texture (same colours as `text_draw`, with `text_sprite_ok` as the test and
+  a dead sprite for a failed font or an empty string), `text_sprite_draw`
+  blits it with no TTF call at all, and `text_sprite_free` destroys it;
+  `text_draw` is unchanged. The alternative — a bounded cache keyed by
+  (font, size, string, colour) — was weighed and rejected: the kit has no
+  hidden state to put it in, pool strings can be invalidated under a cache,
+  and an explicit handle is the kit's shape with the same measured win.
+- The measured before/after ships as `examples/text_bench.vnt`: one 24 pt
+  string, both paths, counts stable and milliseconds the machine's. On the
+  development machine (headless dummy driver, software renderer) 40000 draws
+  went from ~130 ms via `text_draw` to ~4 ms via one sprite — about 30x. A
+  smoke test asserts the two output lines' shape and never the numbers, the
+  rule being that timings are never frozen. 3 new tests (543 total).
+- Docs: the tutorial gains an Animated sprites section and the render-once
+  paragraph in Text on screen; the reference's kit chapter lists nine
+  modules, and both READMEs follow. Every new snippet is executed with its
+  output frozen, and the frozen runs of pong and breakout are re-verified
+  unchanged.
+
 ## v0.21.0 — 2026-10-19
 
 - Game controllers. `gamekit/gamepad.vnt` (an eighth module) wraps SDL2's

@@ -258,7 +258,7 @@ Notes:
   plays to nowhere in real time).
 
 [`../pong.vnt`](../pong.vnt) and [`../breakout.vnt`](../breakout.vnt) are the
-worked examples: pong imports six of the eight modules, draws its score with
+worked examples: pong imports six of the nine modules, draws its score with
 `text_draw`, and beeps with `audio_play_tone`; breakout loads the ball,
-paddle, and bricks from image files with `image.vnt` and fires WAV hits with
-`sound_load`.
+paddle, and bricks from image files with `image.vnt`, spins the ball with
+`anim.vnt`, and fires WAV hits with `sound_load`.
