@@ -139,18 +139,20 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 533 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 538 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless
 (`SDL_VIDEODRIVER=dummy` plus a frame-limit argument; the audio tests use
 `SDL_AUDIODRIVER=dummy`, whose device paces playback in real time) and skip
 when SDL2 is not installed; the SDL_ttf tests (the raw text example, pong's
-text score, the `text` kit module) do the same and skip when SDL2_ttf is
-missing; audio needs no library beyond SDL2 core. CI
-installs SDL2 and SDL_ttf on Linux, macOS, and Windows. The game kit's
-`rng` module has no SDL dependency and is covered by its own test, so part
-of the kit runs anywhere a C++ compiler does.
+text score, the `text` kit module) and the SDL2_image tests (the raw texture
+example, the `image` kit module, breakout) do the same and skip when their
+library is missing; audio needs no library beyond SDL2 core, and the WAV
+format tests write their own sample files. CI installs SDL2, SDL_ttf, and
+SDL2_image on Linux, macOS, and Windows. The game kit's `rng` module has no
+SDL dependency and is covered by its own test, so part of the kit runs
+anywhere a C++ compiler does.
 
 ```powershell
 python -m unittest discover -s tests

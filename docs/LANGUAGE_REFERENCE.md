@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.19.0)
+# Vanta Language Reference (v0.20.0)
 
 This is the reference for the language as implemented at tag `v0.16.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -1103,14 +1103,15 @@ bytes.
 
 ## SDL2 and a window (v0.12.0)
 
-SDL2 is the worked example of `extern`. Three programs ship:
+SDL2 is the worked example of `extern`. Five programs ship:
 `examples/sdl_window.vnt` opens a window and clears it to a colour;
 `examples/sdl_game.vnt` is the first playable Vanta game — move the paddle
 with Left/Right (or A/D) to catch falling coins; Esc or the close button
-quits — and `examples/pong.vnt` is the second, built on the
-[game kit](#the-game-kit-v0140) documented below. All are pure `extern`
-declarations: no SDL headers are involved at compile time, only the library
-at link time:
+quits — `examples/sdl_texture.vnt` loads image files as textures and proves
+its draws by reading the pixels back (SDL2_image), and
+`examples/sdl_sound.vnt` loads a WAV file and plays it. Every one of them
+talks to C only through `extern` declarations: no SDL headers are involved
+at compile time, only the library at link time:
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -1210,40 +1211,51 @@ What the moving parts mean:
 - **`ptr_is_null` before trusting a handle**, and the `mut` on `renderer` is
   what lets the second creation attempt overwrite the first.
 
-All three take an optional frame-limit argument, so a smoke run needs no
-display at all — this is how the test suite exercises them (CI installs SDL2
-on Linux, macOS, and Windows and runs the same smoke tests):
+The windowed programs take an optional frame-limit argument, so a smoke run
+needs no display at all — this is how the test suite exercises them (CI
+installs SDL2 on Linux, macOS, and Windows and runs the same smoke tests):
 
 ```powershell
 $env:SDL_VIDEODRIVER = "dummy"
 python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib --link SDL2
 ```
 
-Sound follows the same recipe: `examples/sdl_audio.vnt` queues a generated
-tone on the default device, and `examples/sdl_audio_cb.vnt` puts a Vanta
-function in the `SDL_AudioSpec.callback` field for SDL's audio thread to
-run — both pure `extern` programs, linking nothing but SDL2.
+Files follow the same recipe: `examples/sdl_texture.vnt` decodes PNG and BMP
+files into textures with `IMG_LoadTexture`, draws them tinted, flipped, and
+rotated, and checks each draw by reading pixels back from a forced software
+renderer — the readbacks are exact on every machine — while
+`examples/sdl_sound.vnt` loads `examples/assets/blip.wav` with
+`SDL_LoadWAV_RW` (the `SDL_RWFromFile` that `SDL_LoadWAV` wraps), queues it,
+and waits for the device to drain. Sound has the same pair of examples:
+`examples/sdl_audio.vnt` queues a generated tone on the default device, and
+`examples/sdl_audio_cb.vnt` puts a Vanta function in the
+`SDL_AudioSpec.callback` field for SDL's audio thread to run. All of these
+are pure `extern` programs; the texture one links SDL2_image, the rest
+nothing but SDL2. `examples/pong.vnt` and `examples/breakout.vnt`, the other
+two playable games, are built on the
+[game kit](#the-game-kit-v0140) documented below.
 
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is six reusable modules over the SDL2 and SDL_ttf calls
-above — ordinary `.vnt` files, imported like anything else:
+`examples/gamekit/` is seven reusable modules over the SDL2, SDL_ttf, and
+SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 
 | Module | Provides |
 |---|---|
-| `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
+| `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
 | `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
+| `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
-| `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait` |
+| `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_ok` / `sound_play` / `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
 
 Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
-  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `font_*`,
-  `text_*`, `audio_*`, `rand_*`); several modules — and the game's own
-  names — coexist.
+  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `tex_*`,
+  `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`); several modules — and
+  the game's own names — coexist.
 - **Failures come back the way C reports them.** There is still no nil
   literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
@@ -1297,9 +1309,40 @@ func main() -> void:
 true
 ```
 
-`audio.vnt` next: tones are generated, not loaded — the kit ships no sound
-files — so the caller owns the sample buffer and `audio_play_tone` fills it
-with a square wave and queues it on the device. The queue API wants a *null*
+`image.vnt` next: `tex_load` hands a path to SDL_image and gets a `Tex`
+back — a handle plus the decoded size — with `tex_ok` as the C-style test.
+Drawing comes in three shapes: `tex_draw` (whole texture, natural size),
+`tex_draw_src` (one rectangle of it — a sprite-sheet frame), and
+`tex_draw_ex` (rotated by an `f64` angle in degrees and/or flipped with the
+`SDL_FLIP_*` constants); `tex_tint` and `tex_alpha` multiply a colour and an
+opacity into every later draw of that texture. Unlike the `gfx_*` helpers
+none of them take a scratch rect — SDL only needs the rectangles during the
+call, so the kit builds them on a transient arena. Importing the module
+means linking SDL2_image:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/image.vnt"
+
+func main() -> void:
+    let screen = screen_open("Vanta", 320, 240)
+    let ball = tex_load(screen, "examples/assets/ball.png")
+    print_bool(screen_ok(screen) and tex_ok(ball))   # true on any working driver
+    print_fmt("{}x{}", ball.w, ball.h)               # the decoded size
+    tex_tint(ball, 240, 96, 96)
+    tex_draw(screen, ball, 100, 100)
+    tex_free(ball)
+    screen_close(screen)
+```
+
+```
+true
+10x10
+```
+
+`audio.vnt` next: tones need no file — the caller owns the sample buffer and
+`audio_play_tone` fills it with a square wave and queues it on the device
+(WAV files load through `sound_load`, below). The queue API wants a *null*
 callback, built with `ptr_null::<func(...)>()`, and `SDL_AudioSpec` itself is
 a Vanta struct whose callback field keeps its C function-pointer type — the
 same struct drives callback mode when a program puts a real function there
@@ -1326,18 +1369,52 @@ true
 4410
 ```
 
+Sound *files* next: `sound_load(a, path)` reads a WAV — 16-bit PCM at the
+device's 44.1 kHz, mono or stereo — into a buffer SDL allocates; the game
+holds the `Sound` and hands the buffer back with `sound_free`, and
+`sound_play` queues it after whatever is already playing. A stereo file is
+folded to mono in place at load, so its byte count halves; any other rate,
+sample format, or channel count loads as a dead `Sound` — `sound_ok` false,
+and every `sound_*` call on it is a no-op, exactly like a dead `Audio`.
+Paths are opened by C, relative to the process working directory:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/audio.vnt"
+
+func main() -> void:
+    let audio = audio_open()
+    let snd = sound_load(audio, "examples/assets/blip.wav")
+    print_bool(audio_ok(audio) and sound_ok(snd))    # true on any working driver
+    print_fmt("{} bytes", snd.len)                   # 5292 = 60 ms at 44.1 kHz
+    sound_play(audio, snd)
+    audio_wait(audio)
+    sound_free(snd)
+    audio_close(audio)
+```
+
+```
+true
+5292 bytes
+```
+
 Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
-well (`audio.vnt` needs nothing extra — audio is in SDL2's core library):
+well, `image.vnt` links SDL2_image (`audio.vnt` needs nothing extra — audio
+is in SDL2's core library):
 
 ```powershell
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 ```
 
-`examples/pong.vnt` is the worked example: it imports all six modules,
-serves with `match`, draws its score with `text_draw`, beeps with
-`audio_play_tone`, and stays testable headless — a frame-limit argument plus
-`SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` is how the test suite
-runs it in CI.
+`examples/pong.vnt` is the worked example for the first game: it imports six
+of the modules (all but `image.vnt`), serves with `match`, draws its score
+with `text_draw`, beeps with `audio_play_tone`, and stays testable headless —
+a frame-limit argument plus `SDL_VIDEODRIVER=dummy` and
+`SDL_AUDIODRIVER=dummy` is how the test suite runs it in CI.
+`examples/breakout.vnt` adds the satellite modules on top: a tinted sprite
+wall out of one white brick texture, WAV hits, and a deterministic
+full-clear run the suite freezes the same way.
 
 ## File I/O (v0.3.1)
 
