@@ -776,13 +776,45 @@ width, height, a source rectangle, a destination rectangle, filled in by
 and height, which is how you right-align a score or centre a title: measure
 first, then compute the x. **Rendering happens per call**: each `text_draw`
 renders the string into a texture and frees it immediately — just right for
-scores, timers, and labels.
+scores and timers that change.
 
 Programs that import `text.vnt` link SDL_ttf as well as SDL2;
 `examples/pong.vnt` now draws its score this way:
 
 ```powershell
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+```
+
+Text that stays the same but redraws every frame — a label, a wall of
+instructions — takes the render-once path instead: `text_sprite` renders it
+into a `TextSprite` (a texture plus its size), `text_sprite_ok` is the test,
+`text_sprite_draw` blits it with no font call at all, and
+`text_sprite_free` releases the texture. The cost difference is real:
+`examples/text_bench.vnt` draws one string both ways and prints the two
+numbers (headless `SDL_VIDEODRIVER=dummy` works), and the kit freezes the
+counts, never the milliseconds.
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/text.vnt"
+
+func main() -> void:
+    let screen = screen_open("sprites", 320, 240)
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
+    print_bool(screen_ok(screen) and font_ok(font))   # true on any working driver
+    let label = text_sprite(screen, font, "PAUSED", 240, 220, 120)
+    print_bool(text_sprite_ok(label))
+    for i in range(0, 3):
+        text_sprite_draw(screen, label, 24, 24)       # no font call per frame
+    text_sprite_free(label)
+    font_close(font)
+    text_quit()
+    screen_close(screen)
+```
+
+```
+true
+true
 ```
 
 ## Sprites
@@ -1037,4 +1069,4 @@ python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --li
   alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (541 tests).
+- `python -m unittest discover -s tests` — run the test suite (543 tests).

@@ -75,7 +75,8 @@ playable games built on it:
 pong is W/S or Up/Down against a tracking AI, first to 5 wins, with the score
 drawn as text and a beep on every hit and point; breakout is a wall of
 tinted sprites, a spinning animated ball, a tracking paddle, and WAV hits,
-and with no key held the paddle plays its own demo.
+and with no key held the paddle plays its own demo; `examples/text_bench.vnt`
+is the kit's measured before/after for text sprites.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -103,7 +104,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (541 tests) |
+| `tests/` | `unittest` suite (543 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -143,6 +144,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `sdl_audio_cb.vnt` | SDL2 audio, callback mode: a Vanta function in `SDL_AudioSpec.callback`, state through `userdata` |
 | `sdl_sound.vnt` | SDL2 audio, files: `SDL_LoadWAV_RW` over `SDL_RWFromFile`, queued and drained |
 | `sdl_gamepad.vnt` | SDL2 controllers: `SDL_GameControllerOpen`, button/axis polling, the dead-handle path |
+| `text_bench.vnt` | The measured before/after for `text_sprite`: one string drawn both ways; counts stable, milliseconds the machine's |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
 | `gamekit/` | Nine reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), sprite animation, text (SDL_ttf), audio (tones and WAV files), random numbers |
 | `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |

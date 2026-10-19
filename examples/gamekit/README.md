@@ -12,7 +12,7 @@ convention, not a language feature.
 | `gfx.vnt` | Rectangle drawing: `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image textures: `tex_load`, `tex_ok`, `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw`, `tex_draw_src`, `tex_draw_ex` |
 | `anim.vnt` | Sprite-sheet animation: `anim_new`, `anim_tick`, `anim_frame`, `anim_draw` |
-| `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_quit` |
+| `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_sprite`, `text_sprite_ok`, `text_sprite_draw`, `text_sprite_free`, `text_quit` |
 | `audio.vnt` | SDL2 audio: tones — `audio_open`, `audio_ok`, `audio_play_tone`, `audio_pending`, `audio_wait`, `audio_close` — and WAV files: `sound_load`, `sound_ok`, `sound_play`, `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` — bounded helpers over the deterministic stream |
 
@@ -46,7 +46,10 @@ frames 3
 
 Text is one more import — `text.vnt` over SDL_ttf, with a font the kit
 ships. `text_measure` writes the rendered size into the scratch block;
-`text_draw` renders and blits in one call:
+`text_draw` renders and blits in one call, right for text that changes.
+`text_sprite` renders once into a kept texture instead — then
+`text_sprite_draw` blits it with no font call, for text that redraws every
+frame:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -61,12 +64,17 @@ func main() -> void:
     text_draw(screen, font, 24, 24, "Vanta", scratch, 240, 220, 120)
     text_measure(font, "Vanta", scratch)
     print_bool(scratch[0] > 0)               # the measured width is real
+    let label = text_sprite(screen, font, "Vanta", 240, 220, 120)
+    print_bool(text_sprite_ok(label))
+    text_sprite_draw(screen, label, 24, 24)  # no font call per draw
+    text_sprite_free(label)
     font_close(font)
     text_quit()
     screen_close(screen)
 ```
 
 ```
+true
 true
 true
 ```

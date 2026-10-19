@@ -1251,7 +1251,7 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
 | `anim.vnt` | Sprite-sheet animation: `Anim`, `anim_new` / `anim_tick` / `anim_frame` / `anim_draw` |
-| `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
+| `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`; `TextSprite`, `text_sprite` / `text_sprite_ok` / `text_sprite_draw` / `text_sprite_free`; `text_quit` |
 | `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_ok` / `sound_play` / `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
 
@@ -1295,7 +1295,12 @@ destination rect — so one `arena.alloc::<i32>(10)` covers `text_measure`
 and `text_draw` alike; `text_measure` fills `scratch[0]` (width) and
 `scratch[1]` (height), which is how text gets aligned. The kit ships a CC0
 font for examples, docs, and tests (`fonts/tom-thumb.ttf`), and `text_quit`
-is the shutdown call, after closing fonts:
+is the shutdown call, after closing fonts. `text_sprite` is the render-once
+path: it renders one string into a `TextSprite` — a texture plus the
+rendered size, with `text_sprite_ok` as the test — `text_sprite_draw` blits
+it with no TTF call, and `text_sprite_free` destroys the texture. Right for
+text that redraws every frame; `text_draw` stays right for text that
+changes, and `examples/text_bench.vnt` measures both:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -1305,12 +1310,17 @@ func main() -> void:
     let screen = screen_open("Vanta", 320, 240)
     let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
     print_bool(screen_ok(screen) and font_ok(font))   # true on any working driver
+    let label = text_sprite(screen, font, "PAUSED", 240, 220, 120)
+    print_bool(text_sprite_ok(label))
+    text_sprite_draw(screen, label, 24, 24)
+    text_sprite_free(label)
     font_close(font)
     text_quit()
     screen_close(screen)
 ```
 
 ```
+true
 true
 ```
 
