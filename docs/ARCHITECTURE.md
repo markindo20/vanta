@@ -32,7 +32,9 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    alias names codegen will use, and a local binding shadows a function of the
    same name in call position. The pointer rules live here as well: `_coerce_value`
    performs the C-style `ptr<T>` → `ptr<void>` widening (and only that
-   direction), `ptr_is_null` is checked in `_check_ptr_is_null`, a
+   direction), `ptr_is_null` is checked in `_check_ptr_is_null`,
+   `ptr_null::<T>()` (v0.19.0) in `_check_ptr_null` (a function-type `T`
+   yields a null callback), a
    `ptr<void>` cannot be indexed, and `alloc::<void>` is rejected with its
    own message. The integer-width rules live here too (v0.17.0): narrow
    values promote to `i32` in arithmetic, any integer truncates into a narrow
@@ -129,19 +131,23 @@ rejected. `ptr<T>` has no borrow checking, lifetime tracking, or aliasing
 analysis, so dangling and aliased pointers are not detected; the checker only
 guards the conversions (widening to `ptr<void>` is implicit, the reverse is
 an error) and offers `ptr_is_null`. `ptr_cast::<T>(p)` (v0.17.0) is the
-explicit, unchecked reinterpretation and `ptr_offset(p, n)` (v0.18.0) the
-explicit, unchecked element step — the escape hatches stay opt-in.
+explicit, unchecked reinterpretation, `ptr_offset(p, n)` (v0.18.0) the
+explicit, unchecked element step, and `ptr_null::<T>()` (v0.19.0) the
+explicit null — a function-type `T` makes it a null callback — so the
+escape hatches stay opt-in.
 Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 521 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 533 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless
-(`SDL_VIDEODRIVER=dummy` plus a frame-limit argument) and skip when SDL2 is
-not installed; the SDL_ttf tests (the raw text example, pong's text score,
-the `text` kit module) do the same and skip when SDL2_ttf is missing. CI
+(`SDL_VIDEODRIVER=dummy` plus a frame-limit argument; the audio tests use
+`SDL_AUDIODRIVER=dummy`, whose device paces playback in real time) and skip
+when SDL2 is not installed; the SDL_ttf tests (the raw text example, pong's
+text score, the `text` kit module) do the same and skip when SDL2_ttf is
+missing; audio needs no library beyond SDL2 core. CI
 installs SDL2 and SDL_ttf on Linux, macOS, and Windows. The game kit's
 `rng` module has no SDL dependency and is covered by its own test, so part
 of the kit runs anywhere a C++ compiler does.

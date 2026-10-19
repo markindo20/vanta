@@ -2,6 +2,40 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.19.0 — 2026-10-19
+
+- SDL2 audio. `examples/sdl_audio.vnt` plays a synthesized tone through the
+  device's *queue* API — `SDL_OpenAudioDevice` with a hand-built
+  `SDL_AudioSpec` (its `callback` field a true C function-pointer type),
+  `SDL_QueueAudio`, `SDL_PauseAudioDevice`, `SDL_GetQueuedAudioSize` — and
+  `examples/sdl_audio_cb.vnt` puts a Vanta function in the spec's `callback`
+  field instead, so SDL runs it on its audio thread; callback state travels
+  through the `userdata` pointer, as with any C callback. Under SDL's dummy
+  driver both run headless in real time, which is how the tests cover them.
+- `ptr_null::<T>()` builds the null pointer explicitly — the value C APIs ask
+  *for*, where `ptr_is_null` only tests one C hands back. `T` may be a data
+  type (`void` gives the anonymous `ptr<void>`) or a function type, which
+  makes it a null callback: the empty slot a queue-mode `SDL_AudioSpec`
+  carries (`SDL_OpenAudioDevice` also wants NULL, not `""`, for "the default
+  device"). Like the other pointer builtins it takes no arguments; there is
+  still no `nil` literal.
+- The game kit gains `gamekit/audio.vnt` (six modules now): `audio_open` /
+  `audio_ok` / `audio_close`, `audio_play_tone(aud, freq, ms, buf, capacity)`
+  — fills a caller-owned `i16` buffer with a square wave, queues it, and
+  returns the samples queued (0 for a dead device, nonsense values, or an
+  SDL error; a tone longer than the buffer is cut short) — plus
+  `audio_pending` (the bytes still queued) and `audio_wait`. Failure is
+  quiet: with no working device every call does nothing, so games keep
+  running silently. The kit ships no sound files; tones are generated.
+- `examples/pong.vnt` beeps: 880 Hz on a player paddle hit, 660 Hz on an AI
+  hit, and low/high tones on points. The beeps are fire-and-forget, so the
+  headless run is unchanged (`player 0 ai 5 frames 576`).
+- The audio tests need no library beyond SDL2 core, so CI gains no packages;
+  they run under `SDL_AUDIODRIVER=dummy`, whose device paces consumption in
+  real time, so queueing and draining stay deterministic. Examples:
+  `sdl_audio.vnt`, `sdl_audio_cb.vnt`, `gamekit/audio.vnt`. 12 new tests
+  (533 total).
+
 ## v0.18.0 — 2026-10-19
 
 - `ptr_offset(p, n)` moves a pointer `n` elements with its element type kept

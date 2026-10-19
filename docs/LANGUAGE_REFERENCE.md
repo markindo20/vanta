@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.18.0)
+# Vanta Language Reference (v0.19.0)
 
 This is the reference for the language as implemented at tag `v0.16.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -496,8 +496,10 @@ license to pass `T*` as `void*`. The narrowing direction stays an error, and a
 (`ptr<i32>`, ...) if you need `p[i]`. `ptr<void>` is how opaque C handles such
 as `SDL_Window` are typed.
 
-Because there is no `nil` literal, `ptr_is_null(p)` is the null test (see
-[SDL2](#sdl2-and-a-window-v0120) for it in real use).
+Because there is no `nil` literal, `ptr_is_null(p)` is the null test, and
+`ptr_null::<T>()` (v0.19.0, [below](#null-pointers-ptr_nullt-v0190)) is the
+explicit way to build the null value a C function asks for (see
+[SDL2](#sdl2-and-a-window-v0120) for `ptr_is_null` in real use).
 
 **Arena is non-copyable.** `let b = a`, `return a`, and passing an `Arena` as a
 function argument are all rejected at compile time:
@@ -588,6 +590,44 @@ C out-parameters are the motivating case. Functions like SDL_ttf's
 `TTF_SizeUTF8(font, text, scratch, ptr_offset(scratch, 1))` stores the width
 in `scratch[0]` and the height in `scratch[1]`. The game kit's
 [`text.vnt`](#the-game-kit-v0140) builds on exactly that.
+
+### Null pointers: `ptr_null::<T>()` (v0.19.0)
+
+Null handles come *from* C when a call fails — that is what `screen_ok`
+tests. Some C functions also want to *receive* NULL: SDL asks for a device
+name (NULL means "the default device") and for an empty callback slot when a
+device plays through the queue API instead of a callback. `ptr_null::<T>()`
+is how a program writes that value; the type argument says what the pointer
+points at:
+
+```vanta
+func main() -> void:
+    let d = ptr_null::<void>()
+    print_bool(ptr_is_null(d))       # true
+    let p = ptr_null::<i32>()
+    print_bool(ptr_is_null(p))       # true
+```
+
+```
+true
+true
+```
+
+`T` can be any data type — `void` gives the anonymous `ptr<void>` — or a
+function type, which makes the value a null callback: the empty slot a
+queue-mode `SDL_AudioSpec` carries. The result is typed `ptr<T>` (or that
+function type), so it passes to any `extern` that declares the same thing.
+There is still no `nil` literal — this is the one explicit way to build a
+null, and `ptr_is_null` stays the test. Like the other pointer builtins it
+takes no arguments:
+
+```
+error: ptr_null takes no arguments, got 1
+```
+
+The game kit's [`audio.vnt`](#the-game-kit-v0140) is the worked example: it
+hands `SDL_OpenAudioDevice` a null device name and a null callback, and
+`examples/sdl_audio.vnt` does the same with raw `extern` declarations.
 
 ## Dynamic lists: `List<T>` (v0.9.0)
 
@@ -888,7 +928,9 @@ let r = from_quat(q)
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 | `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
 | `ptr_is_null` | `(ptr<T>) -> bool` | `true` when the pointer is null; `T` may be `void` |
+| `ptr_cast` | `ptr_cast::<T>(p) -> ptr<T>` | reinterprets the element type; `T` may not be a function type; see [pointer casts](#pointer-casts-ptr_castt-v0170) |
 | `ptr_offset` | `(ptr<T>, i32) -> ptr<T>` | moves `n` elements; `T` may not be `void`; see [pointer offsets](#pointer-offsets-ptr_offsetp-n-v0180) |
+| `ptr_null` | `ptr_null::<T>() -> ptr<T>` | the null pointer; `T` may be a function type (then it is a null callback); see [null pointers](#null-pointers-ptr_nullt-v0190) |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different
@@ -1177,9 +1219,14 @@ $env:SDL_VIDEODRIVER = "dummy"
 python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib --link SDL2
 ```
 
+Sound follows the same recipe: `examples/sdl_audio.vnt` queues a generated
+tone on the default device, and `examples/sdl_audio_cb.vnt` puts a Vanta
+function in the `SDL_AudioSpec.callback` field for SDL's audio thread to
+run — both pure `extern` programs, linking nothing but SDL2.
+
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is five reusable modules over the SDL2 and SDL_ttf calls
+`examples/gamekit/` is six reusable modules over the SDL2 and SDL_ttf calls
 above — ordinary `.vnt` files, imported like anything else:
 
 | Module | Provides |
@@ -1188,18 +1235,21 @@ above — ordinary `.vnt` files, imported like anything else:
 | `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
+| `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
 
 Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
   name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `font_*`,
-  `text_*`, `rand_*`); several modules — and the game's own names — coexist.
-- **Failures come back the way C reports them.** There is no nil literal,
+  `text_*`, `audio_*`, `rand_*`); several modules — and the game's own
+  names — coexist.
+- **Failures come back the way C reports them.** There is still no nil
+  literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
-  returned — null handles when anything failed — and `screen_ok` is the
-  test to run once before the game loop. `font_open` returns a `Font` the
-  same way, with `font_ok`.
+  returned: null handles when anything failed, and `screen_ok` is the test
+  to run once before the game loop. `font_open` and `audio_open` return
+  their handles the same way, with `font_ok` and `audio_ok`.
 - **One shared scratch rect.** SDL wants a four-`i32` `SDL_Rect*`; allocate
   it once with `arena.alloc::<i32>(4)` and pass it to every `gfx_*` call.
 
@@ -1247,17 +1297,47 @@ func main() -> void:
 true
 ```
 
+`audio.vnt` next: tones are generated, not loaded — the kit ships no sound
+files — so the caller owns the sample buffer and `audio_play_tone` fills it
+with a square wave and queues it on the device. The queue API wants a *null*
+callback, built with `ptr_null::<func(...)>()`, and `SDL_AudioSpec` itself is
+a Vanta struct whose callback field keeps its C function-pointer type — the
+same struct drives callback mode when a program puts a real function there
+(`examples/sdl_audio_cb.vnt` runs a Vanta function on SDL's audio thread).
+`audio_play_tone` returns the samples queued; `audio_pending` asks how much
+is still playing, and `audio_wait` blocks until the queue drains:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/audio.vnt"
+
+func main() -> void:
+    let audio = audio_open()
+    print_bool(audio_ok(audio))       # true on any working audio driver
+    let arena = Arena(32768)
+    let buf = arena.alloc::<i16>(11025)                # 250 ms of samples
+    print_i32(audio_play_tone(audio, 880, 100, buf, 11025))
+    audio_wait(audio)
+    audio_close(audio)
+```
+
+```
+true
+4410
+```
+
 Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
-well:
+well (`audio.vnt` needs nothing extra — audio is in SDL2's core library):
 
 ```powershell
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 ```
 
-`examples/pong.vnt` is the worked example: it imports all five modules,
-serves with `match`, draws its score with `text_draw`, and stays testable
-headless — a frame-limit argument plus `SDL_VIDEODRIVER=dummy` is how the
-test suite runs it in CI.
+`examples/pong.vnt` is the worked example: it imports all six modules,
+serves with `match`, draws its score with `text_draw`, beeps with
+`audio_play_tone`, and stays testable headless — a frame-limit argument plus
+`SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` is how the test suite
+runs it in CI.
 
 ## File I/O (v0.3.1)
 

@@ -581,7 +581,9 @@ through parameters, like the `ptr<i32>` user-data pointer in
 `examples/callbacks_lib.c`) where C calls a Vanta function twice and walks a
 visitor over a count. The C side must declare the matching
 function-pointer type, and an `extern` cannot return a function type yet.
-The full rules are under [Extern
+The Sound section's `examples/sdl_audio_cb.vnt` is the same idea against a
+real library — SDL calls the function on its audio thread, and the user-data
+pointer carries the state. The full rules are under [Extern
 declarations](#extern-declarations-v030) in the reference.
 
 ## SDL2: a real window
@@ -665,12 +667,13 @@ and the rest of the API are documented in the reference's
 
 The SDL2 program above talks to C directly, and that never stops working —
 but wiring the window, the input events, and the rectangles by hand in every
-game gets old. The game kit (`examples/gamekit/`) does it once, as five
+game gets old. The game kit (`examples/gamekit/`) does it once, as six
 ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
 declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
-(reading events), `gfx.vnt` (drawing), `text.vnt` (text, over SDL_ttf), and
-`rng.vnt` (bounded random numbers over the deterministic stream). A tiny
-demo — a square bouncing between the walls for 60 frames:
+(reading events), `gfx.vnt` (drawing), `text.vnt` (text, over SDL_ttf),
+`audio.vnt` (tones, over SDL2's audio), and `rng.vnt` (bounded random
+numbers over the deterministic stream). A tiny demo — a square bouncing
+between the walls for 60 frames:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -712,8 +715,8 @@ nil literal), so `screen_ok` is the check. And the `gfx_*` calls share one
 four-`i32` scratch rectangle — that is the `SDL_Rect` SDL asks for.
 
 That is the whole kit: imports, prefixes, and C's own failure values.
-`examples/pong.vnt` puts it to work with two paddles, a tracking AI, and
-`match` for the serve direction; the
+`examples/pong.vnt` puts it to work with two paddles, a tracking AI,
+`match` for the serve direction, a text score, and beeps; the
 [reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140) lists every function.
 
 ## Text on screen
@@ -775,6 +778,58 @@ Programs that import `text.vnt` link SDL_ttf as well as SDL2;
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 ```
 
+## Sound
+
+SDL2 makes noise without any companion library: audio is part of the core,
+and the kit's `audio.vnt` wraps it the way `gfx.vnt` wraps drawing. Tones are
+generated — the kit ships no sound files — and `audio_play_tone` takes a
+frequency, a duration, and a caller-owned sample buffer, so the kit never
+allocates per beep. A two-note chirp:
+
+```vanta
+import "gamekit/audio.vnt"
+
+func main() -> void:
+    let audio = audio_open()
+    if not audio_ok(audio):
+        print_str("could not open an audio device")
+        return
+    let arena = Arena(32768)
+    let buf = arena.alloc::<i16>(11025)    # up to 250 ms of samples
+    print_fmt("queued {} samples", audio_play_tone(audio, 880, 100, buf, 11025))
+    audio_play_tone(audio, 660, 100, buf, 11025)
+    audio_wait(audio)                      # play the chirp out
+    print_fmt("still queued {}", audio_pending(audio))
+    audio_close(audio)
+```
+
+```
+queued 4410 samples
+still queued 0
+```
+
+Things to know. **Audio is in SDL2 itself**: only `text.vnt` asks for a
+second library (SDL_ttf); audio programs link just SDL2. **Playback happens
+in the background**: queueing returns immediately, SDL's audio thread plays
+the tones on, and the game loop keeps running — `audio_pending` asks how
+many bytes are still queued, and `audio_wait` blocks until the queue drains
+(handy in scripts; games rarely wait). **Failure is quiet by design**:
+`audio_open` returns an `Audio` whose `audio_ok` is false when no device
+works, and every other audio call then does nothing — pong, for instance,
+plays its beeps unconditionally and stays silent on machines without sound.
+
+The chirp above runs exactly like the game kit's other programs, but SDL
+audio is also a good look at the raw C side: `examples/sdl_audio.vnt` opens
+the device with the queue API (a `ptr_null::<func(...)>()` callback slot),
+and `examples/sdl_audio_cb.vnt` does the opposite — it puts a Vanta function
+in the spec's `callback` field and SDL runs it on its audio thread, which is
+the same pattern as the [C callbacks](#c-callbacks) section above.
+`examples/pong.vnt` beeps on every paddle hit and point:
+
+```powershell
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+```
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
@@ -785,4 +840,4 @@ python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
   and `pong.vnt`, with the reusable `gamekit/` modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (521 tests).
+- `python -m unittest discover -s tests` — run the test suite (533 tests).

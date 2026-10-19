@@ -1,6 +1,6 @@
 # Vanta game kit
 
-Five importable modules that package the SDL2 (and SDL_ttf) plumbing every
+Six importable modules that package the SDL2 (and SDL_ttf) plumbing every
 game needs. They are ordinary `.vnt` files — the kit is a convention, not a
 language feature.
 
@@ -10,6 +10,7 @@ language feature.
 | `input.vnt` | Event accessors: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
 | `gfx.vnt` | Drawing: `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_quit` |
+| `audio.vnt` | SDL2 audio: `audio_open`, `audio_ok`, `audio_play_tone`, `audio_pending`, `audio_wait`, `audio_close` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` — bounded helpers over the deterministic stream |
 
 A minimal program — a window with a border and one square, for 3 frames:
@@ -67,7 +68,31 @@ true
 true
 ```
 
-Build it like any SDL2 program — `text.vnt` links SDL_ttf as well as SDL2:
+Sound is another import — `audio.vnt` over SDL2's own audio, with no extra
+library to link. Tones are generated, not loaded, and `audio_play_tone`
+fills a caller-owned `i16` buffer:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/audio.vnt"
+
+func main() -> void:
+    let audio = audio_open()
+    print_bool(audio_ok(audio))              # true on any working driver
+    let arena = Arena(32768)
+    let buf = arena.alloc::<i16>(11025)      # up to 250 ms of samples
+    print_i32(audio_play_tone(audio, 880, 100, buf, 11025))
+    audio_wait(audio)
+    audio_close(audio)
+```
+
+```
+true
+4410
+```
+
+Build it like any SDL2 program — `text.vnt` links SDL_ttf as well as
+SDL2, and `audio.vnt` needs nothing beyond the core library:
 
 ```powershell
 python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
@@ -77,20 +102,27 @@ Notes:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
   name starts with its module's prefix (`screen_*`, `ev_*`, `gfx_*`,
-  `font_*`, `text_*`, `rand_*`). Several modules — and the game's own
-  names — coexist.
-- **`Screen` carries whatever C returned.** There is no nil literal;
-  `screen_open` hands back null handles when anything fails, and
-  `screen_ok` is the test — check it once after opening. `Font` works the
-  same way, with `font_ok`.
+  `font_*`, `text_*`, `audio_*`, `rand_*`). Several modules — and the
+  game's own names — coexist.
+- **`Screen` carries whatever C returned.** There is no nil literal —
+  `ptr_null::<T>()` builds one explicitly where C asks for NULL —
+  and `screen_open` hands back null handles when anything fails, with
+  `screen_ok` as the test — check it once after opening. `Font` and
+  `Audio` work the same way, with `font_ok` and `audio_ok`.
 - **One scratch rect.** SDL wants a four-`i32` `SDL_Rect*`; allocate it
   once with `arena.alloc::<i32>(4)` and pass it to every `gfx_*` call.
 - **One text scratch of ten.** `text_measure` / `text_draw` want ten
   `i32` slots — width, height, a source rect, a destination rect — so one
   `arena.alloc::<i32>(10)` covers both calls and every string.
-- **Headless runs are first-class.** With `SDL_VIDEODRIVER=dummy` plus a
-  frame limit, kit programs run in CI, and the fixed RNG stream makes the
-  results reproducible.
+- **One tone buffer.** `audio_play_tone` fills a caller-owned `i16`
+  buffer — allocate it once with `arena.alloc::<i16>(...)` and reuse it
+  for every beep; a tone longer than the buffer is cut short, and a
+  device that failed to open makes every call a quiet no-op.
+- **Headless runs are first-class.** With `SDL_VIDEODRIVER=dummy` and
+  `SDL_AUDIODRIVER=dummy` plus a frame limit, kit programs run in CI (the
+  fixed RNG stream keeps results reproducible, and the dummy audio driver
+  plays to nowhere in real time).
 
 [`../pong.vnt`](../pong.vnt) is the full worked example — it imports all
-five modules, and draws its score with `text_draw`.
+six modules, draws its score with `text_draw`, and beeps with
+`audio_play_tone`.

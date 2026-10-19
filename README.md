@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.18.0)
+# Vanta - a game-oriented systems language (v0.19.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -62,24 +62,29 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 
 SDL2 is the worked example of all this. `examples/sdl_window.vnt` opens a
-window, `examples/sdl_text.vnt` draws text with SDL_ttf, and
+window, `examples/sdl_text.vnt` draws text with SDL_ttf,
+`examples/sdl_audio.vnt` and `examples/sdl_audio_cb.vnt` make sound (a queued
+tone, and a Vanta callback on SDL's audio thread), and
 `examples/sdl_game.vnt` is the first playable Vanta game — catch the falling
 coins with Left/Right (or A/D), Esc or the close button quits. The game kit
-(`examples/gamekit/`) packages the SDL2 plumbing as five importable modules,
+(`examples/gamekit/`) packages the SDL2 plumbing as six importable modules,
 and `examples/pong.vnt` is the second playable game built on it: W/S or
-Up/Down against a tracking AI, first to 5 wins, with the score drawn as text.
+Up/Down against a tracking AI, first to 5 wins, with the score drawn as text
+and a beep on every hit and point.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 python main.py run examples/sdl_text.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+python main.py run examples/sdl_audio.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 ```
 
 All of them are pure `extern` declarations, so no SDL headers are needed to
-compile, and all take an optional frame-limit argument for headless smoke
-runs (`SDL_VIDEODRIVER=dummy`). The kit ships its own font
-(`examples/gamekit/fonts/tom-thumb.ttf`, a tiny 3x5 pixel face), so the text
-examples and tests need no system fonts.
+compile. The windowed examples take an optional frame-limit argument for
+headless smoke runs (`SDL_VIDEODRIVER=dummy`), and the audio examples run
+under `SDL_AUDIODRIVER=dummy`, which plays to nowhere in real time. The kit
+ships its own font (`examples/gamekit/fonts/tom-thumb.ttf`, a tiny 3x5 pixel
+face), so the text examples and tests need no system fonts.
 
 ## Project layout
 
@@ -89,7 +94,7 @@ examples and tests need no system fonts.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (521 tests) |
+| `tests/` | `unittest` suite (533 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -124,9 +129,11 @@ examples and tests need no system fonts.
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
 | `sdl_text.vnt` | Text with SDL_ttf: `SDL_Color` by value, `TTF_SizeUTF8`, render to texture |
+| `sdl_audio.vnt` | SDL2 audio, queue mode: a hand-built `SDL_AudioSpec`, `ptr_null::<T>()`, `SDL_QueueAudio` |
+| `sdl_audio_cb.vnt` | SDL2 audio, callback mode: a Vanta function in `SDL_AudioSpec.callback`, state through `userdata` |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
-| `gamekit/` | Five reusable game modules: SDL2 window lifecycle, event access, drawing, text (SDL_ttf), random numbers |
-| `pong.vnt` | The second playable game: paddles, tracking AI, score drawn as text — built on the game kit |
+| `gamekit/` | Six reusable game modules: SDL2 window lifecycle, event access, drawing, text (SDL_ttf), audio (generated tones), random numbers |
+| `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |
 
 ## Tests
 
@@ -157,11 +164,12 @@ bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
 lists (`List<T>`) and walk lists and arrays with `for x in xs`, store
 exact-width integers (`i8`/`u8`/`i16`/`u16`) whose memory layout matches C,
 compare structs field by field with `==`, reinterpret pointers with
-`ptr_cast::<T>(p)` and step them by elements with `ptr_offset(p, n)`,
+`ptr_cast::<T>(p)`, step them by elements with `ptr_offset(p, n)`, build
+explicit nulls with `ptr_null::<T>()`,
 assemble strings with `StrBuilder`, name states and modes with enums and
 branch on them exhaustively with `match`, and build and run real SDL2 games
-on the game kit, text rendering included (four SDL examples, two of them
-playable games) — but the remaining gaps are real:
+on the game kit, text rendering and generated sound included (six SDL
+examples, two of them playable games) — but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -179,10 +187,12 @@ playable games) — but the remaining gaps are real:
 - enums are plain named constants: no explicit member values, no associated
   data; `==`/`!=` and `match` are the operations on them (they may appear in
   `extern` signatures)
-- windowing is shipped as SDL2 examples plus the game kit: there is no
-  audio/gamepad wrapper, and events are read by hand (an `SDL_Event` is
+- windowing and sound are shipped as SDL2 examples plus the game kit: there is
+  no gamepad wrapper, no sound *files* (audio is generated tones only), and
+  events are read by hand (an `SDL_Event` is
   viewed as raw `i32`s); `text_draw` uploads a texture per call — fine for
   HUDs, wasteful for walls of text
-- pointers have no null safety beyond `ptr_is_null`; `ptr<void>` widening
+- pointers have no null safety beyond `ptr_is_null` / `ptr_null::<T>()`;
+  `ptr<void>` widening
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
