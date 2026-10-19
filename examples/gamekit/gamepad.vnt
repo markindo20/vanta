@@ -1,0 +1,115 @@
+# gamekit/gamepad.vnt — game controllers, for gamekit programs.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/gamepad.vnt"
+#
+# Link SDL2 only — the controller API is in the core library:
+#
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# pad_open takes SDL's joystick index (0 for the first controller) and
+# returns a Pad. With no controller at that index — none plugged in, or an
+# index out of range — the handle is null, pad_ok is false, and every other
+# call is a guarded no-op. That is how a game stays playable on a keyboard-
+# only machine: poll the pad, fall back to keys.
+#
+# This module polls; it does not subscribe to controller events. pad_button
+# reports the current state, and pad_axis returns SDL's raw value: sticks
+# span -32768..32767 with 0 at rest, triggers span 0..32767. A game that
+# wants a normalised axis divides and applies its own deadzone.
+#
+# pad_open starts SDL's gamecontroller subsystem and pad_close stops it
+# (SDL refcounts subsystems), so open and close pads before screen_close's
+# SDL_Quit, like audio.
+
+import "sdl.vnt"
+
+extern "sdl2" {
+    func SDL_InitSubSystem(flags: u32) -> i32
+    func SDL_QuitSubSystem(flags: u32) -> void
+    func SDL_GameControllerOpen(index: i32) -> ptr<void>
+    func SDL_GameControllerClose(c: ptr<void>) -> void
+    func SDL_GameControllerGetAttached(c: ptr<void>) -> i32
+    func SDL_GameControllerGetButton(c: ptr<void>, button: i32) -> u8
+    func SDL_GameControllerGetAxis(c: ptr<void>, axis: i32) -> i16
+}
+
+const SDL_INIT_GAMECONTROLLER: u32 = 8192
+
+# The standard button numbers from SDL_GameControllerButton. The extended
+# ones (share, paddles, touchpad) exist on some controllers only.
+const PAD_BUTTON_A: i32 = 0
+const PAD_BUTTON_B: i32 = 1
+const PAD_BUTTON_X: i32 = 2
+const PAD_BUTTON_Y: i32 = 3
+const PAD_BUTTON_BACK: i32 = 4
+const PAD_BUTTON_GUIDE: i32 = 5
+const PAD_BUTTON_START: i32 = 6
+const PAD_BUTTON_LEFTSTICK: i32 = 7
+const PAD_BUTTON_RIGHTSTICK: i32 = 8
+const PAD_BUTTON_LEFTSHOULDER: i32 = 9
+const PAD_BUTTON_RIGHTSHOULDER: i32 = 10
+const PAD_BUTTON_DPAD_UP: i32 = 11
+const PAD_BUTTON_DPAD_DOWN: i32 = 12
+const PAD_BUTTON_DPAD_LEFT: i32 = 13
+const PAD_BUTTON_DPAD_RIGHT: i32 = 14
+const PAD_BUTTON_MISC1: i32 = 15        # Xbox share / PS5 microphone / Switch capture
+const PAD_BUTTON_PADDLE1: i32 = 16      # Xbox Elite upper left
+const PAD_BUTTON_PADDLE2: i32 = 17      # Xbox Elite upper right
+const PAD_BUTTON_PADDLE3: i32 = 18      # Xbox Elite lower left
+const PAD_BUTTON_PADDLE4: i32 = 19      # Xbox Elite lower right
+const PAD_BUTTON_TOUCHPAD: i32 = 20     # PS4 / PS5 touchpad click
+
+# The axis numbers from SDL_GameControllerAxis.
+const PAD_AXIS_LEFT_X: i32 = 0
+const PAD_AXIS_LEFT_Y: i32 = 1
+const PAD_AXIS_RIGHT_X: i32 = 2
+const PAD_AXIS_RIGHT_Y: i32 = 3
+const PAD_AXIS_TRIGGER_LEFT: i32 = 4
+const PAD_AXIS_TRIGGER_RIGHT: i32 = 5
+
+struct Pad:
+    handle: ptr<void>
+
+func pad_open(index: i32) -> Pad:
+    # Initialises the controller subsystem (refcounted, so every pad_open
+    # pairs with a pad_close) and opens the controller at SDL's joystick
+    # index. A missing or out-of-range controller is a dead Pad, never a
+    # failed program.
+    if SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0:
+        return Pad(handle: ptr_null::<void>())
+    let h = SDL_GameControllerOpen(index)
+    if ptr_is_null(h):
+        SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER)
+        return Pad(handle: ptr_null::<void>())
+    return Pad(handle: h)
+
+func pad_ok(p: Pad) -> bool:
+    return not ptr_is_null(p.handle)
+
+func pad_close(p: Pad) -> void:
+    # Closes the device and stops the controller subsystem, before
+    # screen_close's SDL_Quit.
+    if pad_ok(p):
+        SDL_GameControllerClose(p.handle)
+        SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER)
+
+func pad_attached(p: Pad) -> bool:
+    # False after the controller is unplugged; the handle stays open, so a
+    # game can keep polling and resume when the pad comes back.
+    if not pad_ok(p):
+        return false
+    return SDL_GameControllerGetAttached(p.handle) == 1
+
+func pad_button(p: Pad, button: i32) -> bool:
+    # True while the button is held, false on a dead or detached pad.
+    if not pad_ok(p):
+        return false
+    return SDL_GameControllerGetButton(p.handle, button) != 0
+
+func pad_axis(p: Pad, axis: i32) -> i32:
+    # SDL's raw axis value: sticks -32768..32767 (0 at rest), triggers
+    # 0..32767; 0 on a dead or detached pad.
+    if not pad_ok(p):
+        return 0
+    return SDL_GameControllerGetAxis(p.handle, axis)

@@ -1301,7 +1301,7 @@ class IntegrationTests(unittest.TestCase):
         # the kit's extern declarations.
         for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'sdl_audio.vnt',
                    'sdl_audio_cb.vnt', 'sdl_texture.vnt', 'sdl_sound.vnt',
-                   'pong.vnt', 'breakout.vnt'):
+                   'sdl_gamepad.vnt', 'pong.vnt', 'breakout.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1471,6 +1471,24 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_gamepad_headless(self):
+        # The raw controller example: SDL_GameControllerOpen at an index no
+        # machine has returns NULL, so the program reports the dead path and
+        # exits cleanly. Index 9999 keeps the frozen output independent of
+        # whether real hardware is attached.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlpad_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_gamepad.vnt'), tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '9999'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['false', 'no controller at index 9999'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
     def test_gamekit_audio(self):
         # gamekit/audio.vnt: the copy puts the relative imports where the
         # probe program can reach them. The probe opens the device, queues
@@ -1624,6 +1642,42 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['true', 'true', '5292', 'true', 'true', 'true',
                               'true', '2000', 'false', 'false'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_gamekit_gamepad(self):
+        # gamekit/gamepad.vnt: an out-of-range index opens dead, and every
+        # accessor is a guarded no-op on a dead pad (false / 0), so the test
+        # is deterministic with or without a controller plugged in. The copy
+        # puts the kit where the probe's relative import can reach it.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitpad_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/sdl.vnt"\n'
+                        'import "gamekit/gamepad.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let screen = screen_open("kit gamepad", 64, 64)\n'
+                        '    print_bool(screen_ok(screen))\n'
+                        '    let pad = pad_open(9999)\n'
+                        '    print_bool(pad_ok(pad))\n'
+                        '    print_bool(pad_attached(pad))\n'
+                        '    print_bool(pad_button(pad, PAD_BUTTON_A))\n'
+                        '    print_i32(pad_axis(pad, PAD_AXIS_LEFT_X))\n'
+                        '    pad_close(pad)\n'
+                        '    print_str("closed")\n'
+                        '    screen_close(screen)\n')
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'false', 'false', 'false', '0', 'closed'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

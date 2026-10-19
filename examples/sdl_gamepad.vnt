@@ -1,0 +1,64 @@
+# sdl_gamepad.vnt — open a game controller and poll its buttons and axes.
+#
+# Usage:
+#   python main.py run examples/sdl_gamepad.vnt             # first controller
+#   python main.py run examples/sdl_gamepad.vnt 1           # second controller
+#   python main.py run examples/sdl_gamepad.vnt 9999        # the dead path
+#
+# The index is SDL's joystick index, not a count. With no controller at that
+# index SDL_GameControllerOpen returns NULL: this program reports the dead
+# path and exits cleanly, which is also how the headless test runs it.
+#
+# This is the raw extern version of the calls; gamekit/gamepad.vnt wraps the
+# same API with a Pad handle and guarded accessors.
+#
+# Build:
+#   python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_InitSubSystem(flags: u32) -> i32
+    func SDL_QuitSubSystem(flags: u32) -> void
+    func SDL_GameControllerOpen(index: i32) -> ptr<void>
+    func SDL_GameControllerClose(c: ptr<void>) -> void
+    func SDL_GameControllerGetAttached(c: ptr<void>) -> i32
+    func SDL_GameControllerGetButton(c: ptr<void>, button: i32) -> u8
+    func SDL_GameControllerGetAxis(c: ptr<void>, axis: i32) -> i16
+}
+
+const SDL_INIT_GAMECONTROLLER: u32 = 8192
+
+# SDL_GameControllerButton / SDL_GameControllerAxis values used below.
+const BUTTON_A: i32 = 0
+const BUTTON_DPAD_LEFT: i32 = 13
+const AXIS_LEFT_X: i32 = 0
+const AXIS_TRIGGER_LEFT: i32 = 4
+
+func main() -> void:
+    if SDL_Init(0) != 0:
+        print_str("SDL_Init failed")
+        return
+    mut index = 0
+    if arg_count() > 1:
+        index = str_to_i32(arg_str(1))
+
+    if SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0:
+        print_str("gamecontroller subsystem failed")
+        SDL_Quit()
+        return
+
+    let pad = SDL_GameControllerOpen(index)
+    print_bool(not ptr_is_null(pad))
+    if ptr_is_null(pad):
+        print_fmt("no controller at index {}", index)
+    else:
+        print_bool(SDL_GameControllerGetAttached(pad) == 1)
+        print_bool(SDL_GameControllerGetButton(pad, BUTTON_A) != 0)
+        print_bool(SDL_GameControllerGetButton(pad, BUTTON_DPAD_LEFT) != 0)
+        print_i32(SDL_GameControllerGetAxis(pad, AXIS_LEFT_X))
+        print_i32(SDL_GameControllerGetAxis(pad, AXIS_TRIGGER_LEFT))
+        SDL_GameControllerClose(pad)
+
+    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER)
+    SDL_Quit()
