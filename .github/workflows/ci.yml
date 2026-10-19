@@ -18,15 +18,15 @@ jobs:
         with:
           python-version: '3.10'
 
-      # SDL2 (and SDL_ttf for the text examples) make the sdl_* examples and
-      # pong (and their headless smoke tests) runnable; without them those
-      # tests skip.
-      - name: Set up SDL2 and SDL_ttf (Linux)
+      # SDL2 (with SDL_ttf and SDL2_image for the text and image examples)
+      # makes the sdl_* examples and the games (and their headless smoke
+      # tests) runnable; without them those tests skip.
+      - name: Set up SDL2, SDL_ttf, and SDL2_image (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev
-      - name: Set up SDL2 and SDL_ttf (macOS)
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
+      - name: Set up SDL2, SDL_ttf, and SDL2_image (macOS)
         if: runner.os == 'macOS'
-        run: brew install sdl2 sdl2_ttf
+        run: brew install sdl2 sdl2_ttf sdl2_image
 
       # Linux and macOS runners ship a C++17 compiler on PATH (g++ / clang++).
       # Windows runners also have MSVC, and the driver prefers cl there, so
@@ -40,7 +40,7 @@ jobs:
         with:
           msystem: mingw64
           update: false
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf mingw-w64-x86_64-SDL2_image
       - name: Expose mingw-w64 on PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

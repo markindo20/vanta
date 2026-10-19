@@ -1,0 +1,98 @@
+# gamekit/image.vnt — image files as textures, for gamekit programs.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/image.vnt"
+#
+# tex_load decodes with SDL_image (PNG, BMP, and whatever else the local
+# build supports), so importing this module means linking SDL2_image too:
+#
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2
+#
+# The draw helpers are self-contained: they build the rects SDL needs on a
+# tiny transient arena (SDL copies them during the call), so a game draws a
+# sprite by name, without bookkeeping:
+#
+#   let ball = tex_load(screen, "assets/ball.png")
+#   tex_draw(screen, ball, x, y)
+
+import "sdl.vnt"
+
+extern "sdl2_image" {
+    func IMG_LoadTexture(renderer: ptr<void>, file: str) -> ptr<void>
+}
+
+struct Tex:
+    handle: ptr<void>
+    w: i32
+    h: i32
+
+func tex_load(s: Screen, path: str) -> Tex:
+    # One call decodes the file straight into a texture on this renderer.
+    # A missing or unreadable file comes back as a null handle, so tex_ok
+    # is the test, like every other handle in the kit. Paths are opened by
+    # C, relative to the process working directory.
+    let t = IMG_LoadTexture(s.renderer, path)
+    if ptr_is_null(t):
+        return Tex(handle: t, w: 0, h: 0)
+    let scratch = Arena(64)
+    let wh = scratch.alloc::<i32>(2)
+    SDL_QueryTexture(t, ptr_null::<u32>(), ptr_null::<i32>(), wh, ptr_offset(wh, 1))
+    return Tex(handle: t, w: wh[0], h: wh[1])
+
+func tex_ok(t: Tex) -> bool:
+    return not ptr_is_null(t.handle)
+
+func tex_free(t: Tex) -> void:
+    if tex_ok(t):
+        SDL_DestroyTexture(t.handle)
+
+func tex_tint(t: Tex, r: i32, g: i32, b: i32) -> void:
+    # Multiplied into every draw of this texture until changed: 255 leaves
+    # a channel alone, 128 halves it, 0 blacks it out. A white texture
+    # takes on the tint exactly.
+    if tex_ok(t):
+        SDL_SetTextureColorMod(t.handle, r, g, b)
+
+func tex_alpha(t: Tex, a: i32) -> void:
+    # The texture's overall opacity, multiplied into every draw the same
+    # way; 255 is fully opaque.
+    if tex_ok(t):
+        SDL_SetTextureAlphaMod(t.handle, a)
+
+func tex_draw_src(s: Screen, t: Tex, sx: i32, sy: i32, sw: i32, sh: i32, x: i32, y: i32) -> void:
+    # One rectangle of a texture — a sprite-sheet frame — drawn at (x, y)
+    # at its natural size, under whatever tint the texture carries.
+    if not tex_ok(t):
+        return
+    let scratch = Arena(64)
+    let rects = scratch.alloc::<i32>(8)
+    rects[0] = sx
+    rects[1] = sy
+    rects[2] = sw
+    rects[3] = sh
+    rects[4] = x
+    rects[5] = y
+    rects[6] = sw
+    rects[7] = sh
+    SDL_RenderCopyEx(s.renderer, t.handle, rects, ptr_offset(rects, 4),
+                     0.0, ptr_null::<i32>(), SDL_FLIP_NONE)
+
+func tex_draw(s: Screen, t: Tex, x: i32, y: i32) -> void:
+    # The whole texture at (x, y), its natural size.
+    tex_draw_src(s, t, 0, 0, t.w, t.h, x, y)
+
+func tex_draw_ex(s: Screen, t: Tex, x: i32, y: i32, angle: f64, flip: u32) -> void:
+    # The whole texture at (x, y), rotated by angle degrees clockwise and
+    # flipped, both about the texture's own centre (which stays put). A
+    # negative angle turns counter-clockwise; flip is SDL_FLIP_NONE,
+    # SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL, or their sum.
+    if not tex_ok(t):
+        return
+    let scratch = Arena(64)
+    let dst = scratch.alloc::<i32>(4)
+    dst[0] = x
+    dst[1] = y
+    dst[2] = t.w
+    dst[3] = t.h
+    SDL_RenderCopyEx(s.renderer, t.handle, ptr_null::<i32>(), dst,
+                     angle, ptr_null::<i32>(), flip)

@@ -1,0 +1,237 @@
+# breakout.vnt — the third game on the Vanta game kit: sprites and sounds.
+#
+# Left/right arrows (or A/D) move the paddle. Esc or the close button
+# quits. With no key held the paddle tracks the ball by itself, so the game
+# plays its own demo — and a headless run with no input is one exact,
+# reproducible trajectory, which the test suite freezes. Every brick row is
+# a tint over one white texture; hits play WAV files loaded from
+# examples/assets/, silent when no audio device or files are available.
+#
+# The game draws sprites with the kit's texture API (image.vnt, SDL2_image)
+# and reads sound files with its audio module, so it links all three
+# libraries:
+#   python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+#   python main.py run examples/breakout.vnt 5000 --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+#
+# The optional argument is a frame limit, the backstop for the headless
+# run; the game normally ends the moment the wall is cleared or the last
+# life is lost.
+
+import "gamekit/sdl.vnt"
+import "gamekit/input.vnt"
+import "gamekit/gfx.vnt"
+import "gamekit/image.vnt"
+import "gamekit/text.vnt"
+import "gamekit/audio.vnt"
+
+const WIN_W: i32 = 480
+const WIN_H: i32 = 360
+const PADDLE_W: i32 = 44
+const PADDLE_H: i32 = 10
+const PADDLE_Y: i32 = 330
+const BALL: i32 = 10
+const COLS: i32 = 10
+const ROWS: i32 = 4
+const BRICKS: i32 = 40              # COLS * ROWS
+const BRICK_W: i32 = 32
+const BRICK_H: i32 = 14
+const BRICK_X0: i32 = 44            # left edge of the leftmost column
+const BRICK_Y0: i32 = 40            # top edge of the top row
+const BRICK_DX: i32 = 40            # column pitch
+const BRICK_DY: i32 = 18            # row pitch
+const PADDLE_SPEED: f32 = 8.0
+const AI_SPEED: f32 = 8.5           # faster than the ball's top |vx|
+const VX_MAX: f32 = 7.5
+const VY_MAX: f32 = 9.0
+const LIVES: i32 = 3
+
+struct Ball:
+    x: f32
+    y: f32
+    vx: f32
+    vy: f32
+
+func serve(px: f32) -> Ball:
+    # Straight up from the paddle's centre with a fixed slant: there is no
+    # random source anywhere in the game, so a headless run is exactly
+    # reproducible.
+    return Ball(x: px + i32_to_f32(PADDLE_W / 2 - BALL / 2),
+                y: i32_to_f32(PADDLE_Y - BALL),
+                vx: 2.5,
+                vy: -5.0)
+
+func main() -> void:
+    let screen = screen_open("Vanta breakout", WIN_W, WIN_H)
+    if not screen_ok(screen):
+        print_str("vanta: could not open a window and renderer")
+        screen_close(screen)
+        return
+    let arena = Arena(65536)
+    let ev = arena.alloc::<i32>(16)          # room for one SDL_Event
+    let scratch = arena.alloc::<i32>(10)     # text_measure/text_draw scratch
+    let bricks = arena.list::<bool>()
+    for i in range(0, BRICKS):
+        bricks.push(true)
+    let tex_ball = tex_load(screen, "examples/assets/ball.png")
+    let tex_paddle = tex_load(screen, "examples/assets/paddle.bmp")
+    let tex_brick = tex_load(screen, "examples/assets/brick.png")
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 24)
+    let audio = audio_open()
+    let snd_blip = sound_load(audio, "examples/assets/blip.wav")
+    let snd_brick = sound_load(audio, "examples/assets/brick.wav")
+    let snd_lose = sound_load(audio, "examples/assets/lose.wav")
+
+    mut frames = 0
+    mut max_frames = 0
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+
+    mut px = i32_to_f32(WIN_W / 2 - PADDLE_W / 2)
+    mut ball = serve(px)
+    mut lives = LIVES
+    mut cleared = 0
+    mut left_down = false
+    mut right_down = false
+    mut running = true
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            if ev_is_quit(ev):
+                running = false
+            elif ev_is_keydown(ev):
+                let k = ev_key(ev)
+                if k == KEY_ESCAPE:
+                    running = false
+                elif k == KEY_LEFT or k == KEY_A:
+                    left_down = true
+                elif k == KEY_RIGHT or k == KEY_D:
+                    right_down = true
+            elif ev_is_keyup(ev):
+                let k = ev_key(ev)
+                if k == KEY_LEFT or k == KEY_A:
+                    left_down = false
+                elif k == KEY_RIGHT or k == KEY_D:
+                    right_down = false
+
+        # The paddle: arrow keys move it; with no key held the auto-pilot
+        # tracks the ball (a dead zone keeps it from jittering), which is
+        # also how the headless test plays the game.
+        if left_down:
+            px -= PADDLE_SPEED
+        if right_down:
+            px += PADDLE_SPEED
+        if not left_down and not right_down:
+            let target = ball.x + i32_to_f32(BALL / 2 - PADDLE_W / 2)
+            if target > px + 1.0:
+                px += AI_SPEED
+            elif target < px - 1.0:
+                px -= AI_SPEED
+        px = max_f32(0.0, min_f32(px, i32_to_f32(WIN_W - PADDLE_W)))
+
+        # The ball, and the three walls.
+        ball.x += ball.vx
+        ball.y += ball.vy
+        if ball.x < 0.0:
+            ball.x = 0.0
+            ball.vx = -ball.vx
+        if ball.x > i32_to_f32(WIN_W - BALL):
+            ball.x = i32_to_f32(WIN_W - BALL)
+            ball.vx = -ball.vx
+        if ball.y < 0.0:
+            ball.y = 0.0
+            ball.vy = -ball.vy
+
+        # The paddle returns the ball, steering with the contact point and
+        # speeding up a little each return.
+        if ball.vy > 0.0 and ball.y + i32_to_f32(BALL) >= i32_to_f32(PADDLE_Y) and ball.y < i32_to_f32(PADDLE_Y + PADDLE_H) and ball.x + i32_to_f32(BALL) > px and ball.x < px + i32_to_f32(PADDLE_W):
+            ball.y = i32_to_f32(PADDLE_Y - BALL)
+            mut up = ball.vy * 1.02
+            if up < 5.0:
+                up = 5.0
+            if up > VY_MAX:
+                up = VY_MAX
+            ball.vy = -up
+            ball.vx += (ball.x + i32_to_f32(BALL / 2) - (px + i32_to_f32(PADDLE_W / 2))) * 0.12
+            ball.vx = max_f32(-VX_MAX, min_f32(ball.vx, VX_MAX))
+            sound_play(audio, snd_blip)
+
+        # Bricks: one collision per frame, reflected on whichever axis the
+        # ball has penetrated less — the side it came from.
+        for i in range(0, BRICKS):
+            if not bricks[i]:
+                continue
+            let bx = i32_to_f32(BRICK_X0 + (i % COLS) * BRICK_DX)
+            let by = i32_to_f32(BRICK_Y0 + (i / COLS) * BRICK_DY)
+            if ball.x + i32_to_f32(BALL) <= bx or ball.x >= bx + i32_to_f32(BRICK_W) or ball.y + i32_to_f32(BALL) <= by or ball.y >= by + i32_to_f32(BRICK_H):
+                continue
+            let ox = min_f32(ball.x + i32_to_f32(BALL), bx + i32_to_f32(BRICK_W)) - max_f32(ball.x, bx)
+            let oy = min_f32(ball.y + i32_to_f32(BALL), by + i32_to_f32(BRICK_H)) - max_f32(ball.y, by)
+            if ox < oy:
+                if ball.x + i32_to_f32(BALL / 2) < bx + i32_to_f32(BRICK_W / 2):
+                    ball.x = bx - i32_to_f32(BALL)
+                else:
+                    ball.x = bx + i32_to_f32(BRICK_W)
+                ball.vx = -ball.vx
+            else:
+                if ball.y + i32_to_f32(BALL / 2) < by + i32_to_f32(BRICK_H / 2):
+                    ball.y = by - i32_to_f32(BALL)
+                else:
+                    ball.y = by + i32_to_f32(BRICK_H)
+                ball.vy = -ball.vy
+            bricks[i] = false
+            cleared += 1
+            sound_play(audio, snd_brick)
+            break
+
+        # A lost ball: one life, a low note, and a fresh serve.
+        if ball.y > i32_to_f32(WIN_H):
+            lives -= 1
+            sound_play(audio, snd_lose)
+            if lives <= 0:
+                running = false
+            else:
+                ball = serve(px)
+
+        # Draw: background, the wall (white brick texture, tinted per row),
+        # paddle, ball, and the HUD — lives as little balls, cleared count
+        # right-aligned.
+        gfx_clear(screen, 16, 18, 26)
+        for row in range(0, ROWS):
+            if row == 0:
+                tex_tint(tex_brick, 240, 96, 96)
+            elif row == 1:
+                tex_tint(tex_brick, 240, 184, 88)
+            elif row == 2:
+                tex_tint(tex_brick, 112, 208, 128)
+            else:
+                tex_tint(tex_brick, 112, 160, 240)
+            for col in range(0, COLS):
+                if bricks[row * COLS + col]:
+                    tex_draw(screen, tex_brick, BRICK_X0 + col * BRICK_DX,
+                             BRICK_Y0 + row * BRICK_DY)
+        tex_draw(screen, tex_paddle, f32_to_i32(px), PADDLE_Y)
+        tex_draw(screen, tex_ball, f32_to_i32(ball.x), f32_to_i32(ball.y))
+        for j in range(0, lives):
+            tex_draw(screen, tex_ball, 8 + j * 14, 8)
+        let score = to_str_i32(cleared)
+        text_measure(font, score, scratch)
+        text_draw(screen, font, WIN_W - 8 - scratch[0], 4, score, scratch, 200, 200, 220)
+        gfx_present(screen)
+
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+        if cleared >= BRICKS:
+            running = false
+
+    tex_free(tex_ball)
+    tex_free(tex_paddle)
+    tex_free(tex_brick)
+    sound_free(snd_blip)
+    sound_free(snd_brick)
+    sound_free(snd_lose)
+    font_close(font)
+    text_quit()
+    audio_close(audio)
+    screen_close(screen)
+    print_fmt("cleared {} lives {} frames {}", cleared, lives, frames)

@@ -81,6 +81,67 @@ def _find_sdl2_ttf():
 SDL2_TTF = _find_sdl2_ttf()
 
 
+def _find_sdl2_image():
+    """How to build against SDL2_image (with SDL2), or None when it is not
+    available."""
+    base = _find_sdl2()
+    if base is None:
+        return None
+    if os.name == 'nt':
+        for d in base['lib_dirs']:
+            if os.path.exists(os.path.join(d, 'libSDL2_image.dll.a')):
+                return {'lib_dirs': [d], 'libs': ['SDL2_image', 'SDL2']}
+        return None
+    import ctypes.util
+    if ctypes.util.find_library('SDL2_image'):
+        return {'lib_dirs': base['lib_dirs'], 'libs': ['SDL2_image', 'SDL2']}
+    # macOS: Homebrew installs outside dyld's default search paths, where
+    # find_library cannot see it, so ask brew (same story as SDL2_ttf).
+    brew = shutil.which('brew')
+    if brew:
+        dirs = []
+        for args in (['--prefix', 'sdl2_image'], ['--prefix']):
+            p = subprocess.run([brew] + args, capture_output=True, text=True)
+            if p.returncode == 0:
+                lib_dir = os.path.join(p.stdout.strip(), 'lib')
+                if os.path.exists(os.path.join(lib_dir, 'libSDL2_image.dylib')):
+                    dirs.append(lib_dir)
+        if dirs:
+            return {'lib_dirs': base['lib_dirs'] + dirs,
+                    'libs': ['SDL2_image', 'SDL2']}
+    return None
+
+
+SDL2_IMAGE = _find_sdl2_image()
+
+
+def _sdl2_all():
+    """SDL2 + SDL2_ttf + SDL2_image together, for the game that uses all
+    three, or None when any is missing."""
+    if SDL2 is None or SDL2_TTF is None or SDL2_IMAGE is None:
+        return None
+    dirs = []
+    for cfg in (SDL2_TTF, SDL2_IMAGE):
+        for d in cfg['lib_dirs']:
+            if d not in dirs:
+                dirs.append(d)
+    return {'lib_dirs': dirs, 'libs': ['SDL2_image', 'SDL2_ttf', 'SDL2']}
+
+
+SDL2_ALL = _sdl2_all()
+
+
+def _write_wav(path, samples, channels, rate):
+    """Write a minimal 16-bit PCM WAV, for the kit's sound-format tests."""
+    import struct
+    data = struct.pack('<%dh' % len(samples), *samples)
+    with open(path, 'wb') as f:
+        f.write(b'RIFF' + struct.pack('<I', 36 + len(data)) + b'WAVE'
+                + b'fmt ' + struct.pack('<IHHIIHH', 16, 1, channels, rate,
+                                        rate * channels * 2, channels * 2, 16)
+                + b'data' + struct.pack('<I', len(data)) + data)
+
+
 @unittest.skipUnless(_have_compiler(), "no C++17 compiler available")
 class IntegrationTests(unittest.TestCase):
     def _build_and_run(self, source, expected_lines):
@@ -1239,7 +1300,8 @@ class IntegrationTests(unittest.TestCase):
         # pong.vnt imports every gamekit module, so this also type-checks
         # the kit's extern declarations.
         for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'sdl_audio.vnt',
-                   'sdl_audio_cb.vnt', 'pong.vnt'):
+                   'sdl_audio_cb.vnt', 'sdl_texture.vnt', 'sdl_sound.vnt',
+                   'pong.vnt', 'breakout.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1290,6 +1352,27 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    @unittest.skipUnless(SDL2_ALL, "SDL2 + SDL2_ttf + SDL2_image not found")
+    def test_breakout_headless(self):
+        # The third game: sprites, tinted brick rows, and WAV sound files.
+        # With no input the paddle auto-pilot plays, and the whole run is
+        # reproducible: the wall is cleared without losing a life, at frame
+        # 2064, well before the frame cap — which is only the backstop.
+        # cwd=HERE so the relative asset and font paths resolve.
+        tmp = tempfile.mkdtemp(prefix='vanta_breakout_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'breakout.vnt'), tmp,
+                                  cfg=SDL2_ALL)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy',
+                       SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe, '5000'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['cleared 40 lives 3 frames 2064'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     @unittest.skipUnless(SDL2_TTF, "SDL2_ttf not found")
     def test_sdl_text_headless(self):
         # The raw SDL_ttf example: render one string per frame and keep
@@ -1304,6 +1387,29 @@ class IntegrationTests(unittest.TestCase):
                                env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(), ['frames 120'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_IMAGE, "SDL2_image not found")
+    def test_sdl_texture_headless(self):
+        # The raw SDL_image example: load PNG and BMP textures, tint, draw
+        # a sheet region, flip and rotate, and check every draw by reading
+        # the pixels back. The example force-picks the software renderer,
+        # so the readbacks are exact everywhere. cwd=HERE so the relative
+        # paths to the generated assets resolve.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdltex_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_texture.vnt'),
+                                  tmp, cfg=SDL2_IMAGE)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['loaded true', 'ball 10 10', 'paddle 44 10',
+                              'ball centre true', 'ball corner true',
+                              'tint true', 'sheet true', 'flipped true',
+                              'rotated true'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1340,6 +1446,27 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['opened true', 'callbacks ran true',
                               'samples per call 1024'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_sound_headless(self):
+        # The raw WAV example: SDL_LoadWAV_RW pulls examples/assets/blip.wav
+        # into a buffer SDL allocates, the queue API plays it, SDL_FreeWAV
+        # gives the buffer back. The spec of a known file is safe to freeze;
+        # cwd=HERE so the relative path resolves.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlsound_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_sound.vnt'), tmp)
+            env = dict(os.environ, SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['opened true', 'loaded true',
+                              'sample rate 44100 channels 1', 'pcm16 true',
+                              'bytes 5292', 'queued true', 'pending true',
+                              'drained true'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1382,6 +1509,121 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['true', '44100', '3528', 'true', 'true',
                               '0', '100'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_IMAGE, "SDL2_image not found")
+    def test_gamekit_texture(self):
+        # gamekit/image.vnt textures: load PNG and BMP, read the sizes
+        # back, draw whole / sheet-region / rotated-flipped, tint and fade,
+        # and walk the guards — a missing file loads dead, and drawing a
+        # dead texture is a no-op, not a crash. The copy puts the relative
+        # imports and the assets where the probe program can reach them.
+        tmp = tempfile.mkdtemp(prefix='vanta_kittex_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            shutil.copytree(os.path.join(EXAMPLES, 'assets'),
+                            os.path.join(tmp, 'assets'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/sdl.vnt"\n'
+                        'import "gamekit/gfx.vnt"\n'
+                        'import "gamekit/image.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let screen = screen_open("kit texture", 64, 64)\n'
+                        '    print_bool(screen_ok(screen))\n'
+                        '    let ball = tex_load(screen, "assets/ball.png")\n'
+                        '    let paddle = tex_load(screen, "assets/paddle.bmp")\n'
+                        '    let tiles = tex_load(screen, "assets/tiles.png")\n'
+                        '    print_bool(tex_ok(ball) and tex_ok(paddle) and tex_ok(tiles))\n'
+                        '    print_i32(ball.w)\n'
+                        '    print_i32(ball.h)\n'
+                        '    print_i32(paddle.w)\n'
+                        '    print_i32(paddle.h)\n'
+                        '    let missing = tex_load(screen, "assets/nope.png")\n'
+                        '    print_bool(tex_ok(missing))\n'
+                        '    tex_tint(tiles, 200, 100, 50)\n'
+                        '    tex_alpha(tiles, 200)\n'
+                        '    gfx_clear(screen, 0, 0, 0)\n'
+                        '    tex_draw(screen, ball, 4, 4)\n'
+                        '    tex_draw(screen, missing, 4, 40)\n'
+                        '    tex_draw_src(screen, tiles, 0, 0, 16, 16, 20, 4)\n'
+                        '    tex_draw_ex(screen, paddle, 4, 60, 45.0, SDL_FLIP_HORIZONTAL)\n'
+                        '    gfx_present(screen)\n'
+                        '    print_str("drawn")\n'
+                        '    tex_free(ball)\n'
+                        '    tex_free(missing)\n'
+                        '    tex_free(paddle)\n'
+                        '    tex_free(tiles)\n'
+                        '    screen_close(screen)\n')
+            exe = self._build_sdl(path, tmp, cfg=SDL2_IMAGE)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', '10', '10', '44', '10',
+                              'false', 'drawn'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_gamekit_sound(self):
+        # gamekit/audio.vnt sound files: a 44.1 kHz mono WAV loads and
+        # plays at full length; a stereo one folds to mono in place (half
+        # the bytes); a wrong-rate file and a missing file load dead, and
+        # freeing a dead sound is harmless. The stereo and low-rate files
+        # are written here; the copy puts the kit where the probe can
+        # reach it.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitsnd_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            os.makedirs(os.path.join(tmp, 'snd'))
+            shutil.copy(os.path.join(EXAMPLES, 'assets', 'blip.wav'),
+                        os.path.join(tmp, 'snd', 'blip.wav'))
+            _write_wav(os.path.join(tmp, 'snd', 'stereo.wav'),
+                       [8000, 4000] * 1000, 2, 44100)
+            _write_wav(os.path.join(tmp, 'snd', 'lowrate.wav'),
+                       [0] * 2205, 1, 22050)
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/audio.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let audio = audio_open()\n'
+                        '    print_bool(audio_ok(audio))\n'
+                        '    if not audio_ok(audio):\n'
+                        '        return\n'
+                        '    let good = sound_load(audio, "snd/blip.wav")\n'
+                        '    print_bool(sound_ok(good))\n'
+                        '    print_i32(good.len)\n'
+                        '    print_bool(sound_play(audio, good))\n'
+                        '    print_bool(audio_pending(audio) > 0)\n'
+                        '    audio_wait(audio)\n'
+                        '    print_bool(audio_pending(audio) == 0)\n'
+                        '    let stereo = sound_load(audio, "snd/stereo.wav")\n'
+                        '    print_bool(sound_ok(stereo))\n'
+                        '    print_i32(stereo.len)\n'
+                        '    let lowrate = sound_load(audio, "snd/lowrate.wav")\n'
+                        '    print_bool(sound_ok(lowrate))\n'
+                        '    let missing = sound_load(audio, "snd/nope.wav")\n'
+                        '    print_bool(sound_ok(missing))\n'
+                        '    sound_free(good)\n'
+                        '    sound_free(stereo)\n'
+                        '    sound_free(lowrate)\n'
+                        '    sound_free(missing)\n'
+                        '    audio_close(audio)\n')
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', '5292', 'true', 'true', 'true',
+                              'true', '2000', 'false', 'false'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

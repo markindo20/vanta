@@ -1,4 +1,4 @@
-# gamekit/gfx.vnt — drawing helpers built on an SDL renderer.
+# gamekit/gfx.vnt — rectangle drawing helpers built on an SDL renderer.
 #
 # SDL_RenderFillRect wants a pointer to a four-i32 SDL_Rect. Every helper
 # here takes one as `rect`, so a game allocates it once at startup and
@@ -7,6 +7,9 @@
 #   let arena = Arena(512)
 #   let rect = arena.alloc::<i32>(4)
 #   gfx_fill_rect(screen, rect, 10, 10, 40, 20, 240, 240, 240)
+#
+# Textures — loading image files and drawing sprites — live in
+# gamekit/image.vnt, next to their SDL2_image dependency.
 
 import "sdl.vnt"
 

@@ -23,10 +23,11 @@ struct SDL_Color:
     a: u8
 
 extern "sdl2" {
+    # SDL_DestroyTexture, shared with image.vnt's tex_free, is declared in
+    # sdl.vnt.
     func SDL_CreateTextureFromSurface(renderer: ptr<void>, surface: ptr<void>) -> ptr<void>
     func SDL_RenderCopy(renderer: ptr<void>, texture: ptr<void>, src: ptr<i32>, dst: ptr<i32>) -> i32
     func SDL_FreeSurface(surface: ptr<void>) -> void
-    func SDL_DestroyTexture(texture: ptr<void>) -> void
 }
 
 extern "sdl2_ttf" {

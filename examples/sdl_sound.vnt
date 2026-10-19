@@ -1,0 +1,94 @@
+# Vanta + SDL2: load a WAV file and play it with the raw C API, no game kit.
+#
+#   python main.py run examples/sdl_sound.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# The program opens the default device queue-style (a null callback),
+# loads examples/assets/blip.wav with SDL_LoadWAV, queues the samples with
+# SDL_QueueAudio, and waits for the device to play them out. Run this from
+# the repository root so the relative path resolves. There is no window at
+# all — audio only — and under the dummy audio driver
+# (SDL_AUDIODRIVER=dummy) the device plays to nowhere in real time, which
+# is how the test suite runs this headless.
+
+struct SDL_AudioSpec:
+    freq: i32
+    format: u16
+    channels: u8
+    silence: u8
+    samples: u16
+    padding: u16
+    size: u32
+    callback: func(ptr<void>, ptr<u8>, i32)
+    userdata: ptr<void>
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_OpenAudioDevice(device: ptr<u8>, iscapture: i32, desired: ptr<SDL_AudioSpec>,
+                             obtained: ptr<SDL_AudioSpec>, allowed_changes: i32) -> u32
+    func SDL_QueueAudio(dev: u32, data: ptr<void>, len: i32) -> i32
+    func SDL_GetQueuedAudioSize(dev: u32) -> u32
+    func SDL_PauseAudioDevice(dev: u32, pause_on: i32) -> void
+    func SDL_CloseAudioDevice(dev: u32) -> void
+    func SDL_Delay(ms: u32) -> void
+    func SDL_RWFromFile(file: str, mode: str) -> ptr<void>
+    func SDL_LoadWAV_RW(src: ptr<void>, freesrc: i32, spec: ptr<SDL_AudioSpec>,
+                        audio_buf: ptr<ptr<u8>>, audio_len: ptr<u32>) -> ptr<SDL_AudioSpec>
+    func SDL_FreeWAV(audio_buf: ptr<u8>) -> void
+}
+
+const SDL_INIT_AUDIO: u32 = 16
+const AUDIO_S16SYS: u16 = 32784    # AUDIO_S16SYS, 0x8010, on little-endian hosts
+
+func main() -> void:
+    if SDL_Init(SDL_INIT_AUDIO) != 0:
+        print_str("SDL_Init failed")
+        return
+    let arena = Arena(16384)
+    let desired = arena.alloc::<SDL_AudioSpec>(1)
+    let obtained = arena.alloc::<SDL_AudioSpec>(1)
+    desired[0] = SDL_AudioSpec(
+        freq: 44100, format: AUDIO_S16SYS, channels: 1, silence: 0,
+        samples: 1024, padding: 0, size: 0,
+        callback: ptr_null::<func(ptr<void>, ptr<u8>, i32)>(),
+        userdata: ptr_null::<void>())
+    let dev = SDL_OpenAudioDevice(ptr_null::<u8>(), 0, desired, obtained, 0)
+    print_fmt("opened {}", dev != 0)
+    if dev == 0:
+        print_str("SDL_OpenAudioDevice failed")
+        SDL_Quit()
+        return
+    SDL_PauseAudioDevice(dev, 0)       # devices start out paused
+
+    # SDL_LoadWAV is a macro over SDL_LoadWAV_RW(SDL_RWFromFile(...)):
+    # freesrc=1 closes the file handle for us. SDL allocates the sample
+    # buffer; SDL_FreeWAV hands it back.
+    let spec = arena.alloc::<SDL_AudioSpec>(1)
+    let data = arena.alloc::<ptr<u8>>(1)
+    let nbytes = arena.alloc::<u32>(1)
+    data[0] = ptr_null::<u8>()
+    let rw = SDL_RWFromFile("examples/assets/blip.wav", "rb")
+    let got = SDL_LoadWAV_RW(rw, 1, spec, data, nbytes)
+    print_fmt("loaded {}", not ptr_is_null(got))
+    if ptr_is_null(got):
+        SDL_CloseAudioDevice(dev)
+        SDL_Quit()
+        return
+    print_fmt("sample rate {} channels {}", spec[0].freq, spec[0].channels)
+    print_fmt("pcm16 {}", spec[0].format == AUDIO_S16SYS)
+    # SDL reports the byte count as Uint32; reading the same four bytes as
+    # i32 is what the queue call wants.
+    let n = ptr_cast::<i32>(nbytes)[0]
+    print_fmt("bytes {}", n)
+
+    print_fmt("queued {}", SDL_QueueAudio(dev, data[0], n) == 0)
+    print_fmt("pending {}", SDL_GetQueuedAudioSize(dev) > 0)
+    mut guard = 0
+    while SDL_GetQueuedAudioSize(dev) > 0 and guard < 2000:
+        SDL_Delay(5)
+        guard += 1
+    print_fmt("drained {}", SDL_GetQueuedAudioSize(dev) == 0)
+
+    SDL_FreeWAV(data[0])
+    SDL_CloseAudioDevice(dev)
+    SDL_Quit()

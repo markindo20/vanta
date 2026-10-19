@@ -1,18 +1,21 @@
-# gamekit/audio.vnt — SDL2 audio for gamekit programs: fire-and-forget tones.
+# gamekit/audio.vnt — SDL2 audio for gamekit programs: tones and sound files.
 #
 #   import "gamekit/sdl.vnt"
 #   import "gamekit/audio.vnt"
 #
-# Link SDL2 only — audio is part of the core library, and the kit ships no
-# sound files: tones are generated, so nothing is loaded from disk.
+# Link SDL2 only — audio is part of the core library. The kit ships no
+# sound files: tones are generated, and sound files are read from paths the
+# game supplies (16-bit PCM WAV at 44.1 kHz, mono or stereo).
 #
 #   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 #
 # audio_play_tone turns a frequency and a duration into a square wave and
 # queues it on the device, then returns at once: SDL plays it in the
 # background, and audio_wait blocks until it has been played. The caller
-# supplies the sample buffer and its capacity, so the kit never allocates
-# per tone. Close with audio_close, before screen_close's SDL_Quit.
+# supplies the tone buffer and its capacity, so the kit never allocates per
+# tone. sound_load reads a WAV into a buffer SDL allocates; sound_play
+# queues it, and sound_free hands the buffer back. Close with audio_close,
+# before screen_close's SDL_Quit.
 
 import "sdl.vnt"
 
@@ -42,6 +45,10 @@ extern "sdl2" {
     func SDL_PauseAudioDevice(dev: u32, pause_on: i32) -> void
     func SDL_CloseAudioDevice(dev: u32) -> void
     func SDL_Delay(ms: u32) -> void
+    func SDL_RWFromFile(file: str, mode: str) -> ptr<void>
+    func SDL_LoadWAV_RW(src: ptr<void>, freesrc: i32, spec: ptr<SDL_AudioSpec>,
+                        audio_buf: ptr<ptr<u8>>, audio_len: ptr<u32>) -> ptr<SDL_AudioSpec>
+    func SDL_FreeWAV(audio_buf: ptr<u8>) -> void
 }
 
 const SDL_INIT_AUDIO: u32 = 16
@@ -111,6 +118,63 @@ func audio_play_tone(a: Audio, freq: i32, ms: i32, buf: ptr<i16>, capacity: i32)
     if SDL_QueueAudio(a.dev, buf, n * 2) != 0:
         return 0
     return n
+
+struct Sound:
+    data: ptr<u8>
+    len: i32        # bytes of 44.1 kHz mono S16 PCM; one sample is two
+
+func sound_load(a: Audio, path: str) -> Sound:
+    # SDL_LoadWAV decodes the whole file into a buffer sound_free hands
+    # back to SDL_FreeWAV. The device runs at 44.1 kHz mono S16, so a file
+    # already in that format loads as-is; a stereo one is folded to mono
+    # in place, and anything else — another rate, another sample format,
+    # more channels, an unreadable file — loads as a Sound that fails
+    # sound_ok. Paths are opened by C, relative to the process working
+    # directory.
+    if not audio_ok(a):
+        return Sound(data: ptr_null::<u8>(), len: 0)
+    let scratch = Arena(128)
+    let spec = scratch.alloc::<SDL_AudioSpec>(1)
+    let data = scratch.alloc::<ptr<u8>>(1)
+    let nbytes = scratch.alloc::<u32>(1)
+    data[0] = ptr_null::<u8>()
+    # SDL declares SDL_LoadWAV as a macro over SDL_LoadWAV_RW(RWFromFile):
+    # the same shape, with freesrc closing the file for us.
+    let rw = SDL_RWFromFile(path, "rb")
+    if ptr_is_null(SDL_LoadWAV_RW(rw, 1, spec, data, nbytes)):
+        return Sound(data: ptr_null::<u8>(), len: 0)
+    if spec[0].format != AUDIO_S16SYS or spec[0].freq != a.rate:
+        SDL_FreeWAV(data[0])
+        return Sound(data: ptr_null::<u8>(), len: 0)
+    mut n = ptr_cast::<i32>(nbytes)[0]    # SDL reports the length as Uint32
+    if spec[0].channels == 2:
+        # Fold stereo to mono in place: each write trails the reads it is
+        # built from, so one buffer is enough.
+        let samples = ptr_cast::<i16>(data[0])
+        let frames = n / 4
+        for i in range(0, frames):
+            samples[i] = (samples[i * 2] + samples[i * 2 + 1]) / 2
+        n = frames * 2
+    elif spec[0].channels != 1:
+        SDL_FreeWAV(data[0])
+        return Sound(data: ptr_null::<u8>(), len: 0)
+    return Sound(data: data[0], len: n)
+
+func sound_ok(s: Sound) -> bool:
+    return not ptr_is_null(s.data)
+
+func sound_play(a: Audio, s: Sound) -> bool:
+    # Queues the whole sound after whatever the device already holds; SDL
+    # copies the bytes, so the buffer stays the game's to keep until
+    # sound_free. False when the device or the sound is dead.
+    if not audio_ok(a) or not sound_ok(s):
+        return false
+    return SDL_QueueAudio(a.dev, s.data, s.len) == 0
+
+func sound_free(s: Sound) -> void:
+    # Hands the sample buffer back to SDL, which allocated it at load.
+    if sound_ok(s):
+        SDL_FreeWAV(s.data)
 
 func audio_wait(a: Audio) -> void:
     # Block until the queued audio has played, with a ~5 s backstop in

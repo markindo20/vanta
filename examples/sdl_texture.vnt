@@ -1,0 +1,140 @@
+# Vanta + SDL2 + SDL_image: load images as textures with the raw C API, and
+# check the draws by reading the pixels back.
+#
+#   python main.py run examples/sdl_texture.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2
+#
+# There is no event loop and nothing is ever presented: the program draws
+# to a hidden window with the software renderer — a fixed choice that makes
+# pixel readback exact on every machine, GPU or not. SDL_image decodes PNG,
+# BMP, and whatever else the local build supports; the examples ship
+# generated assets in examples/assets/ (see gen_assets.py there). Run this
+# from the repository root so the relative paths resolve; under the dummy
+# video driver (SDL_VIDEODRIVER=dummy) it needs no display at all.
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_QueryTexture(texture: ptr<void>, format: ptr<u32>, access: ptr<i32>,
+                          w: ptr<i32>, h: ptr<i32>) -> i32
+    func SDL_RenderCopyEx(renderer: ptr<void>, texture: ptr<void>, srcrect: ptr<i32>,
+                          dstrect: ptr<i32>, angle: f64, center: ptr<i32>, flip: u32) -> i32
+    func SDL_SetTextureColorMod(texture: ptr<void>, r: i32, g: i32, b: i32) -> i32
+    func SDL_RenderReadPixels(renderer: ptr<void>, rect: ptr<i32>, format: u32,
+                              pixels: ptr<void>, pitch: i32) -> i32
+    func SDL_DestroyTexture(texture: ptr<void>) -> void
+}
+
+extern "sdl2_image" {
+    func IMG_LoadTexture(renderer: ptr<void>, file: str) -> ptr<void>
+}
+
+const SDL_INIT_VIDEO: u32 = 32
+const SDL_WINDOW_HIDDEN: u32 = 8
+const SDL_RENDERER_SOFTWARE: u32 = 1
+const PIXEL_RGBA32: u32 = 376840196     # SDL_PIXELFORMAT_RGBA32
+const FLIP_NONE: u32 = 0                # SDL_FLIP_NONE
+const FLIP_H: u32 = 1                   # SDL_FLIP_HORIZONTAL
+
+func is_rgb(p: u32, r: u32, g: u32, b: u32) -> bool:
+    # The readback buffer holds one RGBA32 pixel per u32: red in the low
+    # byte on little-endian hosts.
+    return p % 256 == r and p / 256 % 256 == g and p / 65536 % 256 == b
+
+func main() -> void:
+    if SDL_Init(SDL_INIT_VIDEO) != 0:
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta", 100, 100, 64, 64, SDL_WINDOW_HIDDEN)
+    if ptr_is_null(window):
+        print_str("SDL_CreateWindow failed")
+        SDL_Quit()
+        return
+    let renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE)
+    if ptr_is_null(renderer):
+        print_str("SDL_CreateRenderer failed")
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
+
+    let arena = Arena(32768)
+    let fb = arena.alloc::<u32>(64 * 64)     # one 64x64 RGBA32 frame
+    let rect = arena.alloc::<i32>(4)
+    let src = arena.alloc::<i32>(4)
+    let qw = arena.alloc::<i32>(1)
+    let qh = arena.alloc::<i32>(1)
+
+    let ball = IMG_LoadTexture(renderer, "examples/assets/ball.png")
+    let paddle = IMG_LoadTexture(renderer, "examples/assets/paddle.bmp")
+    let brick = IMG_LoadTexture(renderer, "examples/assets/brick.png")
+    let tiles = IMG_LoadTexture(renderer, "examples/assets/tiles.png")
+    print_fmt("loaded {}", not ptr_is_null(ball) and not ptr_is_null(paddle)
+              and not ptr_is_null(brick) and not ptr_is_null(tiles))
+    SDL_QueryTexture(ball, ptr_null::<u32>(), ptr_null::<i32>(), qw, qh)
+    print_fmt("ball {} {}", qw[0], qh[0])
+    SDL_QueryTexture(paddle, ptr_null::<u32>(), ptr_null::<i32>(), qw, qh)
+    print_fmt("paddle {} {}", qw[0], qh[0])
+
+    # A PNG with an alpha channel: the ball's centre is opaque white, its
+    # transparent corners leave the cleared colour alone.
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
+    SDL_RenderClear(renderer)
+    rect[0] = 0
+    rect[1] = 0
+    rect[2] = 10
+    rect[3] = 10
+    SDL_RenderCopyEx(renderer, ball, ptr_null::<i32>(), rect, 0.0, ptr_null::<i32>(), FLIP_NONE)
+    SDL_RenderReadPixels(renderer, ptr_null::<i32>(), PIXEL_RGBA32, fb, 64 * 4)
+    print_fmt("ball centre {}", is_rgb(fb[5 * 64 + 5], 255, 255, 255))
+    print_fmt("ball corner {}", is_rgb(fb[1 * 64 + 1], 0, 0, 0))
+
+    # A tint: white multiplied by (255, 128, 0) reads back exactly.
+    SDL_SetTextureColorMod(brick, 255, 128, 0)
+    SDL_RenderClear(renderer)
+    rect[2] = 32
+    rect[3] = 14
+    SDL_RenderCopyEx(renderer, brick, ptr_null::<i32>(), rect, 0.0, ptr_null::<i32>(), FLIP_NONE)
+    SDL_RenderReadPixels(renderer, ptr_null::<i32>(), PIXEL_RGBA32, fb, 64 * 4)
+    print_fmt("tint {}", is_rgb(fb[7 * 64 + 16], 255, 128, 0))
+    SDL_SetTextureColorMod(brick, 255, 255, 255)
+
+    # A sprite-sheet region: tiles.png holds two 16x16 tiles, drawn as-is
+    # and again flipped. The red tile's white dot sits at x 6..9, so the
+    # mirrored draw puts it at x 22..25.
+    src[0] = 0
+    src[1] = 0
+    src[2] = 16
+    src[3] = 16
+    SDL_RenderClear(renderer)
+    rect[0] = 0
+    rect[1] = 0
+    rect[2] = 16
+    rect[3] = 16
+    SDL_RenderCopyEx(renderer, tiles, src, rect, 0.0, ptr_null::<i32>(), FLIP_NONE)
+    rect[0] = 16
+    SDL_RenderCopyEx(renderer, tiles, src, rect, 0.0, ptr_null::<i32>(), FLIP_H)
+    SDL_RenderReadPixels(renderer, ptr_null::<i32>(), PIXEL_RGBA32, fb, 64 * 4)
+    print_fmt("sheet {}", is_rgb(fb[7 * 64 + 7], 255, 255, 255))
+    print_fmt("flipped {}", is_rgb(fb[7 * 64 + 24], 255, 255, 255))
+
+    # Rotated 90 degrees about its own centre — the dot landing there is
+    # the proof the angle went through.
+    SDL_RenderClear(renderer)
+    rect[0] = 0
+    rect[1] = 0
+    SDL_RenderCopyEx(renderer, tiles, src, rect, 90.0, ptr_null::<i32>(), FLIP_NONE)
+    SDL_RenderReadPixels(renderer, ptr_null::<i32>(), PIXEL_RGBA32, fb, 64 * 4)
+    print_fmt("rotated {}", is_rgb(fb[8 * 64 + 8], 255, 255, 255))
+
+    SDL_DestroyTexture(ball)
+    SDL_DestroyTexture(paddle)
+    SDL_DestroyTexture(brick)
+    SDL_DestroyTexture(tiles)
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()

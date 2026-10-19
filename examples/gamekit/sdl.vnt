@@ -2,21 +2,26 @@
 #
 # The kit is ordinary Vanta files: import the modules a game needs.
 # Because Vanta has one flat namespace, every kit name is prefixed by its
-# module (SDL_*, screen_*, ev_*, gfx_*, font_*, text_*, audio_*, rand_*),
-# so the modules coexist with each other and with a game's own names.
+# module (SDL_*, screen_*, ev_*, gfx_*, tex_*, font_*, text_*, audio_*,
+# sound_*, rand_*), so the modules coexist with each other and with a
+# game's own names.
 #
 #   import "gamekit/sdl.vnt"
 #   import "gamekit/input.vnt"
 #   import "gamekit/gfx.vnt"
+#   import "gamekit/image.vnt"
 #   import "gamekit/text.vnt"
 #   import "gamekit/audio.vnt"
 #   import "gamekit/rng.vnt"
 #
-# Build with the SDL2 library, e.g. on Windows with MSYS2 (text.vnt pulls in
-# SDL_ttf as well; audio is part of SDL2 itself):
+# Build with the SDL2 library, e.g. on Windows with MSYS2 (image.vnt pulls
+# in SDL2_image, text.vnt pulls in SDL_ttf, audio is part of SDL2 itself —
+# link a satellite only when the game imports its module):
 #   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 #
-# examples/pong.vnt is a complete game built on the kit.
+# examples/pong.vnt is a complete game built on the kit; breakout.vnt adds
+# textures and sound files.
 
 extern "sdl2" {
     func SDL_Init(flags: u32) -> i32
@@ -28,6 +33,13 @@ extern "sdl2" {
     func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
     func SDL_RenderClear(renderer: ptr<void>) -> i32
     func SDL_RenderFillRect(renderer: ptr<void>, rect: ptr<i32>) -> i32
+    func SDL_RenderCopyEx(renderer: ptr<void>, texture: ptr<void>, srcrect: ptr<i32>,
+                          dstrect: ptr<i32>, angle: f64, center: ptr<i32>, flip: u32) -> i32
+    func SDL_QueryTexture(texture: ptr<void>, format: ptr<u32>, access: ptr<i32>,
+                          w: ptr<i32>, h: ptr<i32>) -> i32
+    func SDL_SetTextureColorMod(texture: ptr<void>, r: i32, g: i32, b: i32) -> i32
+    func SDL_SetTextureAlphaMod(texture: ptr<void>, a: i32) -> i32
+    func SDL_DestroyTexture(texture: ptr<void>) -> void
     func SDL_RenderPresent(renderer: ptr<void>) -> void
     func SDL_PollEvent(event: ptr<i32>) -> i32
 }
@@ -36,6 +48,11 @@ const SDL_INIT_VIDEO: u32 = 32
 const SDL_WINDOW_SHOWN: u32 = 4
 const SDL_RENDERER_ACCELERATED_VSYNC: u32 = 6    # ACCELERATED | PRESENTVSYNC
 const SDL_RENDERER_ANY: u32 = 0                  # fallback: the software renderer
+
+# SDL_RendererFlip values, for tex_draw_ex.
+const SDL_FLIP_NONE: u32 = 0
+const SDL_FLIP_HORIZONTAL: u32 = 1
+const SDL_FLIP_VERTICAL: u32 = 2
 
 # Event types, as stored in SDL_Event.type.
 const EV_QUIT: i32 = 256
