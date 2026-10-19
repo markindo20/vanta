@@ -1,15 +1,15 @@
 # Vanta in 30 minutes
 
 A hands-on introduction that builds from `print_str` to a small project — an
-ASCII terrain generator — and then leaves the terminal behind: the last
-section opens a real window with SDL2. Every code block below is a complete
-program that was run to produce the output shown — copy it into a file with a
-`.vnt` extension and run it.
+ASCII terrain generator — and then leaves the terminal behind: the closing
+sections open a real window with SDL2 and draw text with SDL_ttf. Every code
+block below is a complete program that was run to produce the output shown —
+copy it into a file with a `.vnt` extension and run it.
 
 **Prerequisites:** Python 3.10+ and a C++17 compiler (`g++`, `clang++`, or
 MSVC `cl`). See the Quick start in the [README](../README.md). The SDL2
-section at the end additionally needs the SDL2 library, but everything
-before it does not.
+sections at the end additionally need the SDL2 and SDL_ttf libraries, but
+everything before them does not.
 
 ```powershell
 python main.py run hello.vnt     # compile and run
@@ -665,12 +665,12 @@ and the rest of the API are documented in the reference's
 
 The SDL2 program above talks to C directly, and that never stops working —
 but wiring the window, the input events, and the rectangles by hand in every
-game gets old. The game kit (`examples/gamekit/`) does it once, as four
+game gets old. The game kit (`examples/gamekit/`) does it once, as five
 ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
 declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
-(reading events), `gfx.vnt` (drawing), and `rng.vnt` (bounded random
-numbers over the deterministic stream). A tiny demo — a square bouncing
-between the walls for 60 frames:
+(reading events), `gfx.vnt` (drawing), `text.vnt` (text, over SDL_ttf), and
+`rng.vnt` (bounded random numbers over the deterministic stream). A tiny
+demo — a square bouncing between the walls for 60 frames:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -716,6 +716,65 @@ That is the whole kit: imports, prefixes, and C's own failure values.
 `match` for the serve direction; the
 [reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140) lists every function.
 
+## Text on screen
+
+SDL2 paints rectangles and textures; words come from SDL_ttf, the companion
+library. The kit's `text.vnt` wraps it the same way the other modules wrap
+SDL: a `Font` handle, C-style failure (`font_ok`), and one call to draw a
+string. A little title card:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/gfx.vnt"
+import "gamekit/text.vnt"
+
+func main() -> void:
+    let screen = screen_open("text", 320, 240)
+    if not screen_ok(screen):
+        print_str("could not open a window and renderer")
+        return
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
+    if not font_ok(font):
+        print_str("could not open a font")
+        return
+    let arena = Arena(512)
+    let rect = arena.alloc::<i32>(4)         # the gfx scratch rect
+    let scratch = arena.alloc::<i32>(10)     # the text scratch block
+    mut frames = 0
+    while frames < 3:
+        gfx_clear(screen, 22, 24, 34)
+        gfx_stroke_rect(screen, rect, 24, 24, 272, 192, 2, 58, 62, 78)
+        text_draw(screen, font, 48, 100, "Vanta speaks!", scratch, 240, 220, 120)
+        gfx_present(screen)
+        frames += 1
+    font_close(font)
+    text_quit()
+    screen_close(screen)
+    print_fmt("frames {}", frames)
+```
+
+```
+frames 3
+```
+
+Three things to know. **The kit ships the font**:
+`examples/gamekit/fonts/tom-thumb.ttf` is a tiny 3x5 pixel face released
+under CC0, so this program runs on any machine — point `font_open` at any
+TrueType file you like instead. **The text scratch is ten `i32` slots**:
+width, height, a source rectangle, a destination rectangle, filled in by
+`text_measure` and `text_draw` themselves. `text_measure` writes the width
+and height, which is how you right-align a score or centre a title: measure
+first, then compute the x. **Rendering happens per call**: each `text_draw`
+renders the string into a texture and frees it immediately — just right for
+scores, timers, and labels.
+
+Programs that import `text.vnt` link SDL_ttf as well as SDL2;
+`examples/pong.vnt` now draws its score this way:
+
+```powershell
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+```
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
@@ -726,4 +785,4 @@ That is the whole kit: imports, prefixes, and C's own failure values.
   and `pong.vnt`, with the reusable `gamekit/` modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (430 tests).
+- `python -m unittest discover -s tests` — run the test suite (521 tests).

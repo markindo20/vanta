@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.17.0)
+# Vanta - a game-oriented systems language (v0.18.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -62,20 +62,24 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 See `docs/LANGUAGE_REFERENCE.md` for the declaration rules.
 
 SDL2 is the worked example of all this. `examples/sdl_window.vnt` opens a
-window; `examples/sdl_game.vnt` is the first playable Vanta game — catch the
-falling coins with Left/Right (or A/D), Esc or the close button quits. The
-game kit (`examples/gamekit/`) packages the SDL2 plumbing as four importable
-modules, and `examples/pong.vnt` is the second playable game built on it:
-W/S or Up/Down against a tracking AI, first to 5 wins.
+window, `examples/sdl_text.vnt` draws text with SDL_ttf, and
+`examples/sdl_game.vnt` is the first playable Vanta game — catch the falling
+coins with Left/Right (or A/D), Esc or the close button quits. The game kit
+(`examples/gamekit/`) packages the SDL2 plumbing as five importable modules,
+and `examples/pong.vnt` is the second playable game built on it: W/S or
+Up/Down against a tracking AI, first to 5 wins, with the score drawn as text.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+python main.py run examples/sdl_text.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 ```
 
 All of them are pure `extern` declarations, so no SDL headers are needed to
 compile, and all take an optional frame-limit argument for headless smoke
-runs (`SDL_VIDEODRIVER=dummy`).
+runs (`SDL_VIDEODRIVER=dummy`). The kit ships its own font
+(`examples/gamekit/fonts/tom-thumb.ttf`, a tiny 3x5 pixel face), so the text
+examples and tests need no system fonts.
 
 ## Project layout
 
@@ -85,7 +89,7 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (507 tests) |
+| `tests/` | `unittest` suite (521 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -113,14 +117,16 @@ runs (`SDL_VIDEODRIVER=dummy`).
 | `foreach.vnt` | `for x in xs` over lists and arrays, with `break`/`continue` |
 | `struct_eq.vnt` | `==`/`!=` on structs: `str` by content, arrays element-wise, nested structs |
 | `ptr_cast.vnt` | `ptr_cast::<T>(p)` reinterpretation, including a `ptr<void>` round trip |
+| `ptr_offset.vnt` | `ptr_offset(p, n)`: element-wise pointer arithmetic, cursor walking over arrays |
 | `enums_extern.vnt` | Enum types in `extern` signatures, through `match` and back (C side: `enums_extern_lib.c`) |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
+| `sdl_text.vnt` | Text with SDL_ttf: `SDL_Color` by value, `TTF_SizeUTF8`, render to texture |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
-| `gamekit/` | Four reusable game modules: SDL2 window lifecycle, event access, drawing, random numbers |
-| `pong.vnt` | The second playable game: paddles, tracking AI, contact-point steering — built on the game kit |
+| `gamekit/` | Five reusable game modules: SDL2 window lifecycle, event access, drawing, text (SDL_ttf), random numbers |
+| `pong.vnt` | The second playable game: paddles, tracking AI, score drawn as text — built on the game kit |
 
 ## Tests
 
@@ -151,10 +157,11 @@ bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
 lists (`List<T>`) and walk lists and arrays with `for x in xs`, store
 exact-width integers (`i8`/`u8`/`i16`/`u16`) whose memory layout matches C,
 compare structs field by field with `==`, reinterpret pointers with
-`ptr_cast::<T>(p)`, assemble strings with `StrBuilder`, name states and modes
-with enums and branch on them exhaustively with `match`, and build and run
-real SDL2 games on the game kit (three SDL examples, two of them playable
-games) — but the remaining gaps are real:
+`ptr_cast::<T>(p)` and step them by elements with `ptr_offset(p, n)`,
+assemble strings with `StrBuilder`, name states and modes with enums and
+branch on them exhaustively with `match`, and build and run real SDL2 games
+on the game kit, text rendering included (four SDL examples, two of them
+playable games) — but the remaining gaps are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
@@ -173,8 +180,9 @@ games) — but the remaining gaps are real:
   data; `==`/`!=` and `match` are the operations on them (they may appear in
   `extern` signatures)
 - windowing is shipped as SDL2 examples plus the game kit: there is no
-  audio/gamepad wrapper and no text rendering, and events are read by hand
-  (an `SDL_Event` is viewed as raw `i32`s)
+  audio/gamepad wrapper, and events are read by hand (an `SDL_Event` is
+  viewed as raw `i32`s); `text_draw` uploads a texture per call — fine for
+  HUDs, wasteful for walls of text
 - pointers have no null safety beyond `ptr_is_null`; `ptr<void>` widening
-  is the only implicit pointer conversion, and `ptr_cast::<T>(p)` is the
-  unchecked explicit escape hatch
+  is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
+  `ptr_offset(p, n)` are the unchecked explicit escape hatches

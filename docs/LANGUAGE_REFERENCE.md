@@ -1,4 +1,4 @@
-# Vanta Language Reference (v0.17.0)
+# Vanta Language Reference (v0.18.0)
 
 This is the reference for the language as implemented at tag `v0.16.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
@@ -539,6 +539,56 @@ rejection:
 error: ptr_cast cannot target a function type
 ```
 
+### Pointer offsets: `ptr_offset(p, n)` (v0.18.0)
+
+`ptr_offset(p, n)` moves a pointer `n` elements — the `p + n` of C, spelled
+as a call. The element type is kept, the result indexes and passes exactly
+like `p`, and the offset counts elements, not bytes:
+
+```vanta
+func main() -> void:
+    let arena = Arena(256)
+    let xs = arena.alloc::<i32>(4)
+    xs[0] = 10
+    xs[1] = 20
+    xs[2] = 30
+    xs[3] = 40
+    let third = ptr_offset(xs, 2)
+    print_i32(third[0])                  # 30
+    third[0] = 33                        # writes through to xs[2]
+    print_i32(xs[2])                     # 33
+    print_i32(ptr_offset(third, -1)[0])  # 20 — offsets may be negative
+    print_i32(ptr_offset(xs, 3)[0])      # 40
+```
+
+```
+30
+33
+20
+40
+```
+
+The offset is plain arithmetic — bounds are the programmer's business, as
+with `p[i]` — but it must be an integer: `i32`, with narrow values
+promoting. A non-integer offset gets the usual conversion message:
+
+```
+error: offset: cannot assign f32 to i32
+```
+
+`ptr<void>` has no element size to step by, so it is the one rejection:
+
+```
+error: cannot offset a ptr<void> (it has no element size); ptr_cast it to a typed pointer first
+```
+
+C out-parameters are the motivating case. Functions like SDL_ttf's
+`TTF_SizeUTF8(font, text, &w, &h)` write through two pointers; with
+`ptr_offset` one scratch block and one `arena.alloc` cover them:
+`TTF_SizeUTF8(font, text, scratch, ptr_offset(scratch, 1))` stores the width
+in `scratch[0]` and the height in `scratch[1]`. The game kit's
+[`text.vnt`](#the-game-kit-v0140) builds on exactly that.
+
 ## Dynamic lists: `List<T>` (v0.9.0)
 
 `List<T>` is a growable array whose storage lives in an `Arena`. Create an
@@ -838,6 +888,7 @@ let r = from_quat(q)
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 | `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
 | `ptr_is_null` | `(ptr<T>) -> bool` | `true` when the pointer is null; `T` may be `void` |
+| `ptr_offset` | `(ptr<T>, i32) -> ptr<T>` | moves `n` elements; `T` may not be `void`; see [pointer offsets](#pointer-offsets-ptr_offsetp-n-v0180) |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different
@@ -1128,25 +1179,27 @@ python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib -
 
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is four reusable modules over the SDL2 calls above —
-ordinary `.vnt` files, imported like anything else:
+`examples/gamekit/` is five reusable modules over the SDL2 and SDL_ttf calls
+above — ordinary `.vnt` files, imported like anything else:
 
 | Module | Provides |
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
 | `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
+| `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
 
 Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
-  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `rand_*`);
-  several modules — and the game's own names — coexist.
+  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `font_*`,
+  `text_*`, `rand_*`); several modules — and the game's own names — coexist.
 - **Failures come back the way C reports them.** There is no nil literal,
   so `screen_open` returns a `Screen` carrying whatever the C calls
   returned — null handles when anything failed — and `screen_ok` is the
-  test to run once before the game loop.
+  test to run once before the game loop. `font_open` returns a `Font` the
+  same way, with `font_ok`.
 - **One shared scratch rect.** SDL wants a four-`i32` `SDL_Rect*`; allocate
   it once with `arena.alloc::<i32>(4)` and pass it to every `gfx_*` call.
 
@@ -1168,15 +1221,43 @@ true
 3
 ```
 
-Kit programs build like any other SDL2 program:
+`text.vnt` follows the same shape: `text_draw(screen, font, x, y, text,
+scratch, r, g, b)` renders one string with its top-left corner at `(x, y)`.
+The scratch block is ten `i32` slots — width, height, a source rect, a
+destination rect — so one `arena.alloc::<i32>(10)` covers `text_measure`
+and `text_draw` alike; `text_measure` fills `scratch[0]` (width) and
+`scratch[1]` (height), which is how text gets aligned. The kit ships a CC0
+font for examples, docs, and tests (`fonts/tom-thumb.ttf`), and `text_quit`
+is the shutdown call, after closing fonts:
 
-```powershell
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/text.vnt"
+
+func main() -> void:
+    let screen = screen_open("Vanta", 320, 240)
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
+    print_bool(screen_ok(screen) and font_ok(font))   # true on any working driver
+    font_close(font)
+    text_quit()
+    screen_close(screen)
 ```
 
-`examples/pong.vnt` is the worked example: it imports all four modules,
-serves with `match`, and stays testable headless — a frame-limit argument
-plus `SDL_VIDEODRIVER=dummy` is how the test suite runs it in CI.
+```
+true
+```
+
+Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
+well:
+
+```powershell
+python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+```
+
+`examples/pong.vnt` is the worked example: it imports all five modules,
+serves with `match`, draws its score with `text_draw`, and stays testable
+headless — a frame-limit argument plus `SDL_VIDEODRIVER=dummy` is how the
+test suite runs it in CI.
 
 ## File I/O (v0.3.1)
 

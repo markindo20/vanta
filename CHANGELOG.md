@@ -2,6 +2,38 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.18.0 — 2026-10-19
+
+- `ptr_offset(p, n)` moves a pointer `n` elements with its element type kept
+  (`p + n` in the generated C++). The offset must be an integer (`i32`;
+  narrow values promote) and may be negative; `ptr<void>` is rejected —
+  `cannot offset a ptr<void> (it has no element size); ptr_cast it to a
+  typed pointer first`. C out-parameters are the motivating case:
+  `TTF_SizeUTF8(font, text, &w, &h)` reaches its second slot with
+  `ptr_offset(scratch, 1)` instead of a second allocation.
+- Text rendering, through SDL_ttf. `examples/sdl_text.vnt` draws with the
+  raw C API — `TTF_Init` / `TTF_OpenFont`, `TTF_SizeUTF8`,
+  `TTF_RenderUTF8_Blended` into a texture, `SDL_RenderCopy` — with
+  `SDL_Color` declared as a Vanta struct of four `u8` channels passed to C
+  by value (the layout was verified against a C mirror).
+- The game kit gains `gamekit/text.vnt`: `font_open` / `font_ok` /
+  `font_close`, `text_measure` (writes width and height into a caller
+  scratch block), `text_draw(screen, font, x, y, text, scratch, r, g, b)`,
+  and `text_quit`. The scratch layout is 10 `i32` slots: `[0] w`, `[1] h`,
+  `[2..5]` source rect, `[6..9]` destination rect — one `arena.alloc`
+  covers measure and draw. A font that failed to open measures 0x0 and
+  draws nothing instead of crashing.
+- `examples/pong.vnt` now draws its score as text (the pip rectangles are
+  gone) and links `SDL2_ttf`; the headless run is unchanged
+  (`player 0 ai 5 frames 576`).
+- The kit ships a font: `examples/gamekit/fonts/tom-thumb.ttf`, a 3x5
+  pixel monospace face (CC0/CC-BY 3.0; credits in `fonts/LICENSE.md`), so
+  examples, docs, and CI depend on no system fonts.
+- CI installs SDL_ttf everywhere (`libsdl2-ttf-dev`, `sdl2_ttf`,
+  `mingw-w64-x86_64-SDL2_ttf`); the SDL_ttf tests skip when it is missing,
+  like the SDL2 tests. Examples: `ptr_offset.vnt`, `sdl_text.vnt`,
+  `gamekit/text.vnt`. 14 new tests (521 total).
+
 ## v0.17.0 — 2026-10-18
 
 - Narrow integers: `i8`, `u8`, `i16`, `u16`. They store their exact width —
