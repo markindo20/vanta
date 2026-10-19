@@ -3,9 +3,9 @@
 A hands-on introduction that builds from `print_str` to a small project — an
 ASCII terrain generator — and then leaves the terminal behind: the closing
 sections open a real window with SDL2, draw text, load sprite images and
-sound files, and end with a playable game. Every code block below is a
-complete program that was run to produce the output shown — copy it into a
-file with a `.vnt` extension and run it.
+sound files, poll a game controller, and end with a playable game. Every code
+block below is a complete program that was run to produce the output shown —
+copy it into a file with a `.vnt` extension and run it.
 
 **Prerequisites:** Python 3.10+ and a C++17 compiler (`g++`, `clang++`, or
 MSVC `cl`). See the Quick start in the [README](../README.md). The SDL2
@@ -668,14 +668,14 @@ and the rest of the API are documented in the reference's
 
 The SDL2 program above talks to C directly, and that never stops working —
 but wiring the window, the input events, and the rectangles by hand in every
-game gets old. The game kit (`examples/gamekit/`) does it once, as seven
+game gets old. The game kit (`examples/gamekit/`) does it once, as eight
 ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
 declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
-(reading events), `gfx.vnt` (rectangle drawing), `image.vnt` (textures, over
-SDL2_image), `text.vnt` (text, over SDL_ttf), `audio.vnt` (tones and WAV
-files, over SDL2's audio), and `rng.vnt` (bounded random numbers over the
-deterministic stream). A tiny demo — a square bouncing between the walls for
-60 frames:
+(reading events), `gamepad.vnt` (controllers, polled), `gfx.vnt` (rectangle
+drawing), `image.vnt` (textures, over SDL2_image), `text.vnt` (text, over
+SDL_ttf), `audio.vnt` (tones and WAV files, over SDL2's audio), and `rng.vnt`
+(bounded random numbers over the deterministic stream). A tiny demo — a
+square bouncing between the walls for 60 frames:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -719,8 +719,10 @@ four-`i32` scratch rectangle — that is the `SDL_Rect` SDL asks for.
 That is the whole kit: imports, prefixes, and C's own failure values.
 `examples/pong.vnt` puts it to work with two paddles, a tracking AI,
 `match` for the serve direction, a text score, and beeps;
-`examples/breakout.vnt` adds sprite images and sound files; the
-[reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140) lists every function.
+`examples/breakout.vnt` adds sprite images and sound files, and
+`examples/sdl_gamepad.vnt` shows the raw controller calls behind
+`gamepad.vnt`; the [reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140)
+lists every function.
 
 ## Text on screen
 
@@ -923,6 +925,55 @@ python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 ```
 
+## Gamepads
+
+Controllers are another kit import — `gamepad.vnt`, over SDL2's core library,
+so no companion library is needed. `pad_open` takes SDL's joystick index (0
+is the first controller) and returns a `Pad`; with no controller at that
+index the handle is dead, `pad_ok` is false, and every other call is a
+guarded no-op. That is the trick that keeps a game playable on a
+keyboard-only machine: poll the pad each frame and fall back to keys.
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/gamepad.vnt"
+
+func main() -> void:
+    let screen = screen_open("gamepads", 320, 240)
+    let pad = pad_open(9999)                  # out of range: the dead path
+    print_bool(pad_ok(pad))                   # false
+    print_bool(pad_attached(pad))             # false, guarded
+    print_bool(pad_button(pad, PAD_BUTTON_A)) # false, guarded
+    print_i32(pad_axis(pad, PAD_AXIS_LEFT_X)) # 0, guarded
+    pad_close(pad)                            # safe on a dead pad
+    screen_close(screen)
+```
+
+```
+false
+false
+false
+0
+```
+
+Three things to know. **The index is SDL's, not a count**: `pad_open(0)` is
+the first controller and 1 the second, so the snippet asks for 9999 to make
+its frozen output the dead path on every machine — change it to 0 to play
+with real hardware. **Axes are raw**: `pad_axis` returns SDL's `Sint16` —
+sticks span -32768..32767 with 0 at rest, triggers 0..32767 — so divide and
+apply your own deadzone. **Polling, not events**: `pad_button` reports the
+current state each frame; the event loop stays keyboard-focused, and
+`pad_attached` turns false when the pad is unplugged while the handle stays
+open.
+
+`examples/sdl_gamepad.vnt` is the raw version of the same calls — open by
+index, poll A, d-pad-left, the left stick, and the left trigger, close. With
+no controller it prints the dead path too:
+
+```powershell
+python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+```
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
@@ -934,4 +985,4 @@ python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link 
   alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (538 tests).
+- `python -m unittest discover -s tests` — run the test suite (540 tests).

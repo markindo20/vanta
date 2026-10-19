@@ -1103,15 +1103,18 @@ bytes.
 
 ## SDL2 and a window (v0.12.0)
 
-SDL2 is the worked example of `extern`. Five programs ship:
+SDL2 is the worked example of `extern`. Eight programs ship:
 `examples/sdl_window.vnt` opens a window and clears it to a colour;
-`examples/sdl_game.vnt` is the first playable Vanta game — move the paddle
-with Left/Right (or A/D) to catch falling coins; Esc or the close button
-quits — `examples/sdl_texture.vnt` loads image files as textures and proves
-its draws by reading the pixels back (SDL2_image), and
-`examples/sdl_sound.vnt` loads a WAV file and plays it. Every one of them
-talks to C only through `extern` declarations: no SDL headers are involved
-at compile time, only the library at link time:
+`examples/sdl_text.vnt` draws text (SDL_ttf); `examples/sdl_texture.vnt`
+loads image files as textures and proves its draws by reading the pixels
+back (SDL2_image); `examples/sdl_audio.vnt` and `examples/sdl_audio_cb.vnt`
+make sound (a queued tone, and a Vanta callback on SDL's audio thread);
+`examples/sdl_sound.vnt` loads a WAV file; `examples/sdl_gamepad.vnt` polls
+a game controller; and `examples/sdl_game.vnt` is the first playable Vanta
+game — move the paddle with Left/Right (or A/D) to catch falling coins; Esc
+or the close button quits. Every one of them talks to C only through
+`extern` declarations: no SDL headers are involved at compile time, only the
+library at link time:
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -1237,13 +1240,14 @@ two playable games, are built on the
 
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is seven reusable modules over the SDL2, SDL_ttf, and
+`examples/gamekit/` is eight reusable modules over the SDL2, SDL_ttf, and
 SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 
 | Module | Provides |
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
 | `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
+| `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open` / `pad_ok` / `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
@@ -1253,9 +1257,9 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
-  name is prefixed by its module (`screen_*`, `ev_*`, `gfx_*`, `tex_*`,
-  `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`); several modules — and
-  the game's own names — coexist.
+  name is prefixed by its module (`screen_*`, `ev_*`, `pad_*`, `gfx_*`,
+  `tex_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`); several
+  modules — and the game's own names — coexist.
 - **Failures come back the way C reports them.** There is still no nil
   literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
@@ -1398,9 +1402,37 @@ true
 5292 bytes
 ```
 
+`gamepad.vnt` next: `pad_open` takes SDL's joystick index (0 is the first
+controller) and starts SDL's gamecontroller subsystem; a missing or
+out-of-range controller comes back dead, so `pad_ok` is the test and every
+other call is a guarded no-op — the same shape as a dead `Screen`, `Tex`, or
+`Sound`. `pad_button` polls the current button state and `pad_axis` returns
+SDL's raw `Sint16` (sticks -32768..32767 with 0 at rest, triggers
+0..32767); the `PAD_BUTTON_*` / `PAD_AXIS_*` constants name the standard
+controls. `pad_close` closes the device and stops the subsystem, before
+`screen_close`'s `SDL_Quit`:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/gamepad.vnt"
+
+func main() -> void:
+    let pad = pad_open(9999)                       # an index no machine has
+    print_bool(pad_ok(pad))                        # dead handle
+    print_bool(pad_button(pad, PAD_BUTTON_A))      # guarded: false
+    print_i32(pad_axis(pad, PAD_AXIS_LEFT_X))      # guarded: 0
+    pad_close(pad)
+```
+
+```
+false
+false
+0
+```
+
 Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
-well, `image.vnt` links SDL2_image (`audio.vnt` needs nothing extra — audio
-is in SDL2's core library):
+well, `image.vnt` links SDL2_image (`audio.vnt` and `gamepad.vnt` need
+nothing extra — they use SDL2's core library):
 
 ```powershell
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
@@ -1408,9 +1440,9 @@ python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link 
 ```
 
 `examples/pong.vnt` is the worked example for the first game: it imports six
-of the modules (all but `image.vnt`), serves with `match`, draws its score
-with `text_draw`, beeps with `audio_play_tone`, and stays testable headless —
-a frame-limit argument plus `SDL_VIDEODRIVER=dummy` and
+of the modules (all but `image.vnt` and `gamepad.vnt`), serves with `match`,
+draws its score with `text_draw`, beeps with `audio_play_tone`, and stays
+testable headless — a frame-limit argument plus `SDL_VIDEODRIVER=dummy` and
 `SDL_AUDIODRIVER=dummy` is how the test suite runs it in CI.
 `examples/breakout.vnt` adds the satellite modules on top: a tinted sprite
 wall out of one white brick texture, WAV hits, and a deterministic

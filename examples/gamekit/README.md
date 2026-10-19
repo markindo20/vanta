@@ -1,6 +1,6 @@
 # Vanta game kit
 
-Seven importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
+Eight importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
 plumbing every game needs. They are ordinary `.vnt` files — the kit is a
 convention, not a language feature.
 
@@ -8,6 +8,7 @@ convention, not a language feature.
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, and the `Screen` lifecycle: `screen_open`, `screen_ok`, `screen_close` |
 | `input.vnt` | Event accessors: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
+| `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open`, `pad_ok`, `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | Rectangle drawing: `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image textures: `tex_load`, `tex_ok`, `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw`, `tex_draw_src`, `tex_draw_ex` |
 | `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_quit` |
@@ -138,9 +139,40 @@ true
 5292 bytes
 ```
 
+Controllers are another import — `gamepad.vnt` over SDL2's core library, so
+no extra library either. `pad_open` takes SDL's joystick index (0 is the
+first controller) and starts the gamecontroller subsystem; a missing or
+out-of-range controller opens dead, so `pad_ok` is the test and every other
+call is a guarded no-op. `pad_button` polls the current button state,
+`pad_axis` returns SDL's raw `Sint16` (sticks -32768..32767 with 0 at rest,
+triggers 0..32767), and `pad_attached` turns false when the pad is
+unplugged. `pad_close` stops the subsystem again, before `screen_close`'s
+`SDL_Quit`. The snippet asks for an index no machine has, so it shows the
+dead path:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/gamepad.vnt"
+
+func main() -> void:
+    let pad = pad_open(9999)
+    print_bool(pad_ok(pad))                   # false on every machine
+    print_bool(pad_attached(pad))             # guarded
+    print_bool(pad_button(pad, PAD_BUTTON_A)) # guarded
+    print_i32(pad_axis(pad, PAD_AXIS_LEFT_X)) # guarded
+    pad_close(pad)
+```
+
+```
+false
+false
+false
+0
+```
+
 Build it like any SDL2 program — `text.vnt` links SDL_ttf and `image.vnt`
-links SDL2_image as well as SDL2, and `audio.vnt` needs nothing beyond the
-core library:
+links SDL2_image as well as SDL2, and `audio.vnt` and `gamepad.vnt` need
+nothing beyond the core library:
 
 ```powershell
 python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
@@ -149,9 +181,9 @@ python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --
 Notes:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
-  name starts with its module's prefix (`screen_*`, `ev_*`, `gfx_*`,
-  `tex_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`). Several
-  modules — and the game's own names — coexist.
+  name starts with its module's prefix (`screen_*`, `ev_*`, `pad_*`,
+  `gfx_*`, `tex_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`).
+  Several modules — and the game's own names — coexist.
 - **`Screen` carries whatever C returned.** There is no nil literal —
   `ptr_null::<T>()` builds one explicitly where C asks for NULL —
   and `screen_open` hands back null handles when anything fails, with
@@ -173,13 +205,18 @@ Notes:
   buffer SDL allocates; `sound_free` hands it back. Any other rate,
   sample format, or channel count loads as a dead `Sound`, and playing
   or freeing one is a no-op.
+- **Controllers are polled, not events.** `pad_button` reports the state
+  each frame instead of subscribing to SDL's controller events, so the
+  event loop stays keyboard-focused. The index is SDL's joystick index, not
+  a count; a dead `Pad` makes every call a no-op, and `pad_attached` is the
+  unplug check while the handle stays open.
 - **Headless runs are first-class.** With `SDL_VIDEODRIVER=dummy` and
   `SDL_AUDIODRIVER=dummy` plus a frame limit, kit programs run in CI (the
   fixed RNG stream keeps results reproducible, and the dummy audio driver
   plays to nowhere in real time).
 
 [`../pong.vnt`](../pong.vnt) and [`../breakout.vnt`](../breakout.vnt) are the
-worked examples: pong imports six of the seven modules, draws its score with
+worked examples: pong imports six of the eight modules, draws its score with
 `text_draw`, and beeps with `audio_play_tone`; breakout loads the ball,
 paddle, and bricks from image files with `image.vnt` and fires WAV hits with
 `sound_load`.
