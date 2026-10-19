@@ -699,6 +699,25 @@ class CodegenTests(unittest.TestCase):
                   "    q[0] = 1\n")
         self.assertIn('((v_p) + (2))', cpp)
 
+    # ---------- ptr_null (v0.19.0) ----------
+
+    def test_ptr_null_emit(self):
+        cpp = gen("func f() -> void:\n"
+                  "    let p = ptr_null::<i32>()\n"
+                  "    print_bool(ptr_is_null(p))\n")
+        self.assertIn('int32_t* v_p = nullptr;', cpp)
+
+    def test_ptr_null_func_field_emit(self):
+        # A func-typed struct field is a C function pointer, and ptr_null
+        # fills it with nullptr — the shape SDL_AudioSpec's callback needs.
+        cpp = gen("struct S:\n"
+                  "    cb: func(i32) -> i32\n"
+                  "func f() -> void:\n"
+                  "    let s = S(cb: ptr_null::<func(i32) -> i32>())\n")
+        self.assertIn('using FnPtr0 = int32_t(*)(int32_t);', cpp)
+        self.assertIn('FnPtr0 v_cb;', cpp)
+        self.assertIn('S{nullptr}', cpp)
+
     # ---------- enums in extern (v0.17.0) ----------
 
     def test_extern_enum_emit(self):

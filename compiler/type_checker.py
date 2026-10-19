@@ -566,7 +566,7 @@ class TypeChecker:
                 expr.type = ent[0]
                 return ent[0]
             if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32',
-                             'ptr_is_null', 'ptr_cast', 'ptr_offset'):
+                             'ptr_is_null', 'ptr_cast', 'ptr_offset', 'ptr_null'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
@@ -873,6 +873,8 @@ class TypeChecker:
                 return self._check_ptr_cast(call)
             if name == 'ptr_offset':
                 return self._check_ptr_offset(call)
+            if name == 'ptr_null':
+                return self._check_ptr_null(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.structs:
@@ -1029,6 +1031,21 @@ class TypeChecker:
         it = self._check_expr(call.args[1])
         self._coerce_value(call.args[1], it, I32, call.pos, "offset")
         t = PtrType(at.inner)
+        call.type = t
+        return t
+
+    def _check_ptr_null(self, call: A.Call) -> Type:
+        if not call.type_args or len(call.type_args) != 1:
+            raise CheckError("ptr_null requires a type argument: ptr_null::<T>()",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("ptr_null does not accept named arguments",
+                             self.filename, call.pos)
+        if call.args:
+            raise CheckError(f"ptr_null takes no arguments, got {len(call.args)}",
+                             self.filename, call.pos)
+        inner = self._resolve_type(call.type_args[0])
+        t = inner if isinstance(inner, FuncType) else PtrType(inner)
         call.type = t
         return t
 

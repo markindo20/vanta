@@ -1,0 +1,81 @@
+# Vanta + SDL2: let SDL call a Vanta function to make the sound.
+#
+#   python main.py run examples/sdl_audio_cb.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# Instead of the queue API, this example puts a Vanta function into the
+# SDL_AudioSpec's callback field. SDL runs it on its audio thread once per
+# buffer: the function writes a 440 Hz square wave straight into the
+# stream C hands it. Callbacks are plain function pointers — no closures —
+# so the state the callback needs (how often it ran, and the sample rate)
+# travels through the userdata pointer, pointing into the arena.
+#
+# The program plays for 300 ms and reports booleans only: how many times
+# the callback runs depends on the machine and the driver.
+
+struct SDL_AudioSpec:
+    freq: i32
+    format: u16
+    channels: u8
+    silence: u8
+    samples: u16
+    padding: u16
+    size: u32
+    callback: func(ptr<void>, ptr<u8>, i32)
+    userdata: ptr<void>
+
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_OpenAudioDevice(device: ptr<u8>, iscapture: i32, desired: ptr<SDL_AudioSpec>,
+                             obtained: ptr<SDL_AudioSpec>, allowed_changes: i32) -> u32
+    func SDL_PauseAudioDevice(dev: u32, pause_on: i32) -> void
+    func SDL_CloseAudioDevice(dev: u32) -> void
+    func SDL_Delay(ms: u32) -> void
+}
+
+const SDL_INIT_AUDIO: u32 = 16
+const AUDIO_S16SYS: u16 = 32784    # AUDIO_S16SYS, 0x8010, on little-endian hosts
+
+# state[0] counts callback runs; state[1] is the device's sample rate,
+# which main writes once the device is open.
+func tone_cb(userdata: ptr<void>, stream: ptr<u8>, length: i32):
+    let state = ptr_cast::<i32>(userdata)
+    state[0] += 1
+    let samples = ptr_cast::<i16>(stream)
+    let period = state[1] / 440
+    for i in range(0, length / 2):
+        if (i / period) % 2 == 1:
+            samples[i] = -8000
+        else:
+            samples[i] = 8000
+
+func main() -> void:
+    if SDL_Init(SDL_INIT_AUDIO) != 0:
+        print_str("SDL_Init failed")
+        return
+    let arena = Arena(256)
+    let state = arena.alloc::<i32>(2)
+    state[0] = 0
+    state[1] = 44100
+    let desired = arena.alloc::<SDL_AudioSpec>(1)
+    let obtained = arena.alloc::<SDL_AudioSpec>(1)
+    desired[0] = SDL_AudioSpec(
+        freq: 44100, format: AUDIO_S16SYS, channels: 1, silence: 0,
+        samples: 1024, padding: 0, size: 0,
+        callback: tone_cb, userdata: state)
+    let dev = SDL_OpenAudioDevice(ptr_null::<u8>(), 0, desired, obtained, 0)
+    print_fmt("opened {}", dev != 0)
+    if dev == 0:
+        print_str("SDL_OpenAudioDevice failed")
+        SDL_Quit()
+        return
+    state[1] = obtained[0].freq
+
+    SDL_PauseAudioDevice(dev, 0)       # devices start out paused
+    SDL_Delay(300)
+    SDL_PauseAudioDevice(dev, 1)       # blocks until the callback stops
+    print_fmt("callbacks ran {}", state[0] > 0)
+    print_fmt("samples per call {}", obtained[0].samples)
+
+    SDL_CloseAudioDevice(dev)
+    SDL_Quit()

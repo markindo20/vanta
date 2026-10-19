@@ -2,15 +2,17 @@
 #
 # Left paddle: W/S or Up/Down. Esc or the close button quits. The right
 # paddle is a simple AI: it tracks the ball while the ball is incoming and
-# drifts back to the middle otherwise. First to 5 points wins.
+# drifts back to the middle otherwise. First to 5 points wins. Paddle hits
+# and points beep through the kit's audio module — silent when no audio
+# device is available.
 #
 # The game runs without a display: an optional frame limit on the command
 # line ends it early, and with no input the AI keeps scoring, so the final
 # score is reproducible — the test suite freezes it.
 #
 # Usage (Windows with MSYS2; any platform with SDL2 and SDL_ttf works).
-# Pong draws its score with the game kit's text module, so it links two
-# libraries:
+# Pong draws its score with the game kit's text module and beeps with its
+# audio module, so it links two libraries:
 #   python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 #   python main.py run examples/pong.vnt 900 --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 
@@ -18,6 +20,7 @@ import "gamekit/sdl.vnt"
 import "gamekit/input.vnt"
 import "gamekit/gfx.vnt"
 import "gamekit/text.vnt"
+import "gamekit/audio.vnt"
 import "gamekit/rng.vnt"
 
 const WIN_W: i32 = 640
@@ -33,6 +36,7 @@ const AI_DEADZONE: f32 = 6.0
 const BALL_VX_MAX: f32 = 9.0
 const BALL_VY_MAX: f32 = 7.5
 const WIN_SCORE: i32 = 5
+const BEEP_CAP: i32 = 11025        # tone buffer: 250 ms at 44.1 kHz
 
 enum Side:
     Left
@@ -66,11 +70,13 @@ func main() -> void:
         print_str("vanta: could not open a window and renderer")
         screen_close(screen)
         return
-    let arena = Arena(512)
+    let arena = Arena(32768)
     let ev = arena.alloc::<i32>(16)          # room for one SDL_Event
     let rect = arena.alloc::<i32>(4)         # an SDL_Rect: x, y, w, h
     let scratch = arena.alloc::<i32>(10)     # text_measure/text_draw scratch
+    let tonebuf = arena.alloc::<i16>(BEEP_CAP)   # samples for one beep
     let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
+    let audio = audio_open()
 
     mut frames = 0
     mut max_frames = 0
@@ -130,6 +136,7 @@ func main() -> void:
             ball.vx = min_f32(BALL_VX_MAX, -ball.vx * 1.03)
             ball.vy += (ball.y + 6.0 - (py + 40.0)) * 0.12
             ball.vy = max_f32(-BALL_VY_MAX, min_f32(ball.vy, BALL_VY_MAX))
+            audio_play_tone(audio, 880, 40, tonebuf, BEEP_CAP)
 
         # The AI paddle: chase the ball while it is incoming, drift back to
         # the middle otherwise. A dead zone keeps it from jittering.
@@ -147,12 +154,17 @@ func main() -> void:
             ball.vx = max_f32(-BALL_VX_MAX, -ball.vx * 1.03)
             ball.vy += (ball.y + 6.0 - (ay + 40.0)) * 0.12
             ball.vy = max_f32(-BALL_VY_MAX, min_f32(ball.vy, BALL_VY_MAX))
+            audio_play_tone(audio, 660, 40, tonebuf, BEEP_CAP)
 
-        # Scoring: the side that lost the point gets the next serve.
+        # Scoring: the side that lost the point gets the next serve, and
+        # the point plays a beep — low when the player misses, high when
+        # the AI does.
         if ball.x + 12.0 < 0.0:
+            audio_play_tone(audio, 392, 140, tonebuf, BEEP_CAP)
             score_a += 1
             ball = serve(Side.Left)
         elif ball.x > 640.0:
+            audio_play_tone(audio, 1046, 140, tonebuf, BEEP_CAP)
             score_p += 1
             ball = serve(Side.Right)
 
@@ -181,5 +193,6 @@ func main() -> void:
 
     font_close(font)
     text_quit()
+    audio_close(audio)
     screen_close(screen)
     print_fmt("player {} ai {} frames {}", score_p, score_a, frames)

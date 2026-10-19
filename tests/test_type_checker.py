@@ -1931,6 +1931,45 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_offset' as a value"):
             run("func f() -> void:\n    let q = ptr_offset\n")
 
+    # ---------- ptr_null (v0.19.0) ----------
+
+    def test_ptr_null_ok(self):
+        run("func f() -> void:\n"
+            "    let a = ptr_null::<i32>()\n"
+            "    let b = ptr_null::<void>()\n"
+            "    let c: ptr<f32> = ptr_null::<f32>()\n"
+            "    let d = ptr_null::<Vec2>()\n")
+
+    def test_ptr_null_nested_pointer_ok(self):
+        run("func f() -> void:\n"
+            "    let pp = ptr_null::<ptr<i32>>()\n")
+
+    def test_ptr_null_func_type_ok(self):
+        # A null of a function type: the empty callback slot a queue-mode
+        # device passes to C.
+        run("struct S:\n"
+            "    cb: func(i32) -> i32\n"
+            "    n: i32\n"
+            "func f() -> void:\n"
+            "    let s = S(cb: ptr_null::<func(i32) -> i32>(), n: 1)\n")
+
+    def test_ptr_null_requires_type_argument(self):
+        with self.assertRaisesRegex(
+                CheckError, r"ptr_null requires a type argument: ptr_null::<T>\(\)"):
+            run("func f() -> void:\n    let p = ptr_null()\n")
+
+    def test_ptr_null_arity(self):
+        with self.assertRaisesRegex(CheckError, "ptr_null takes no arguments, got 1"):
+            run("func f() -> void:\n    let p = ptr_null::<i32>(5)\n")
+
+    def test_ptr_null_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_null does not accept named arguments"):
+            run("func f() -> void:\n    let p = ptr_null::<i32>(x: 1)\n")
+
+    def test_ptr_null_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_null' as a value"):
+            run("func f() -> void:\n    let p = ptr_null\n")
+
     # ---------- for-each (v0.17.0) ----------
 
     def test_foreach_list_ok(self):

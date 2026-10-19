@@ -1,0 +1,126 @@
+# gamekit/audio.vnt — SDL2 audio for gamekit programs: fire-and-forget tones.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/audio.vnt"
+#
+# Link SDL2 only — audio is part of the core library, and the kit ships no
+# sound files: tones are generated, so nothing is loaded from disk.
+#
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+#
+# audio_play_tone turns a frequency and a duration into a square wave and
+# queues it on the device, then returns at once: SDL plays it in the
+# background, and audio_wait blocks until it has been played. The caller
+# supplies the sample buffer and its capacity, so the kit never allocates
+# per tone. Close with audio_close, before screen_close's SDL_Quit.
+
+import "sdl.vnt"
+
+# SDL_AudioSpec, spelled out field by field: the same bytes, in the same
+# order, that SDL declares. callback keeps its C function-pointer type, so
+# a Vanta function can sit there (a callback-mode device); the queue API
+# wants it null instead. (Extern signatures name it, so it comes before
+# the extern blocks.)
+struct SDL_AudioSpec:
+    freq: i32
+    format: u16
+    channels: u8
+    silence: u8
+    samples: u16
+    padding: u16
+    size: u32
+    callback: func(ptr<void>, ptr<u8>, i32)
+    userdata: ptr<void>
+
+extern "sdl2" {
+    func SDL_OpenAudioDevice(device: ptr<u8>, iscapture: i32, desired: ptr<SDL_AudioSpec>,
+                             obtained: ptr<SDL_AudioSpec>, allowed_changes: i32) -> u32
+    # SDL declares the byte count as Uint32; Vanta works in i32 and a
+    # queued tone never comes near 2 GiB, so the declaration says i32.
+    func SDL_QueueAudio(dev: u32, data: ptr<void>, len: i32) -> i32
+    func SDL_GetQueuedAudioSize(dev: u32) -> u32
+    func SDL_PauseAudioDevice(dev: u32, pause_on: i32) -> void
+    func SDL_CloseAudioDevice(dev: u32) -> void
+    func SDL_Delay(ms: u32) -> void
+}
+
+const SDL_INIT_AUDIO: u32 = 16
+const AUDIO_S16SYS: u16 = 32784    # AUDIO_S16SYS, 0x8010, on little-endian hosts
+const TONE_LEVEL: i16 = 8000       # square-wave amplitude: a quarter of i16 range
+const TONE_CAP_MS: i32 = 10000     # audio_play_tone caps longer durations here
+
+struct Audio:
+    dev: u32
+    rate: i32
+
+func audio_open() -> Audio:
+    # Like screen_open: SDL_Init reports failure by return code and the
+    # device id comes straight back from C — 0 means "no sound", and every
+    # other audio function then quietly does nothing. The desired spec is
+    # transient (SDL copies it during the call), so it lives on a small
+    # local arena that is freed when this function returns. The callback
+    # is null: this module plays through the queue API.
+    SDL_Init(SDL_INIT_AUDIO)
+    let scratch = Arena(128)
+    let desired = scratch.alloc::<SDL_AudioSpec>(1)
+    let obtained = scratch.alloc::<SDL_AudioSpec>(1)
+    desired[0] = SDL_AudioSpec(
+        freq: 44100, format: AUDIO_S16SYS, channels: 1, silence: 0,
+        samples: 1024, padding: 0, size: 0,
+        callback: ptr_null::<func(ptr<void>, ptr<u8>, i32)>(),
+        userdata: ptr_null::<void>())
+    let dev = SDL_OpenAudioDevice(ptr_null::<u8>(), 0, desired, obtained, 0)
+    if dev == 0:
+        return Audio(dev: 0, rate: 0)
+    SDL_PauseAudioDevice(dev, 0)       # devices start out paused
+    return Audio(dev: dev, rate: obtained[0].freq)
+
+func audio_ok(a: Audio) -> bool:
+    return a.dev != 0
+
+func audio_pending(a: Audio) -> u32:
+    # Bytes queued on the device and not yet played; 0 when it is quiet.
+    if a.dev == 0:
+        return 0
+    return SDL_GetQueuedAudioSize(a.dev)
+
+func audio_play_tone(a: Audio, freq: i32, ms: i32, buf: ptr<i16>, capacity: i32) -> i32:
+    # Fill buf with a square wave at freq Hz for ms milliseconds and queue
+    # it. buf holds capacity samples: a longer tone is cut short, and a
+    # duration past TONE_CAP_MS is capped so the sample count stays in i32
+    # range. Returns the samples queued — 0 for a dead device, nonsense
+    # values, or an SDL error.
+    if not audio_ok(a):
+        return 0
+    if freq < 1 or ms < 1 or capacity < 1:
+        return 0
+    mut span = ms
+    if span > TONE_CAP_MS:
+        span = TONE_CAP_MS
+    mut n = a.rate * span / 1000
+    if n > capacity:
+        n = capacity
+    mut period = a.rate / freq
+    if period < 2:
+        period = 2
+    for i in range(0, n):
+        if (i / period) % 2 == 1:
+            buf[i] = -TONE_LEVEL
+        else:
+            buf[i] = TONE_LEVEL
+    if SDL_QueueAudio(a.dev, buf, n * 2) != 0:
+        return 0
+    return n
+
+func audio_wait(a: Audio) -> void:
+    # Block until the queued audio has played, with a ~5 s backstop in
+    # case a device stops consuming.
+    mut guard = 0
+    while audio_pending(a) > 0 and guard < 1000:
+        SDL_Delay(5)
+        guard += 1
+
+func audio_close(a: Audio) -> void:
+    # Call before screen_close; whatever is still queued is dropped.
+    if a.dev != 0:
+        SDL_CloseAudioDevice(a.dev)

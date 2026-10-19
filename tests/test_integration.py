@@ -1238,7 +1238,8 @@ class IntegrationTests(unittest.TestCase):
         # Pure frontend: needs no SDL2 at all, so it runs everywhere.
         # pong.vnt imports every gamekit module, so this also type-checks
         # the kit's extern declarations.
-        for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'pong.vnt'):
+        for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'sdl_audio.vnt',
+                   'sdl_audio_cb.vnt', 'pong.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1270,15 +1271,17 @@ class IntegrationTests(unittest.TestCase):
     @unittest.skipUnless(SDL2_TTF, "SDL2_ttf not found")
     def test_pong_headless(self):
         # The second game, built on the game kit, now drawing its score with
-        # the text module, so it links SDL2_ttf as well. With no input under
-        # the dummy driver the AI takes every point, and the whole run is
-        # reproducible: the AI wins 5-0 in frame 576, well before the frame
-        # cap, so the cap never fires — it is only the backstop.
+        # the text module and beeping with the audio module, so it links
+        # SDL2_ttf as well. With no input under the dummy drivers the AI
+        # takes every point, and the whole run is reproducible: the AI wins
+        # 5-0 in frame 576, well before the frame cap, so the cap never
+        # fires — it is only the backstop.
         tmp = tempfile.mkdtemp(prefix='vanta_pong_')
         try:
             exe = self._build_sdl(os.path.join(EXAMPLES, 'pong.vnt'), tmp,
                                   cfg=SDL2_TTF)
-            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy',
+                       SDL_AUDIODRIVER='dummy')
             r = subprocess.run([exe, '3000'], capture_output=True, text=True,
                                env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
@@ -1301,6 +1304,84 @@ class IntegrationTests(unittest.TestCase):
                                env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(), ['frames 120'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_audio_headless(self):
+        # The raw queue-mode example: build an SDL_AudioSpec by hand with a
+        # null callback, queue a synthesized 440 Hz tone, and let the dummy
+        # audio driver play it out in real time. The obtained spec is the
+        # requested one on every driver, so the values are safe to freeze.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlaudio_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_audio.vnt'), tmp)
+            env = dict(os.environ, SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['opened true', 'rate 44100 channels 1',
+                              'queued true', 'drained true'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_audio_callback_headless(self):
+        # The callback-mode example: a Vanta function lives inside the
+        # SDL_AudioSpec and SDL runs it on its audio thread. Only booleans
+        # are frozen — how many times the callback runs depends on the
+        # machine; the samples per call are the requested buffer.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdlcbaudio_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_audio_cb.vnt'), tmp)
+            env = dict(os.environ, SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['opened true', 'callbacks ran true',
+                              'samples per call 1024'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_gamekit_audio(self):
+        # gamekit/audio.vnt: the copy puts the relative imports where the
+        # probe program can reach them. The probe opens the device, queues
+        # a tone and waits for the dummy driver to play it out, then walks
+        # the guards: a nonsense frequency queues nothing, and a tone
+        # longer than the caller's buffer is cut to its capacity. 3528
+        # samples is exactly 80 ms at 44.1 kHz.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitaudio_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/audio.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let audio = audio_open()\n'
+                        '    print_bool(audio_ok(audio))\n'
+                        '    if not audio_ok(audio):\n'
+                        '        return\n'
+                        '    print_i32(audio.rate)\n'
+                        '    let arena = Arena(32768)\n'
+                        '    let buf = arena.alloc::<i16>(11025)\n'
+                        '    print_i32(audio_play_tone(audio, 880, 80, buf, 11025))\n'
+                        '    print_bool(audio_pending(audio) > 0)\n'
+                        '    audio_wait(audio)\n'
+                        '    print_bool(audio_pending(audio) == 0)\n'
+                        '    print_i32(audio_play_tone(audio, 0, 50, buf, 11025))\n'
+                        '    print_i32(audio_play_tone(audio, 880, 80, buf, 100))\n'
+                        '    audio_wait(audio)\n'
+                        '    audio_close(audio)\n')
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', '44100', '3528', 'true', 'true',
+                              '0', '100'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

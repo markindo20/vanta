@@ -691,6 +691,8 @@ class CodeGen:
                         f'({self._expr(c.args[0])})')
             if name == 'ptr_offset':
                 return f'(({self._expr(c.args[0])}) + ({self._expr(c.args[1])}))'
+            if name == 'ptr_null':
+                return 'nullptr'
             if name in BUILTIN_MATH_CTOR:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{BUILTIN_MATH_CTOR[name]}({args})'

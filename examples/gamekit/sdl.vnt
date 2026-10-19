@@ -2,18 +2,21 @@
 #
 # The kit is ordinary Vanta files: import the modules a game needs.
 # Because Vanta has one flat namespace, every kit name is prefixed by its
-# module (SDL_*, screen_*, ev_*, gfx_*, rand_*), so the modules coexist
-# with each other and with a game's own names.
+# module (SDL_*, screen_*, ev_*, gfx_*, font_*, text_*, audio_*, rand_*),
+# so the modules coexist with each other and with a game's own names.
 #
 #   import "gamekit/sdl.vnt"
 #   import "gamekit/input.vnt"
 #   import "gamekit/gfx.vnt"
+#   import "gamekit/text.vnt"
+#   import "gamekit/audio.vnt"
 #   import "gamekit/rng.vnt"
 #
-# Build with the SDL2 library, e.g. on Windows with MSYS2:
+# Build with the SDL2 library, e.g. on Windows with MSYS2 (text.vnt pulls in
+# SDL_ttf as well; audio is part of SDL2 itself):
 #   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 #
-# examples/pong.vnt is a complete game built on these four modules.
+# examples/pong.vnt is a complete game built on the kit.
 
 extern "sdl2" {
     func SDL_Init(flags: u32) -> i32
