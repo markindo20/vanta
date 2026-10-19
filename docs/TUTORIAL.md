@@ -668,14 +668,15 @@ and the rest of the API are documented in the reference's
 
 The SDL2 program above talks to C directly, and that never stops working —
 but wiring the window, the input events, and the rectangles by hand in every
-game gets old. The game kit (`examples/gamekit/`) does it once, as eight
+game gets old. The game kit (`examples/gamekit/`) does it once, as nine
 ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
 declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
 (reading events), `gamepad.vnt` (controllers, polled), `gfx.vnt` (rectangle
-drawing), `image.vnt` (textures, over SDL2_image), `text.vnt` (text, over
-SDL_ttf), `audio.vnt` (tones and WAV files, over SDL2's audio), and `rng.vnt`
-(bounded random numbers over the deterministic stream). A tiny demo — a
-square bouncing between the walls for 60 frames:
+drawing), `image.vnt` (textures, over SDL2_image), `anim.vnt` (sprite-sheet
+animation), `text.vnt` (text, over SDL_ttf), `audio.vnt` (tones and WAV
+files, over SDL2's audio), and `rng.vnt` (bounded random numbers over the
+deterministic stream). A tiny demo — a square bouncing between the walls for
+60 frames:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -719,7 +720,8 @@ four-`i32` scratch rectangle — that is the `SDL_Rect` SDL asks for.
 That is the whole kit: imports, prefixes, and C's own failure values.
 `examples/pong.vnt` puts it to work with two paddles, a tracking AI,
 `match` for the serve direction, a text score, and beeps;
-`examples/breakout.vnt` adds sprite images and sound files, and
+`examples/breakout.vnt` adds sprite images, an animated ball, and sound
+files, and
 `examples/sdl_gamepad.vnt` shows the raw controller calls behind
 `gamepad.vnt`; the [reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140)
 lists every function.
@@ -836,6 +838,56 @@ arena, because SDL copies them during the call.
 
 `examples/breakout.vnt` is the worked example — a tinted sprite wall, a ball,
 and a paddle:
+
+```powershell
+python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+```
+
+## Animated sprites
+
+A sprite sheet plays back as a strip of equal frames. `anim.vnt` is the
+frame clock over `tex_draw_src` that the sprites section left by hand:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/image.vnt"
+import "gamekit/anim.vnt"
+
+func main() -> void:
+    let screen = screen_open("animation", 96, 32)
+    let spin = tex_load(screen, "examples/assets/ball_spin.png")   # 4 frames
+    print_bool(screen_ok(screen) and tex_ok(spin))   # true on any working driver
+    mut anim = anim_new(4, 10, 10, 8.0)              # 4 frames, 10x10, 8 fps
+    for i in range(0, 6):
+        anim = anim_tick(anim, 0.125)                # advance by 1/8 second
+        anim_draw(screen, spin, anim, 4 + i * 14, 4)
+        print_i32(anim_frame(anim))
+    tex_free(spin)
+    screen_close(screen)
+```
+
+```
+true
+1
+2
+3
+0
+1
+2
+```
+
+`anim_tick` returns the updated clock — `anim = anim_tick(anim, dt)` is the
+idiom, because structs are values — and the frame wraps, so the animation
+loops. The step is the game's to choose: pass the frame time from your own
+loop, as breakout does with a fixed 1/60 s so its headless run cannot
+drift, or any exact amount when you want repeatable numbers like the ones
+above. `anim_new` describes the strip (frame count, frame size, frames per
+second); `anim_draw` blits the current frame under whatever tint the
+texture carries. Nothing reads a wall clock, and a dead texture or an empty
+strip (zero frames) draws nothing.
+
+`examples/breakout.vnt` now spins its ball from `ball_spin.png`, the sheet
+the assets script generates beside the static ball:
 
 ```powershell
 python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
@@ -985,4 +1037,4 @@ python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --li
   alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (540 tests).
+- `python -m unittest discover -s tests` — run the test suite (541 tests).

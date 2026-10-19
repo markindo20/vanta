@@ -1,6 +1,6 @@
 # Vanta game kit
 
-Eight importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
+Nine importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
 plumbing every game needs. They are ordinary `.vnt` files — the kit is a
 convention, not a language feature.
 
@@ -11,6 +11,7 @@ convention, not a language feature.
 | `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open`, `pad_ok`, `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | Rectangle drawing: `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image textures: `tex_load`, `tex_ok`, `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw`, `tex_draw_src`, `tex_draw_ex` |
+| `anim.vnt` | Sprite-sheet animation: `anim_new`, `anim_tick`, `anim_frame`, `anim_draw` |
 | `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_quit` |
 | `audio.vnt` | SDL2 audio: tones — `audio_open`, `audio_ok`, `audio_play_tone`, `audio_pending`, `audio_wait`, `audio_close` — and WAV files: `sound_load`, `sound_ok`, `sound_play`, `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` — bounded helpers over the deterministic stream |
@@ -94,6 +95,39 @@ func main() -> void:
 ```
 true
 32x14
+```
+
+Animation is one more import — `anim.vnt` is a frame clock over
+`tex_draw_src`. `anim_new` describes a horizontal strip (frame count, frame
+size, frames per second), `anim_tick` advances the clock by the time the
+game hands it and returns the updated clock (structs are values), and
+`anim_draw` blits the current frame. The frame wraps, so the animation
+loops, and a dead `Tex` or an empty strip draws nothing:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/image.vnt"
+import "gamekit/anim.vnt"
+
+func main() -> void:
+    let screen = screen_open("gamekit", 320, 240)
+    let spin = tex_load(screen, "examples/assets/ball_spin.png")
+    print_bool(screen_ok(screen) and tex_ok(spin))
+    mut anim = anim_new(4, 10, 10, 8.0)              # 4 frames, 10x10, 8 fps
+    for i in range(0, 4):
+        anim = anim_tick(anim, 0.125)                # 1/8 s: one frame per tick
+        anim_draw(screen, spin, anim, 40 + i * 14, 40)
+        print_i32(anim_frame(anim))
+    tex_free(spin)
+    screen_close(screen)
+```
+
+```
+true
+1
+2
+3
+0
 ```
 
 Sound is another import — `audio.vnt` over SDL2's own audio, with no extra

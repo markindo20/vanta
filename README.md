@@ -69,13 +69,13 @@ tone, and a Vanta callback on SDL's audio thread), `examples/sdl_sound.vnt`
 loads a WAV file, `examples/sdl_gamepad.vnt` polls a game controller, and
 `examples/sdl_game.vnt` is the first playable Vanta game — catch the falling
 coins with Left/Right (or A/D), Esc or the close button quits. The game kit
-(`examples/gamekit/`) packages the SDL2 plumbing as eight importable modules,
+(`examples/gamekit/`) packages the SDL2 plumbing as nine importable modules,
 and `examples/pong.vnt` and `examples/breakout.vnt` are the second and third
 playable games built on it:
 pong is W/S or Up/Down against a tracking AI, first to 5 wins, with the score
 drawn as text and a beep on every hit and point; breakout is a wall of
-tinted sprites, a tracking paddle, and WAV hits, and with no key held the
-paddle plays its own demo.
+tinted sprites, a spinning animated ball, a tracking paddle, and WAV hits,
+and with no key held the paddle plays its own demo.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -103,7 +103,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (540 tests) |
+| `tests/` | `unittest` suite (541 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -144,9 +144,9 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `sdl_sound.vnt` | SDL2 audio, files: `SDL_LoadWAV_RW` over `SDL_RWFromFile`, queued and drained |
 | `sdl_gamepad.vnt` | SDL2 controllers: `SDL_GameControllerOpen`, button/axis polling, the dead-handle path |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
-| `gamekit/` | Eight reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), text (SDL_ttf), audio (tones and WAV files), random numbers |
+| `gamekit/` | Nine reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), sprite animation, text (SDL_ttf), audio (tones and WAV files), random numbers |
 | `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |
-| `breakout.vnt` | The third playable game: tinted sprite wall, auto-playing paddle, WAV hits — built on the game kit |
+| `breakout.vnt` | The third playable game: tinted sprite wall, animated ball, auto-playing paddle, WAV hits — built on the game kit |
 
 ## Tests
 
@@ -182,7 +182,8 @@ compare structs field by field with `==`, reinterpret pointers with
 explicit nulls with `ptr_null::<T>()`,
 assemble strings with `StrBuilder`, name states and modes with enums and
 branch on them exhaustively with `match`, and build and run real SDL2 games
-on the game kit, text rendering, sprite images, and WAV sound files included
+on the game kit, text rendering, sprite images, sprite-sheet animation, and
+WAV sound files included
 (eight SDL examples, three of them playable games) — but the remaining gaps
 are real:
 

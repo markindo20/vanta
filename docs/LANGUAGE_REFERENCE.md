@@ -1240,7 +1240,7 @@ two playable games, are built on the
 
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is eight reusable modules over the SDL2, SDL_ttf, and
+`examples/gamekit/` is nine reusable modules over the SDL2, SDL_ttf, and
 SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 
 | Module | Provides |
@@ -1250,6 +1250,7 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 | `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open` / `pad_ok` / `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
+| `anim.vnt` | Sprite-sheet animation: `Anim`, `anim_new` / `anim_tick` / `anim_frame` / `anim_draw` |
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`, `text_quit` |
 | `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_ok` / `sound_play` / `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
@@ -1258,8 +1259,8 @@ Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
   name is prefixed by its module (`screen_*`, `ev_*`, `pad_*`, `gfx_*`,
-  `tex_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`); several
-  modules — and the game's own names — coexist.
+  `tex_*`, `anim_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`);
+  several modules — and the game's own names — coexist.
 - **Failures come back the way C reports them.** There is still no nil
   literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
@@ -1342,6 +1343,42 @@ func main() -> void:
 ```
 true
 10x10
+```
+
+`anim.vnt` next: a sprite sheet plays back as a strip of equal frames.
+`anim_new(count, fw, fh, fps)` describes the strip, `anim_tick` advances the
+clock by the time the game hands it and returns the updated clock — structs
+are values, so `anim = anim_tick(anim, dt)` is the idiom — `anim_frame`
+reads the current frame, and `anim_draw` blits it through `tex_draw_src`.
+The frame wraps, so the animation loops; a dead `Tex` or an empty strip
+(zero frames) draws nothing; and nothing here reads a wall clock:
+
+```vanta
+import "gamekit/sdl.vnt"
+import "gamekit/image.vnt"
+import "gamekit/anim.vnt"
+
+func main() -> void:
+    let screen = screen_open("Vanta", 320, 240)
+    let spin = tex_load(screen, "examples/assets/ball_spin.png")
+    print_bool(screen_ok(screen) and tex_ok(spin))   # true on any working driver
+    print_fmt("{}x{}", spin.w, spin.h)
+    mut anim = anim_new(4, 10, 10, 8.0)              # 4 frames, 10x10, 8 fps
+    for i in range(0, 4):
+        anim = anim_tick(anim, 0.125)                # 1/8 s: exactly one frame
+        anim_draw(screen, spin, anim, 40 + i * 14, 40)
+        print_i32(anim_frame(anim))
+    tex_free(spin)
+    screen_close(screen)
+```
+
+```
+true
+40x10
+1
+2
+3
+0
 ```
 
 `audio.vnt` next: tones need no file — the caller owns the sample buffer and
