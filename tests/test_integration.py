@@ -1587,6 +1587,60 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    @unittest.skipUnless(SDL2_IMAGE, "SDL2_image not found")
+    def test_gamekit_animation(self):
+        # gamekit/anim.vnt: a frame clock over tex_draw_src. The step is
+        # 0.125 s at 8 fps, so each tick advances exactly one frame and the
+        # frozen numbers cannot drift; a dead texture and an empty clock are
+        # guarded no-ops. The copy puts the kit and the sheet where the
+        # probe's relative paths can reach them.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitanim_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            shutil.copytree(os.path.join(EXAMPLES, 'assets'),
+                            os.path.join(tmp, 'assets'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/sdl.vnt"\n'
+                        'import "gamekit/gfx.vnt"\n'
+                        'import "gamekit/image.vnt"\n'
+                        'import "gamekit/anim.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let screen = screen_open("kit anim", 64, 64)\n'
+                        '    print_bool(screen_ok(screen))\n'
+                        '    let spin = tex_load(screen, "assets/ball_spin.png")\n'
+                        '    print_bool(tex_ok(spin))\n'
+                        '    print_fmt("{}x{}", spin.w, spin.h)\n'
+                        '    mut a = anim_new(4, 10, 10, 8.0)\n'
+                        '    for i in range(0, 8):\n'
+                        '        a = anim_tick(a, 0.125)\n'
+                        '        print_i32(anim_frame(a))\n'
+                        '    print_i32(a.count)\n'
+                        '    gfx_clear(screen, 0, 0, 0)\n'
+                        '    anim_draw(screen, spin, a, 4, 4)\n'
+                        '    gfx_present(screen)\n'
+                        '    let dead = tex_load(screen, "assets/nope.png")\n'
+                        '    anim_draw(screen, dead, a, 0, 0)\n'
+                        '    let empty = anim_new(0, 10, 10, 8.0)\n'
+                        '    print_i32(anim_frame(anim_tick(empty, 1.0)))\n'
+                        '    tex_free(spin)\n'
+                        '    tex_free(dead)\n'
+                        '    screen_close(screen)\n'
+                        '    print_str("drawn")\n')
+            exe = self._build_sdl(path, tmp, cfg=SDL2_IMAGE)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', '40x10',
+                              '1', '2', '3', '0', '1', '2', '3', '0',
+                              '4', '0', 'drawn'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     @unittest.skipUnless(SDL2, "SDL2 not found")
     def test_gamekit_sound(self):
         # gamekit/audio.vnt sound files: a 44.1 kHz mono WAV loads and

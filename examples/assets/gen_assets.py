@@ -9,6 +9,7 @@ run this to build or test the examples; the script is here so the assets
 are reproducible and reviewable — no opaque binaries, nothing licensed):
 
     ball.png   10x10 white ball, transparent corners   (PNG, alpha)
+    ball_spin.png 40x10 sheet: four 10x10 ball frames   (PNG, animation demo)
     paddle.bmp 44x10 pale blue paddle                  (BMP, no alpha)
     brick.png  32x14 white brick, gray edge            (PNG, tinted per row by the game)
     tiles.png  32x16 sheet: two 16x16 tiles            (PNG, sprite-sheet demo)
@@ -98,6 +99,22 @@ def ball_pixel(x, y):
     return (0, 0, 0, 0)
 
 
+def ball_spin_pixel(x, y):
+    # ball_spin.png: four 10x10 frames side by side; a pale-blue highlight
+    # orbits the ball a quarter turn per frame, so playing them in order
+    # reads as a spin. Frame 0 has it top-right.
+    frame_x = x % 10
+    dx, dy = frame_x - 4.5, y - 4.5
+    if dx * dx + dy * dy > 20.25:
+        return (0, 0, 0, 0)
+    angle = (x // 10) * (math.pi / 2.0) - math.pi / 4.0
+    hx = 4.5 + 1.8 * math.cos(angle)
+    hy = 4.5 + 1.8 * math.sin(angle)
+    if (frame_x - hx) * (frame_x - hx) + (y - hy) * (y - hy) <= 1.44:
+        return (150, 205, 255, 255)
+    return (255, 255, 255, 255)
+
+
 def brick_pixel(x, y):
     if x < 2 or y < 2 or x >= 30 or y >= 12:
         return (150, 150, 150, 255)
@@ -116,6 +133,7 @@ def tile_pixel(tile, body):
 
 def main():
     write_png("ball.png", 10, 10, ball_pixel)
+    write_png("ball_spin.png", 40, 10, ball_spin_pixel)
     write_bmp("paddle.bmp", 44, 10, lambda x, y: (200, 220, 255))
     write_png("brick.png", 32, 14, brick_pixel)
 
@@ -135,7 +153,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-    for name in ("ball.png", "paddle.bmp", "brick.png", "tiles.png",
-                 "blip.wav", "brick.wav", "lose.wav"):
+    for name in ("ball.png", "ball_spin.png", "paddle.bmp", "brick.png",
+                 "tiles.png", "blip.wav", "brick.wav", "lose.wav"):
         path = os.path.join(HERE, name)
         print(f"{name}: {os.path.getsize(path)} bytes")

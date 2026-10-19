@@ -7,9 +7,9 @@
 # a tint over one white texture; hits play WAV files loaded from
 # examples/assets/, silent when no audio device or files are available.
 #
-# The game draws sprites with the kit's texture API (image.vnt, SDL2_image)
-# and reads sound files with its audio module, so it links all three
-# libraries:
+# The game draws sprites with the kit's texture API (image.vnt, SDL2_image),
+# animates the ball with anim.vnt (the ball sheet's four frames), and
+# reads sound files with its audio module, so it links all three libraries:
 #   python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 #   python main.py run examples/breakout.vnt 5000 --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 #
@@ -21,6 +21,7 @@ import "gamekit/sdl.vnt"
 import "gamekit/input.vnt"
 import "gamekit/gfx.vnt"
 import "gamekit/image.vnt"
+import "gamekit/anim.vnt"
 import "gamekit/text.vnt"
 import "gamekit/audio.vnt"
 
@@ -73,6 +74,7 @@ func main() -> void:
     for i in range(0, BRICKS):
         bricks.push(true)
     let tex_ball = tex_load(screen, "examples/assets/ball.png")
+    let tex_spin = tex_load(screen, "examples/assets/ball_spin.png")
     let tex_paddle = tex_load(screen, "examples/assets/paddle.bmp")
     let tex_brick = tex_load(screen, "examples/assets/brick.png")
     let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 24)
@@ -88,6 +90,7 @@ func main() -> void:
 
     mut px = i32_to_f32(WIN_W / 2 - PADDLE_W / 2)
     mut ball = serve(px)
+    mut ball_anim = anim_new(4, BALL, BALL, 8.0)
     mut lives = LIVES
     mut cleared = 0
     mut left_down = false
@@ -192,6 +195,11 @@ func main() -> void:
             else:
                 ball = serve(px)
 
+        # The ball's sprite advances with a fixed 60 Hz step — its own
+        # clock, so the frozen headless run cannot drift — and the physics
+        # above is untouched by what the ball looks like.
+        ball_anim = anim_tick(ball_anim, 1.0 / 60.0)
+
         # Draw: background, the wall (white brick texture, tinted per row),
         # paddle, ball, and the HUD — lives as little balls, cleared count
         # right-aligned.
@@ -210,7 +218,7 @@ func main() -> void:
                     tex_draw(screen, tex_brick, BRICK_X0 + col * BRICK_DX,
                              BRICK_Y0 + row * BRICK_DY)
         tex_draw(screen, tex_paddle, f32_to_i32(px), PADDLE_Y)
-        tex_draw(screen, tex_ball, f32_to_i32(ball.x), f32_to_i32(ball.y))
+        anim_draw(screen, tex_spin, ball_anim, f32_to_i32(ball.x), f32_to_i32(ball.y))
         for j in range(0, lives):
             tex_draw(screen, tex_ball, 8 + j * 14, 8)
         let score = to_str_i32(cleared)
@@ -225,6 +233,7 @@ func main() -> void:
             running = false
 
     tex_free(tex_ball)
+    tex_free(tex_spin)
     tex_free(tex_paddle)
     tex_free(tex_brick)
     sound_free(snd_blip)

@@ -1,0 +1,62 @@
+# gamekit/anim.vnt — sprite-sheet animation, for gamekit programs.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/image.vnt"
+#   import "gamekit/anim.vnt"
+#
+# A frame clock over tex_draw_src, for a horizontal strip of equal frames:
+# anim_new says how many frames the sheet holds, how big one frame is, and
+# how fast it plays; anim_tick advances the clock by the time the game
+# hands it; anim_draw blits whichever frame is current.
+#
+#   let spin = tex_load(screen, "assets/ball_spin.png")   # a 40x10 strip
+#   mut anim = anim_new(4, 10, 10, 8.0)                   # 4 frames, 8 fps
+#   while running:
+#       anim = anim_tick(anim, 1.0 / 60.0)                # once per frame
+#       anim_draw(screen, spin, anim, x, y)
+#
+# The clock is explicit: the game owns the step, so a headless test can tick
+# exact amounts and freeze the numbers. Nothing here reads a wall clock, and
+# nothing here needs a library beyond the ones image.vnt already links
+# (SDL2_image and SDL2).
+#
+# Copying semantics: anim_tick returns the updated clock rather than
+# mutating the caller's copy — `anim = anim_tick(anim, dt)` is the idiom.
+# A degenerate clock (no frames, or a rate of zero) stays on frame 0.
+
+import "sdl.vnt"
+import "image.vnt"
+
+struct Anim:
+    count: i32      # frames in the sheet
+    fw: i32         # frame width, in pixels
+    fh: i32         # frame height, in pixels
+    fps: f32        # playback rate, in frames per second
+    elapsed: f32    # seconds ticked so far
+    frame: i32      # current frame, 0 up to count - 1
+
+func anim_new(count: i32, fw: i32, fh: i32, fps: f32) -> Anim:
+    # Frame 0, at time zero. count, fw, and fh describe the strip; fps is
+    # how many frames it plays per second.
+    return Anim(count: count, fw: fw, fh: fh, fps: fps, elapsed: 0.0, frame: 0)
+
+func anim_tick(a: Anim, dt: f32) -> Anim:
+    # Advance by dt seconds (the game's frame time — a real delta from its
+    # own clock, or a fixed step; both stay deterministic here). The frame
+    # wraps, so the animation loops.
+    mut next = a
+    next.elapsed += dt
+    if next.count > 0 and next.fps > 0.0:
+        next.frame = f32_to_i32(next.elapsed * next.fps) % next.count
+    return next
+
+func anim_frame(a: Anim) -> i32:
+    return a.frame
+
+func anim_draw(s: Screen, t: Tex, a: Anim, x: i32, y: i32) -> void:
+    # The current frame of the strip, drawn with its top-left corner at
+    # (x, y) at the frame's natural size, under whatever tint the texture
+    # carries. A dead texture or an empty clock draws nothing.
+    if a.count <= 0:
+        return
+    tex_draw_src(s, t, a.frame * a.fw, 0, a.fw, a.fh, x, y)
