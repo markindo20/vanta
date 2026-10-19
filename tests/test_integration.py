@@ -1297,11 +1297,11 @@ class IntegrationTests(unittest.TestCase):
 
     def test_sdl_examples_typecheck(self):
         # Pure frontend: needs no SDL2 at all, so it runs everywhere.
-        # pong.vnt imports every gamekit module, so this also type-checks
-        # the kit's extern declarations.
+        # breakout.vnt imports seven of the nine gamekit modules, so this
+        # also type-checks most of the kit's extern declarations.
         for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'sdl_audio.vnt',
                    'sdl_audio_cb.vnt', 'sdl_texture.vnt', 'sdl_sound.vnt',
-                   'sdl_gamepad.vnt', 'pong.vnt', 'breakout.vnt'):
+                   'sdl_gamepad.vnt', 'text_bench.vnt', 'pong.vnt', 'breakout.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1387,6 +1387,35 @@ class IntegrationTests(unittest.TestCase):
                                env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(), ['frames 120'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_TTF, "SDL_ttf not found")
+    def test_text_bench_headless(self):
+        # examples/text_bench.vnt is the measured before/after behind
+        # TextSprite: it draws one string with text_draw and with a
+        # pre-rendered sprite and prints the draw counts and milliseconds.
+        # The counts are stable; the milliseconds are this machine's, so
+        # the test checks the line shapes and never the numbers.
+        tmp = tempfile.mkdtemp(prefix='vanta_textbench_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'text_bench.vnt'),
+                                  tmp, cfg=SDL2_TTF)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '200'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            lines = r.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            drawn = lines[0].split()
+            self.assertEqual(drawn[:3], ['text_draw', '200', 'draws'])
+            self.assertTrue(drawn[3].isdigit(), msg=lines[0])
+            self.assertEqual(drawn[4], 'ms')
+            sprite = lines[1].split()
+            self.assertEqual(sprite[:5],
+                             ['text_sprite', '1', 'render', '200', 'draws'])
+            self.assertTrue(sprite[5].isdigit(), msg=lines[1])
+            self.assertEqual(sprite[6], 'ms')
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1815,6 +1844,66 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['true', 'true', 'true', 'false', '0', 'drawn'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_TTF, "SDL_ttf not found")
+    def test_gamekit_text_sprite(self):
+        # gamekit/text.vnt's TextSprite: render once, draw many times. The
+        # copy puts the relative imports and the shipped font where the
+        # probe can reach them (it runs with cwd=tmp). The sprite's size
+        # matches text_measure, a failed font and an empty string both
+        # render dead, a dead sprite draws nothing, and a sprite can be
+        # freed and rendered again.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitsprite_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/sdl.vnt"\n'
+                        'import "gamekit/text.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let screen = screen_open("text sprite", 320, 240)\n'
+                        '    if not screen_ok(screen):\n'
+                        '        print_str("no screen")\n'
+                        '        return\n'
+                        '    let font = font_open("gamekit/fonts/tom-thumb.ttf", 32)\n'
+                        '    print_bool(font_ok(font))\n'
+                        '    let sprite = text_sprite(screen, font, "Score: 12", 255, 255, 255)\n'
+                        '    print_bool(text_sprite_ok(sprite))\n'
+                        '    let arena = Arena(64)\n'
+                        '    let scratch = arena.alloc::<i32>(10)\n'
+                        '    text_measure(font, "Score: 12", scratch)\n'
+                        '    print_bool(sprite.w == scratch[0] and sprite.h == scratch[1])\n'
+                        '    text_sprite_draw(screen, sprite, 16, 16)\n'
+                        '    text_sprite_free(sprite)\n'
+                        '    let again = text_sprite(screen, font, "Score: 12", 200, 200, 200)\n'
+                        '    print_bool(text_sprite_ok(again))\n'
+                        '    text_sprite_draw(screen, again, 16, 48)\n'
+                        '    text_sprite_free(again)\n'
+                        '    let missing = font_open("no-such-font.ttf", 16)\n'
+                        '    let dead = text_sprite(screen, missing, "x", 255, 255, 255)\n'
+                        '    print_bool(text_sprite_ok(dead))\n'
+                        '    text_sprite_draw(screen, dead, 0, 0)\n'
+                        '    text_sprite_free(dead)\n'
+                        '    font_close(missing)\n'
+                        '    let empty = text_sprite(screen, font, "", 255, 255, 255)\n'
+                        '    print_bool(text_sprite_ok(empty))\n'
+                        '    text_sprite_free(empty)\n'
+                        '    font_close(font)\n'
+                        '    text_quit()\n'
+                        '    screen_close(screen)\n'
+                        '    print_str("drawn")\n')
+            exe = self._build_sdl(path, tmp, cfg=SDL2_TTF)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', 'true', 'true',
+                              'false', 'false', 'drawn'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

@@ -8,8 +8,10 @@
 #   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 #
 # text_draw renders a string on every call — a texture per call, freed
-# immediately — which is all a HUD usually needs. Font paths are opened by
-# C, relative to the process working directory.
+# immediately — which is all a HUD usually needs. A wall of text redrawn
+# every frame is the other case, and that is what text_sprite is for:
+# render once with text_sprite, then text_sprite_draw as often as you like.
+# Font paths are opened by C, relative to the process working directory.
 
 import "sdl.vnt"
 
@@ -41,6 +43,14 @@ extern "sdl2_ttf" {
 
 struct Font:
     handle: ptr<void>
+
+# TextSprite is a string's rendered pixels, kept: a texture plus its size,
+# from text_sprite. text_sprite_draw blits it with no TTF call at all, so
+# the same string can be drawn every frame without re-rendering.
+struct TextSprite:
+    handle: ptr<void>   # the rendered texture
+    w: i32              # rendered width, in pixels
+    h: i32              # rendered height, in pixels
 
 func font_open(path: str, size: i32) -> Font:
     # Like screen_open: C reports failure by returning NULL, and the handle
@@ -99,3 +109,52 @@ func text_draw(s: Screen, f: Font, x: i32, y: i32, txt: str, scratch: ptr<i32>, 
     dst[3] = scratch[1]
     SDL_RenderCopy(s.renderer, texture, src, dst)
     SDL_DestroyTexture(texture)
+
+# text_sprite renders txt once — same colour order and semantics as
+# text_draw — and hands the pixels back: a texture plus its size. Render
+# once, then text_sprite_draw as often as the frame needs; to re-render,
+# free the old sprite and call text_sprite again. The test is
+# text_sprite_ok, like every other handle.
+func text_sprite(s: Screen, f: Font, txt: str, cr: i32, cg: i32, cb: i32) -> TextSprite:
+    mut out = TextSprite(handle: ptr_null::<void>(), w: 0, h: 0)
+    if ptr_is_null(f.handle):
+        return out
+    let arena = Arena(32)
+    let wh = arena.alloc::<i32>(2)
+    text_measure(f, txt, wh)
+    if wh[0] <= 0 or wh[1] <= 0:
+        return out
+    let color = SDL_Color(r: cr, g: cg, b: cb, a: 255)
+    let surface = TTF_RenderUTF8_Blended(f.handle, txt, color)
+    if ptr_is_null(surface):
+        return out
+    let texture = SDL_CreateTextureFromSurface(s.renderer, surface)
+    SDL_FreeSurface(surface)
+    if not ptr_is_null(texture):
+        out.handle = texture
+        out.w = wh[0]
+        out.h = wh[1]
+    return out
+
+func text_sprite_ok(sp: TextSprite) -> bool:
+    return not ptr_is_null(sp.handle)
+
+# text_sprite_draw draws a sprite with its top-left corner at (x, y): one
+# SDL_RenderCopy of the stored texture, no TTF call, pixels already made.
+# A dead sprite draws nothing.
+func text_sprite_draw(s: Screen, sp: TextSprite, x: i32, y: i32) -> void:
+    if not text_sprite_ok(sp):
+        return
+    let arena = Arena(16)
+    let dst = arena.alloc::<i32>(4)
+    dst[0] = x
+    dst[1] = y
+    dst[2] = sp.w
+    dst[3] = sp.h
+    SDL_RenderCopy(s.renderer, sp.handle, ptr_null::<i32>(), dst)
+
+# text_sprite_free destroys the sprite's texture. Freeing a dead sprite is
+# harmless, like every other guard in the kit.
+func text_sprite_free(sp: TextSprite) -> void:
+    if not ptr_is_null(sp.handle):
+        SDL_DestroyTexture(sp.handle)

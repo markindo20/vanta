@@ -1,0 +1,58 @@
+# text_bench.vnt — the measured before/after for text sprites.
+#
+# text_draw renders a texture per call and frees it; text_sprite renders
+# once and text_sprite_draw blits the stored pixels. This program draws one
+# string both ways, the same number of times, and prints the draw counts
+# and the milliseconds. The counts are stable; the milliseconds are this
+# machine's — they are never asserted in tests or docs, only rerun.
+#
+#   python main.py run examples/text_bench.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+#   python main.py run examples/text_bench.vnt 8000 --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+#
+# The optional argument is the draw count per path (default 40000), so a
+# headless run with SDL_VIDEODRIVER=dummy works anywhere SDL2 does.
+
+import "gamekit/sdl.vnt"
+import "gamekit/text.vnt"
+
+extern "sdl2" {
+    # Milliseconds since SDL_Init; the bench's own clock, nothing else uses
+    # it. u32, the way SDL declares it.
+    func SDL_GetTicks() -> u32
+}
+
+func main() -> void:
+    mut draws = 40000
+    if arg_count() > 1:
+        draws = str_to_i32(arg_str(1))
+    let screen = screen_open("text bench", 96, 48)
+    if not screen_ok(screen):
+        print_str("could not open a window and renderer")
+        return
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 24)
+    if not font_ok(font):
+        print_str("could not open the font")
+        return
+    let arena = Arena(64)
+    let scratch = arena.alloc::<i32>(10)
+    # One untimed draw warms TTF's glyph cache, so neither path pays for
+    # loading glyphs.
+    text_draw(screen, font, 4, 4, "score 12", scratch, 240, 220, 120)
+    # Before: a render (and a free) per call, what text_draw always did.
+    let t0 = SDL_GetTicks()
+    for i in range(0, draws):
+        text_draw(screen, font, 4, 4, "score 12", scratch, 240, 220, 120)
+    let t1 = SDL_GetTicks()
+    # After: one render, then blits. Timed render and draws together, so
+    # the number is the whole cost of the sprite path.
+    let t2 = SDL_GetTicks()
+    let sprite = text_sprite(screen, font, "score 12", 240, 220, 120)
+    for i in range(0, draws):
+        text_sprite_draw(screen, sprite, 4, 4)
+    let t3 = SDL_GetTicks()
+    print_fmt("text_draw {} draws {} ms", draws, t1 - t0)
+    print_fmt("text_sprite 1 render {} draws {} ms", draws, t3 - t2)
+    text_sprite_free(sprite)
+    font_close(font)
+    text_quit()
+    screen_close(screen)
