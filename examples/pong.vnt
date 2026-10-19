@@ -8,13 +8,16 @@
 # line ends it early, and with no input the AI keeps scoring, so the final
 # score is reproducible — the test suite freezes it.
 #
-# Usage (Windows with MSYS2; any platform with SDL2 works):
-#   python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-#   python main.py run examples/pong.vnt 900 --lib-dir C:/msys64/mingw64/lib --link SDL2
+# Usage (Windows with MSYS2; any platform with SDL2 and SDL_ttf works).
+# Pong draws its score with the game kit's text module, so it links two
+# libraries:
+#   python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+#   python main.py run examples/pong.vnt 900 --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 
 import "gamekit/sdl.vnt"
 import "gamekit/input.vnt"
 import "gamekit/gfx.vnt"
+import "gamekit/text.vnt"
 import "gamekit/rng.vnt"
 
 const WIN_W: i32 = 640
@@ -66,6 +69,8 @@ func main() -> void:
     let arena = Arena(512)
     let ev = arena.alloc::<i32>(16)          # room for one SDL_Event
     let rect = arena.alloc::<i32>(4)         # an SDL_Rect: x, y, w, h
+    let scratch = arena.alloc::<i32>(10)     # text_measure/text_draw scratch
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 32)
 
     mut frames = 0
     mut max_frames = 0
@@ -152,7 +157,7 @@ func main() -> void:
             ball = serve(Side.Right)
 
         # Draw: background, border, dashed middle line, paddles, ball, and
-        # one pip per point for each side.
+        # the score.
         gfx_clear(screen, 16, 18, 26)
         gfx_stroke_rect(screen, rect, 0, 0, WIN_W, WIN_H, 2, 58, 62, 78)
         for i in range(0, 10):
@@ -160,10 +165,12 @@ func main() -> void:
         gfx_fill_rect(screen, rect, PADDLE_X, f32_to_i32(py), PADDLE_W, PADDLE_H, 88, 216, 120)
         gfx_fill_rect(screen, rect, AI_X, f32_to_i32(ay), PADDLE_W, PADDLE_H, 240, 128, 88)
         gfx_fill_rect(screen, rect, f32_to_i32(ball.x), f32_to_i32(ball.y), BALL, BALL, 240, 240, 240)
-        for i in range(0, score_p):
-            gfx_fill_rect(screen, rect, 12 + i * 14, 12, 10, 10, 88, 216, 120)
-        for i in range(0, score_a):
-            gfx_fill_rect(screen, rect, 618 - i * 14, 12, 10, 10, 240, 128, 88)
+        # The score, as text: the left number right-aligned to the middle
+        # line, the right one left-aligned past it. Scoring stops at 5, so
+        # one measured digit is the right width for every score.
+        text_measure(font, "0", scratch)
+        text_draw(screen, font, 320 - 24 - scratch[0], 24, to_str_i32(score_p), scratch, 88, 216, 120)
+        text_draw(screen, font, 320 + 24, 24, to_str_i32(score_a), scratch, 240, 128, 88)
         gfx_present(screen)
 
         frames += 1
@@ -172,5 +179,7 @@ func main() -> void:
         if score_p >= WIN_SCORE or score_a >= WIN_SCORE:
             running = false
 
+    font_close(font)
+    text_quit()
     screen_close(screen)
     print_fmt("player {} ai {} frames {}", score_p, score_a, frames)

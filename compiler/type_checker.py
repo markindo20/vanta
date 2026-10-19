@@ -566,7 +566,7 @@ class TypeChecker:
                 expr.type = ent[0]
                 return ent[0]
             if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32',
-                             'ptr_is_null', 'ptr_cast'):
+                             'ptr_is_null', 'ptr_cast', 'ptr_offset'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
@@ -871,6 +871,8 @@ class TypeChecker:
                 return self._check_ptr_is_null(call)
             if name == 'ptr_cast':
                 return self._check_ptr_cast(call)
+            if name == 'ptr_offset':
+                return self._check_ptr_offset(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.structs:
@@ -1002,6 +1004,31 @@ class TypeChecker:
             raise CheckError(f"ptr_cast expects a pointer, got {at}",
                              self.filename, call.pos)
         t = PtrType(inner)
+        call.type = t
+        return t
+
+    def _check_ptr_offset(self, call: A.Call) -> Type:
+        if call.type_args:
+            raise CheckError("ptr_offset does not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("ptr_offset does not accept named arguments",
+                             self.filename, call.pos)
+        if len(call.args) != 2:
+            raise CheckError(f"ptr_offset takes two arguments, got {len(call.args)}",
+                             self.filename, call.pos)
+        at = self._check_expr(call.args[0])
+        if not isinstance(at, PtrType):
+            raise CheckError(f"ptr_offset expects a pointer, got {at}",
+                             self.filename, call.pos)
+        if at.inner is VOID:
+            raise CheckError(
+                "cannot offset a ptr<void> (it has no element size); "
+                "ptr_cast it to a typed pointer first",
+                self.filename, call.pos)
+        it = self._check_expr(call.args[1])
+        self._coerce_value(call.args[1], it, I32, call.pos, "offset")
+        t = PtrType(at.inner)
         call.type = t
         return t
 

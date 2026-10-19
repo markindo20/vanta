@@ -1,0 +1,31 @@
+# Pointer offsets: element arithmetic on pointers, the way C does it.
+#
+#   python main.py run examples/ptr_offset.vnt
+
+struct Pair:
+    a: i32
+    b: i32
+
+func main() -> void:
+    let arena = Arena(256)
+    let xs = arena.alloc::<i32>(5)
+    for i in range(0, 5):
+        xs[i] = i * i
+
+    # A cursor: the same pointer type, advanced one element at a time.
+    # The offset counts elements, not bytes, so ptr_offset(xs, 1) is xs[1].
+    mut cursor = xs
+    mut total = 0
+    for i in range(0, 5):
+        total = total + cursor[0]
+        cursor = ptr_offset(cursor, 1)
+    print_i32(total)                     # 0 + 1 + 4 + 9 + 16
+
+    # Offsets go anywhere: backwards from the cursor, or straight to a slot.
+    print_i32(ptr_offset(cursor, -1)[0]) # 16
+    print_i32(ptr_offset(xs, 3)[0])      # 9
+
+    # Over structs the same arithmetic applies element-wise.
+    let ps = arena.alloc::<Pair>(2)
+    ps[1].a = 7
+    print_i32(ptr_offset(ps, 1)[0].a)    # 7

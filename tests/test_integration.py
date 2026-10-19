@@ -45,6 +45,26 @@ def _find_sdl2():
 SDL2 = _find_sdl2()
 
 
+def _find_sdl2_ttf():
+    """How to build against SDL2_ttf (with SDL2), or None when it is not
+    available."""
+    base = _find_sdl2()
+    if base is None:
+        return None
+    if os.name == 'nt':
+        for d in base['lib_dirs']:
+            if os.path.exists(os.path.join(d, 'libSDL2_ttf.dll.a')):
+                return {'lib_dirs': [d], 'libs': ['SDL2_ttf', 'SDL2']}
+        return None
+    import ctypes.util
+    if ctypes.util.find_library('SDL2_ttf'):
+        return {'lib_dirs': base['lib_dirs'], 'libs': ['SDL2_ttf', 'SDL2']}
+    return None
+
+
+SDL2_TTF = _find_sdl2_ttf()
+
+
 @unittest.skipUnless(_have_compiler(), "no C++17 compiler available")
 class IntegrationTests(unittest.TestCase):
     def _build_and_run(self, source, expected_lines):
@@ -1184,7 +1204,8 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def _build_sdl(self, source_path, tmp):
+    def _build_sdl(self, source_path, tmp, cfg=None):
+        cfg = cfg or SDL2
         name, path = find_cxx_compiler()
         prog, tc = _frontend_only(source_path)
         cpp = os.path.join(tmp, 'main.cpp')
@@ -1192,7 +1213,7 @@ class IntegrationTests(unittest.TestCase):
         exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
         from compiler.driver import _compiler_cmd
         cmd = _compiler_cmd(name, path, cpp, exe, release=True,
-                            lib_dirs=SDL2['lib_dirs'], libs=SDL2['libs'])
+                            lib_dirs=cfg['lib_dirs'], libs=cfg['libs'])
         p = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
         return exe
@@ -1201,7 +1222,7 @@ class IntegrationTests(unittest.TestCase):
         # Pure frontend: needs no SDL2 at all, so it runs everywhere.
         # pong.vnt imports every gamekit module, so this also type-checks
         # the kit's extern declarations.
-        for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'pong.vnt'):
+        for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'pong.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1230,20 +1251,40 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    @unittest.skipUnless(SDL2, "SDL2 not found")
+    @unittest.skipUnless(SDL2_TTF, "SDL2_ttf not found")
     def test_pong_headless(self):
-        # The second game, built on the game kit. With no input under the
-        # dummy driver the AI takes every point, and the whole run is
+        # The second game, built on the game kit, now drawing its score with
+        # the text module, so it links SDL2_ttf as well. With no input under
+        # the dummy driver the AI takes every point, and the whole run is
         # reproducible: the AI wins 5-0 in frame 576, well before the frame
         # cap, so the cap never fires — it is only the backstop.
         tmp = tempfile.mkdtemp(prefix='vanta_pong_')
         try:
-            exe = self._build_sdl(os.path.join(EXAMPLES, 'pong.vnt'), tmp)
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'pong.vnt'), tmp,
+                                  cfg=SDL2_TTF)
             env = dict(os.environ, SDL_VIDEODRIVER='dummy')
-            r = subprocess.run([exe, '3000'], capture_output=True, text=True, env=env)
+            r = subprocess.run([exe, '3000'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['player 0 ai 5 frames 576'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_TTF, "SDL2_ttf not found")
+    def test_sdl_text_headless(self):
+        # The raw SDL_ttf example: render one string per frame and keep
+        # going; the frame count is the frozen output. cwd=HERE so the
+        # relative path to the shipped font resolves.
+        tmp = tempfile.mkdtemp(prefix='vanta_sdltext_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'sdl_text.vnt'), tmp,
+                                  cfg=SDL2_TTF)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe, '120'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['frames 120'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1268,6 +1309,65 @@ class IntegrationTests(unittest.TestCase):
                         '    print_i32(rand_sign())\n'
                         '    print_i32(rand_sign())\n')
             self._build_and_run(path, ['4', '3', '1', '0.701852', '-1', '1'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_TTF, "SDL2_ttf not found")
+    def test_gamekit_text(self):
+        # gamekit/text.vnt on top of the kit's Screen: the copy puts the
+        # relative imports and the shipped font where the probe program can
+        # reach them (it runs with cwd=tmp). The probe measures, draws, and
+        # also exercises the failure paths: a font that will not open
+        # measures 0x0 and draws nothing instead of crashing.
+        tmp = tempfile.mkdtemp(prefix='vanta_kittext_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/sdl.vnt"\n'
+                        'import "gamekit/text.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let screen = screen_open("text", 320, 240)\n'
+                        '    if not screen_ok(screen):\n'
+                        '        print_str("no screen")\n'
+                        '        return\n'
+                        '    let font = font_open("gamekit/fonts/tom-thumb.ttf", 32)\n'
+                        '    print_bool(font_ok(font))\n'
+                        '    let arena = Arena(512)\n'
+                        '    let scratch = arena.alloc::<i32>(10)\n'
+                        '    text_measure(font, "Score: 12", scratch)\n'
+                        '    print_bool(scratch[0] > 0)\n'
+                        '    print_bool(scratch[1] > 0)\n'
+                        '    text_draw(screen, font, 16, 16, "Score: 12", scratch, 255, 255, 255)\n'
+                        '    text_draw(screen, font, 9999, 9999, "offscreen", scratch, 255, 0, 0)\n'
+                        '    let missing = font_open("no-such-font.ttf", 16)\n'
+                        '    print_bool(font_ok(missing))\n'
+                        '    text_measure(missing, "x", scratch)\n'
+                        '    print_i32(scratch[0])\n'
+                        '    text_draw(screen, missing, 0, 0, "x", scratch, 255, 255, 255)\n'
+                        '    print_str("drawn")\n'
+                        '    font_close(font)\n'
+                        '    text_quit()\n'
+                        '    screen_close(screen)\n')
+            name, cpath = find_cxx_compiler()
+            prog, tc = _frontend_only(path)
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, cpath, cpp, exe, release=True,
+                                lib_dirs=SDL2_TTF['lib_dirs'],
+                                libs=SDL2_TTF['libs'])
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True,
+                               env=env, cwd=tmp)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['true', 'true', 'true', 'false', '0', 'drawn'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1358,6 +1458,12 @@ class IntegrationTests(unittest.TestCase):
     def test_struct_eq_example(self):
         self._build_and_run(os.path.join(EXAMPLES, 'struct_eq.vnt'),
                             ['true', 'true', 'true', 'false', 'true'])
+
+    # ---------- v0.18.0: pointer offsets -----------------------------------
+
+    def test_ptr_offset_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'ptr_offset.vnt'),
+                            ['30', '16', '9', '7'])
 
 
 if __name__ == '__main__':

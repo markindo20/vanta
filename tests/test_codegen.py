@@ -685,6 +685,20 @@ class CodegenTests(unittest.TestCase):
                   "    print_i32(q[0].x)\n")
         self.assertIn('reinterpret_cast<P*>(v_p)', cpp)
 
+    # ---------- ptr_offset (v0.18.0) ----------
+
+    def test_ptr_offset_emit(self):
+        cpp = gen("func f(p: ptr<i32>, n: i32) -> void:\n"
+                  "    let q = ptr_offset(p, n)\n"
+                  "    q[0] = 1\n")
+        self.assertIn('((v_p) + (v_n))', cpp)
+
+    def test_ptr_offset_literal_emit(self):
+        cpp = gen("func f(p: ptr<i32>) -> void:\n"
+                  "    let q = ptr_offset(p, 2)\n"
+                  "    q[0] = 1\n")
+        self.assertIn('((v_p) + (2))', cpp)
+
     # ---------- enums in extern (v0.17.0) ----------
 
     def test_extern_enum_emit(self):

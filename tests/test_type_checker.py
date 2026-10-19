@@ -1889,6 +1889,48 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_cast' as a value"):
             run("func f() -> void:\n    let q = ptr_cast\n")
 
+    # ---------- ptr_offset (v0.18.0) ----------
+
+    def test_ptr_offset_ok(self):
+        run("func f(p: ptr<i32>, n: i32) -> void:\n"
+            "    let a = ptr_offset(p, n)\n"
+            "    let b = ptr_offset(p, 0)\n"
+            "    let c = ptr_offset(a, -2)\n"
+            "    let d: ptr<i32> = ptr_offset(a, 1)\n")
+
+    def test_ptr_offset_narrow_offset_ok(self):
+        # Reading a narrow value yields i32, so it is a fine offset.
+        run("func f(p: ptr<i32>, n: u8) -> void:\n"
+            "    let a = ptr_offset(p, n)\n")
+
+    def test_ptr_offset_requires_pointer(self):
+        with self.assertRaisesRegex(CheckError, "ptr_offset expects a pointer, got i32"):
+            run("func f(x: i32) -> void:\n    let p = ptr_offset(x, 1)\n")
+
+    def test_ptr_offset_void_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot offset a ptr<void>"):
+            run("func f(p: ptr<void>) -> void:\n    let q = ptr_offset(p, 1)\n")
+
+    def test_ptr_offset_type_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_offset does not accept type arguments"):
+            run("func f(p: ptr<i32>) -> void:\n    let q = ptr_offset::<i32>(p, 1)\n")
+
+    def test_ptr_offset_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "ptr_offset does not accept named arguments"):
+            run("func f(p: ptr<i32>) -> void:\n    let q = ptr_offset(p, x: 1)\n")
+
+    def test_ptr_offset_arity(self):
+        with self.assertRaisesRegex(CheckError, "ptr_offset takes two arguments, got 1"):
+            run("func f(p: ptr<i32>) -> void:\n    let q = ptr_offset(p)\n")
+
+    def test_ptr_offset_float_offset_rejected(self):
+        with self.assertRaisesRegex(CheckError, "offset: cannot assign f32 to i32"):
+            run("func f(p: ptr<i32>, n: f32) -> void:\n    let q = ptr_offset(p, n)\n")
+
+    def test_ptr_offset_as_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use builtin 'ptr_offset' as a value"):
+            run("func f() -> void:\n    let q = ptr_offset\n")
+
     # ---------- for-each (v0.17.0) ----------
 
     def test_foreach_list_ok(self):

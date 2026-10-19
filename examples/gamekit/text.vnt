@@ -1,0 +1,100 @@
+# gamekit/text.vnt — SDL_ttf bindings and text drawing for gamekit programs.
+#
+#   import "gamekit/sdl.vnt"
+#   import "gamekit/text.vnt"
+#
+# Link both libraries (the kit ships a demo font in fonts/):
+#
+#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+#
+# text_draw renders a string on every call — a texture per call, freed
+# immediately — which is all a HUD usually needs. Font paths are opened by
+# C, relative to the process working directory.
+
+import "sdl.vnt"
+
+# SDL_Color, spelled out: one u8 per channel, passed to C by value. The
+# same four bytes, in the same order, that SDL declares. (Extern signatures
+# name it, so it comes before the extern blocks.)
+struct SDL_Color:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+
+extern "sdl2" {
+    func SDL_CreateTextureFromSurface(renderer: ptr<void>, surface: ptr<void>) -> ptr<void>
+    func SDL_RenderCopy(renderer: ptr<void>, texture: ptr<void>, src: ptr<i32>, dst: ptr<i32>) -> i32
+    func SDL_FreeSurface(surface: ptr<void>) -> void
+    func SDL_DestroyTexture(texture: ptr<void>) -> void
+}
+
+extern "sdl2_ttf" {
+    func TTF_Init() -> i32
+    func TTF_Quit() -> void
+    func TTF_OpenFont(path: str, ptsize: i32) -> ptr<void>
+    func TTF_CloseFont(font: ptr<void>) -> void
+    func TTF_SizeUTF8(font: ptr<void>, text: str, w: ptr<i32>, h: ptr<i32>) -> i32
+    func TTF_RenderUTF8_Blended(font: ptr<void>, text: str, color: SDL_Color) -> ptr<void>
+}
+
+struct Font:
+    handle: ptr<void>
+
+func font_open(path: str, size: i32) -> Font:
+    # Like screen_open: C reports failure by returning NULL, and the handle
+    # comes straight back. font_ok is the test.
+    TTF_Init()
+    return Font(handle: TTF_OpenFont(path, size))
+
+func font_ok(f: Font) -> bool:
+    return not ptr_is_null(f.handle)
+
+func font_close(f: Font) -> void:
+    if not ptr_is_null(f.handle):
+        TTF_CloseFont(f.handle)
+
+func text_quit() -> void:
+    # Call once at shutdown, after closing every font the game opened.
+    TTF_Quit()
+
+# text_measure writes the rendered size of txt into scratch[0] (width) and
+# scratch[1] (height, in pixels). A font that failed to open measures 0x0.
+func text_measure(f: Font, txt: str, scratch: ptr<i32>) -> void:
+    scratch[0] = 0
+    scratch[1] = 0
+    if ptr_is_null(f.handle):
+        return
+    TTF_SizeUTF8(f.handle, txt, scratch, ptr_offset(scratch, 1))
+
+# text_draw draws txt with its top-left corner at (x, y) in colour
+# (cr, cg, cb). scratch must have at least 10 i32 slots; the layout is:
+#
+#   [0] width  [1] height  [2..5] source rect  [6..9] destination rect
+#
+# text_measure uses [0] and [1], so measuring first with the same scratch is
+# safe. A failed font, or a string that will not render, draws nothing.
+func text_draw(s: Screen, f: Font, x: i32, y: i32, txt: str, scratch: ptr<i32>, cr: i32, cg: i32, cb: i32) -> void:
+    text_measure(f, txt, scratch)
+    if scratch[0] <= 0 or scratch[1] <= 0:
+        return
+    let color = SDL_Color(r: cr, g: cg, b: cb, a: 255)
+    let surface = TTF_RenderUTF8_Blended(f.handle, txt, color)
+    if ptr_is_null(surface):
+        return
+    let texture = SDL_CreateTextureFromSurface(s.renderer, surface)
+    SDL_FreeSurface(surface)
+    if ptr_is_null(texture):
+        return
+    let src = ptr_offset(scratch, 2)
+    src[0] = 0
+    src[1] = 0
+    src[2] = scratch[0]
+    src[3] = scratch[1]
+    let dst = ptr_offset(scratch, 6)
+    dst[0] = x
+    dst[1] = y
+    dst[2] = scratch[0]
+    dst[3] = scratch[1]
+    SDL_RenderCopy(s.renderer, texture, src, dst)
+    SDL_DestroyTexture(texture)
