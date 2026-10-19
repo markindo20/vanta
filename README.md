@@ -160,6 +160,7 @@ compiler, set the `CXX` environment variable.
 - [`docs/TUTORIAL.md`](docs/TUTORIAL.md) — hands-on introduction, ends with a small project
 - [`docs/LANGUAGE_REFERENCE.md`](docs/LANGUAGE_REFERENCE.md) — syntax and semantics
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the compiler is put together
+- [`ROADMAP.md`](ROADMAP.md) — candidate next milestones and known gaps
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 
 New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
@@ -207,3 +208,5 @@ are real:
   `ptr<void>` widening
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
+
+These are tracked, prioritised, and sized in [ROADMAP.md](ROADMAP.md).
