@@ -59,6 +59,22 @@ def _find_sdl2_ttf():
     import ctypes.util
     if ctypes.util.find_library('SDL2_ttf'):
         return {'lib_dirs': base['lib_dirs'], 'libs': ['SDL2_ttf', 'SDL2']}
+    # macOS: Homebrew installs outside dyld's default search paths, where
+    # find_library cannot see it, so ask brew. The keg and the linked
+    # prefix directory both carry the unversioned libSDL2_ttf.dylib that
+    # -lSDL2_ttf looks for.
+    brew = shutil.which('brew')
+    if brew:
+        dirs = []
+        for args in (['--prefix', 'sdl2_ttf'], ['--prefix']):
+            p = subprocess.run([brew] + args, capture_output=True, text=True)
+            if p.returncode == 0:
+                lib_dir = os.path.join(p.stdout.strip(), 'lib')
+                if os.path.exists(os.path.join(lib_dir, 'libSDL2_ttf.dylib')):
+                    dirs.append(lib_dir)
+        if dirs:
+            return {'lib_dirs': base['lib_dirs'] + dirs,
+                    'libs': ['SDL2_ttf', 'SDL2']}
     return None
 
 
