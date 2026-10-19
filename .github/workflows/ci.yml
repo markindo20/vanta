@@ -13,8 +13,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.10'
 
@@ -30,22 +30,23 @@ jobs:
 
       # Linux and macOS runners ship a C++17 compiler on PATH (g++ / clang++).
       # Windows runners also have MSVC, and the driver prefers cl there, so
-      # install MSYS2's mingw-w64 toolchain, put it on PATH (it also supplies
+      # install MSYS2's UCRT64 toolchain, put it on PATH (it also supplies
       # the DLLs the compiled test binaries need, SDL2 included), and pin CXX
-      # to g++ so Windows matches the toolchain used in development.
-      - name: Set up mingw-w64 (Windows)
+      # to g++ so Windows matches the toolchain used in development. UCRT64 is
+      # MSYS2's current default; the older mingw64 environment is deprecated.
+      - name: Set up UCRT64 (Windows)
         id: msys2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: mingw64
+          msystem: UCRT64
           update: false
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf mingw-w64-x86_64-SDL2_image
-      - name: Expose mingw-w64 on PATH (Windows)
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_ttf mingw-w64-ucrt-x86_64-SDL2_image
+      - name: Expose UCRT64 on PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Version
