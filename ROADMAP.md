@@ -59,6 +59,10 @@ high-leverage items come first; relative size is noted.
 - The VS Code extension (`editors/vscode/`) provides syntax highlighting
   only. A language server (diagnostics, hover, go-to-definition) is a
   substantial separate project and is not scheduled.
+- Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
+  the change for the 2026-10-19 window): if the Linux job's SDL package
+  install or tests change behaviour, pin the label or adapt the setup,
+  verified with the usual full-suite run.
 - Documentation keeps its rule: every snippet in the tutorial and reference
   is executed with its output frozen, and CI runs the real programs that the
   docs describe.
