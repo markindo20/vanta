@@ -139,7 +139,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 538 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 540 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

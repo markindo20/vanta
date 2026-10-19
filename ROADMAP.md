@@ -5,25 +5,19 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.20.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.21.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: the game loop (candidate v0.21.0)
+## Next: the rest of the game loop (candidate v0.22.0)
 
-1. **Gamepad input — small.** Wrap SDL2's `SDL_GameController` in a new
-   `examples/gamekit/gamepad.vnt`: open / ok / close plus button and axis
-   accessors, with a missing controller opening *dead* the way a missing
-   window, texture, or sound does. CI needs no hardware: with no controller
-   attached every call is a guarded no-op, and a headless test can assert
-   exactly that (and that the existing games still link without the module).
-2. **Sprite animation — small.** A frame clock over `tex_draw_src`:
+1. **Sprite animation — small.** A frame clock over `tex_draw_src`:
    frame count, frame size, frames per second, elapsed time, and a draw that
    picks the current frame. No compiler changes — the pieces already exist —
    and breakout is the natural worked example (an animated ball or brick
    shimmer), with a deterministic headless run re-frozen from scratch.
-3. **Text texture cache — medium.** `text_draw` currently renders a string
+2. **Text texture cache — medium.** `text_draw` currently renders a string
    into a texture and frees it per call: right for a score, wasteful for a
    wall of text. Options to weigh: a bounded cache keyed by
    (font, size, string, colour), or an explicit `TextSprite` the game renders
@@ -54,8 +48,8 @@ high-leverage items come first; relative size is noted.
 ## Kit and examples
 
 - A fourth worked game, or a polish pass on breakout (levels, pause, score
-  persistence, per-sound gain by scaling PCM at load) — decide after the
-  three game-loop items above, since they change what a game needs.
+  persistence, per-sound gain by scaling PCM at load) — decide after the two
+  game-loop items above, since they change what a game needs.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.

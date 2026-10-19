@@ -2,6 +2,32 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.21.0 — 2026-10-19
+
+- Game controllers. `gamekit/gamepad.vnt` (an eighth module) wraps SDL2's
+  `SDL_GameController` API: `pad_open(index)` returns a `Pad`, with `pad_ok`
+  as the test, `pad_attached` for the unplug check, and `pad_button` /
+  `pad_axis` polling the current state. A missing controller — none plugged
+  in, or an index out of range — opens *dead*, the same shape as a dead
+  `Screen`, `Tex`, or `Sound`: every other call is a guarded no-op, so a
+  keyboard-only machine stays playable. `pad_open` starts SDL's refcounted
+  gamecontroller subsystem and `pad_close` stops it, so pads close before
+  `screen_close`'s `SDL_Quit`. Axes stay raw — sticks span -32768..32767
+  with 0 at rest, triggers 0..32767 — and the `PAD_BUTTON_*` / `PAD_AXIS_*`
+  constants name the standard controls, extended share/paddle/touchpad
+  buttons included. This is polling, not events: the event loop stays
+  keyboard-focused.
+- `examples/sdl_gamepad.vnt` (raw C calls, SDL2 core only) opens a controller
+  by index and polls A, d-pad-left, the left stick, and the left trigger;
+  with no controller it reports the dead path and exits cleanly. The two new
+  headless tests open index 9999 — out of range on every machine — so their
+  frozen output is hardware-independent, and the existing games still build
+  without the module. 2 new tests (540 total).
+- The tutorial gains a Gamepads section (dead-handle semantics, raw axis
+  ranges, polling vs events), the reference adds the module to the kit
+  chapter, and both READMEs count eight modules. The new snippets join the
+  frozen-output doc checks.
+
 ## v0.20.0 — 2026-10-19
 
 - Sprites. `gamekit/image.vnt` (a seventh module) wraps SDL2_image:
