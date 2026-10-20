@@ -1,8 +1,9 @@
 # Vanta game kit
 
-Nine importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
+Ten importable modules that package the SDL2 (and SDL_ttf and SDL2_image)
 plumbing every game needs. They are ordinary `.vnt` files — the kit is a
-convention, not a language feature.
+convention, not a language feature. One module, `collide.vnt`, is pure Vanta
+with no SDL dependency at all.
 
 | Module | Provides |
 |---|---|
@@ -15,6 +16,7 @@ convention, not a language feature.
 | `text.vnt` | SDL_ttf text: `font_open`, `font_ok`, `font_close`, `text_measure`, `text_draw`, `text_sprite`, `text_sprite_ok`, `text_sprite_draw`, `text_sprite_free`, `text_quit` |
 | `audio.vnt` | SDL2 audio: tones — `audio_open`, `audio_ok`, `audio_play_tone`, `audio_pending`, `audio_wait`, `audio_close` — and WAV files: `sound_load`, `sound_ok`, `sound_play`, `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` — bounded helpers over the deterministic stream |
+| `collide.vnt` | Pure overlap tests: `collide_rects`, `collide_point`, `collide_circles`, `collide_circle_rect` |
 
 A minimal program — a window with a border and one square, for 3 frames:
 
@@ -212,9 +214,38 @@ false
 0
 ```
 
+Collision is the one import with no SDL in it — `collide.vnt` is pure Vanta,
+so it adds no library and runs in a plain headless test. Rectangles are
+`(x, y, w, h)` with the top-left corner and a positive size; edges that only
+touch are not overlaps, and `collide_point` is half-open. Circles take centre
+coordinates and radii; `collide_circle_rect` takes a circle followed by a
+rectangle. The distance tests compare squares, so none of them needs `sqrt`:
+
+```vanta
+import "gamekit/collide.vnt"
+
+func main() -> void:
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))   # true
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0))  # false: edges touch
+    print_bool(collide_point(0.0, 0.0, 0.0, 0.0, 10.0, 10.0))                # true: left/top edge
+    print_bool(collide_point(10.0, 5.0, 0.0, 0.0, 10.0, 10.0))               # false: right edge is out
+    print_bool(collide_circles(0.0, 0.0, 5.0, 7.0, 0.0, 3.0))                # true
+    print_bool(collide_circle_rect(12.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0))    # true: 2 px from the edge
+```
+
+```
+true
+false
+true
+false
+true
+true
+```
+
 Build it like any SDL2 program — `text.vnt` links SDL_ttf and `image.vnt`
-links SDL2_image as well as SDL2, and `audio.vnt` and `gamepad.vnt` need
-nothing beyond the core library:
+links SDL2_image as well as SDL2, and `audio.vnt`, `gamepad.vnt`, and
+`collide.vnt` need nothing beyond the core library (`collide.vnt` needs no
+library at all):
 
 ```powershell
 python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
@@ -224,8 +255,9 @@ Notes:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
   name starts with its module's prefix (`screen_*`, `ev_*`, `pad_*`,
-  `gfx_*`, `tex_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`).
-  Several modules — and the game's own names — coexist.
+  `gfx_*`, `tex_*`, `anim_*`, `font_*`, `text_*`, `audio_*`, `sound_*`,
+  `rand_*`, `collide_*`). Several modules — and the game's own names —
+  coexist.
 - **`Screen` carries whatever C returned.** There is no nil literal —
   `ptr_null::<T>()` builds one explicitly where C asks for NULL —
   and `screen_open` hands back null handles when anything fails, with
@@ -257,8 +289,11 @@ Notes:
   fixed RNG stream keeps results reproducible, and the dummy audio driver
   plays to nowhere in real time).
 
-[`../pong.vnt`](../pong.vnt) and [`../breakout.vnt`](../breakout.vnt) are the
-worked examples: pong imports six of the nine modules, draws its score with
-`text_draw`, and beeps with `audio_play_tone`; breakout loads the ball,
-paddle, and bricks from image files with `image.vnt`, spins the ball with
-`anim.vnt`, and fires WAV hits with `sound_load`.
+[`../pong.vnt`](../pong.vnt), [`../breakout.vnt`](../breakout.vnt), and
+[`../strike.vnt`](../strike.vnt) are the worked examples: pong imports six
+of the ten modules, draws its score with `text_draw`, and beeps with
+`audio_play_tone`; breakout loads the ball, paddle, and bricks from image
+files with `image.vnt`, spins the ball with `anim.vnt`, and fires WAV hits
+with `sound_load`; strike uses nine of the ten modules (all but `rng.vnt`),
+with a gamepad fallback, `collide.vnt` for every hit test, and a
+deterministic autopilot clear the test suite freezes.

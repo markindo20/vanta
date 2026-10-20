@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.23.0)
+# Vanta Language Reference (v0.24.0)
 
-This is the reference for the language as implemented at tag `v0.23.0`. Every
+This is the reference for the language as implemented at tag `v0.24.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -1298,14 +1298,15 @@ and waits for the device to drain. Sound has the same pair of examples:
 `examples/sdl_audio_cb.vnt` puts a Vanta function in the
 `SDL_AudioSpec.callback` field for SDL's audio thread to run. All of these
 are pure `extern` programs; the texture one links SDL2_image, the rest
-nothing but SDL2. `examples/pong.vnt` and `examples/breakout.vnt`, the other
-two playable games, are built on the
+nothing but SDL2. `examples/pong.vnt`, `examples/breakout.vnt`, and
+`examples/strike.vnt`, the other three playable games, are built on the
 [game kit](#the-game-kit-v0140) documented below.
 
 ## The game kit (v0.14.0)
 
-`examples/gamekit/` is nine reusable modules over the SDL2, SDL_ttf, and
-SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
+`examples/gamekit/` is ten reusable modules over the SDL2, SDL_ttf, and
+SDL2_image calls above — ordinary `.vnt` files, imported like anything else.
+`collide.vnt` is the exception: pure Vanta, with no SDL and no externs.
 
 | Module | Provides |
 |---|---|
@@ -1318,13 +1319,14 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else:
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`; `TextSprite`, `text_sprite` / `text_sprite_ok` / `text_sprite_draw` / `text_sprite_free`; `text_quit` |
 | `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_ok` / `sound_play` / `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
+| `collide.vnt` | Pure overlap tests (no SDL): `collide_rects`, `collide_point`, `collide_circles`, `collide_circle_rect` |
 
 Three idioms fall out of the language rules:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
   name is prefixed by its module (`screen_*`, `ev_*`, `pad_*`, `gfx_*`,
-  `tex_*`, `anim_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`);
-  several modules — and the game's own names — coexist.
+  `tex_*`, `anim_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`,
+  `collide_*`); several modules — and the game's own names — coexist.
 - **Failures come back the way C reports them.** There is still no nil
   literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
@@ -1541,13 +1543,44 @@ false
 0
 ```
 
+`collide.vnt` next: the one kit module with no SDL in it. It is pure Vanta,
+so it adds no library and can be tested in a plain headless program.
+Rectangles are `(x, y, w, h)` with the top-left corner and a positive size;
+edges that only touch are not overlaps, and `collide_point` is half-open —
+the left and top edges are inside, the right and bottom edges are out.
+Circles take centre coordinates and radii. The distance tests compare
+squares, so none of them calls `sqrt`:
+
+```vanta
+import "gamekit/collide.vnt"
+
+func main() -> void:
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))   # true
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0))  # false: edges touch
+    print_bool(collide_point(0.0, 0.0, 0.0, 0.0, 10.0, 10.0))                # true: left/top edge
+    print_bool(collide_point(10.0, 5.0, 0.0, 0.0, 10.0, 10.0))               # false: right edge is out
+    print_bool(collide_circles(0.0, 0.0, 5.0, 7.0, 0.0, 3.0))                # true
+    print_bool(collide_circle_rect(12.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0))    # true: 2 px from the edge
+```
+
+```
+true
+false
+true
+false
+true
+true
+```
+
 Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
-well, `image.vnt` links SDL2_image (`audio.vnt` and `gamepad.vnt` need
-nothing extra — they use SDL2's core library):
+well, `image.vnt` links SDL2_image (`audio.vnt`, `gamepad.vnt`, and
+`collide.vnt` need nothing extra — the first two use SDL2's core library,
+and `collide.vnt` uses no library at all):
 
 ```powershell
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+python main.py run examples/strike.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 ```
 
 `examples/pong.vnt` is the worked example for the first game: it imports six
@@ -1558,6 +1591,12 @@ testable headless — a frame-limit argument plus `SDL_VIDEODRIVER=dummy` and
 `examples/breakout.vnt` adds the satellite modules on top: a tinted sprite
 wall out of one white brick texture, WAV hits, and a deterministic
 full-clear run the suite freezes the same way.
+`examples/strike.vnt` is the fourth game and the full-kit example: it uses
+nine of the ten modules (all but `rng.vnt`), draws an animated ship and
+three waves of tinted saucers, keeps the HUD with `text_draw`, fires WAV
+shots and hits, falls back to the keyboard when no gamepad is attached, and
+uses `collide.vnt` for every overlap test. With no input its autopilot
+clears all eighteen saucers at frame 1020, which the suite freezes.
 
 ## File I/O (v0.3.1)
 

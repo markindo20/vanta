@@ -671,15 +671,16 @@ and the rest of the API are documented in the reference's
 
 The SDL2 program above talks to C directly, and that never stops working —
 but wiring the window, the input events, and the rectangles by hand in every
-game gets old. The game kit (`examples/gamekit/`) does it once, as nine
+game gets old. The game kit (`examples/gamekit/`) does it once, as ten
 ordinary `.vnt` modules you import when you need them: `sdl.vnt` (the SDL2
 declarations, the key constants, and the `Screen` lifecycle), `input.vnt`
 (reading events), `gamepad.vnt` (controllers, polled), `gfx.vnt` (rectangle
 drawing), `image.vnt` (textures, over SDL2_image), `anim.vnt` (sprite-sheet
 animation), `text.vnt` (text, over SDL_ttf), `audio.vnt` (tones and WAV
-files, over SDL2's audio), and `rng.vnt` (bounded random numbers over the
-deterministic stream). A tiny demo — a square bouncing between the walls for
-60 frames:
+files, over SDL2's audio), `rng.vnt` (bounded random numbers over the
+deterministic stream), and `collide.vnt` (pure overlap tests, with no SDL
+dependency). A tiny demo — a square bouncing between the walls for 60
+frames:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -724,10 +725,43 @@ That is the whole kit: imports, prefixes, and C's own failure values.
 `examples/pong.vnt` puts it to work with two paddles, a tracking AI,
 `match` for the serve direction, a text score, and beeps;
 `examples/breakout.vnt` adds sprite images, an animated ball, and sound
-files, and
+files; `examples/strike.vnt` is the fourth game and the full-kit example —
+an animated ship, three waves of tinted saucers, a text HUD, WAV shots and
+hits, a gamepad fallback, and collision tests; and
 `examples/sdl_gamepad.vnt` shows the raw controller calls behind
 `gamepad.vnt`; the [reference](LANGUAGE_REFERENCE.md#the-game-kit-v0140)
 lists every function.
+
+## Collision without SDL
+
+`collide.vnt` is the one kit module with no SDL in it: pure Vanta functions,
+no externs, no library to link, and a plain headless test on every machine.
+Rectangles are `(x, y, w, h)` — the top-left corner and a positive size.
+Edges that only touch are not overlaps, and point-in-rectangle is half-open,
+so the left and top edges are inside while the right and bottom edges are
+out. Circles take centre coordinates and radii; the distance tests compare
+squares, so there is no `sqrt` in any of them:
+
+```vanta
+import "gamekit/collide.vnt"
+
+func main() -> void:
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))   # true
+    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0))  # false: edges touch
+    print_bool(collide_point(0.0, 0.0, 0.0, 0.0, 10.0, 10.0))                # true: left/top edge
+    print_bool(collide_point(10.0, 5.0, 0.0, 0.0, 10.0, 10.0))               # false: right edge is out
+    print_bool(collide_circles(0.0, 0.0, 5.0, 7.0, 0.0, 3.0))                # true
+    print_bool(collide_circle_rect(12.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0))    # true: 2 px from the edge
+```
+
+```
+true
+false
+true
+false
+true
+true
+```
 
 ## Text on screen
 
@@ -1068,8 +1102,8 @@ python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --li
   kit, file I/O, and the builtin list.
 - [`../examples/`](../examples) — one sample per feature area, from
   `physics.vnt` to `boids.vnt`, `grid.vnt`, and the playable `sdl_game.vnt`,
-  `pong.vnt`, and `breakout.vnt`, with the reusable `gamekit/` modules
-  alongside.
+  `pong.vnt`, `breakout.vnt`, and `strike.vnt`, with the reusable `gamekit/`
+  modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (554 tests).
+- `python -m unittest discover -s tests` — run the test suite (556 tests).

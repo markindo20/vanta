@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.23.0)
+# Vanta - a game-oriented systems language (v0.24.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -69,14 +69,17 @@ tone, and a Vanta callback on SDL's audio thread), `examples/sdl_sound.vnt`
 loads a WAV file, `examples/sdl_gamepad.vnt` polls a game controller, and
 `examples/sdl_game.vnt` is the first playable Vanta game — catch the falling
 coins with Left/Right (or A/D), Esc or the close button quits. The game kit
-(`examples/gamekit/`) packages the SDL2 plumbing as nine importable modules,
-and `examples/pong.vnt` and `examples/breakout.vnt` are the second and third
-playable games built on it:
+(`examples/gamekit/`) packages the SDL2 plumbing as ten importable modules,
+and `examples/pong.vnt`, `examples/breakout.vnt`, and `examples/strike.vnt`
+are the second, third, and fourth playable games built on it:
 pong is W/S or Up/Down against a tracking AI, first to 5 wins, with the score
 drawn as text and a beep on every hit and point; breakout is a wall of
 tinted sprites, a spinning animated ball, a tracking paddle, and WAV hits,
-and with no key held the paddle plays its own demo; `examples/text_bench.vnt`
-is the kit's measured before/after for text sprites.
+and with no key held the paddle plays its own demo; strike is a one-screen
+wave shooter with an animated ship, three waves of tinted saucers, WAV shots
+and hits, a gamepad fallback, and a deterministic autopilot clear;
+`examples/text_bench.vnt` is the kit's measured before/after for text
+sprites.
 
 ```powershell
 python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
@@ -86,6 +89,7 @@ python main.py run examples/sdl_audio.vnt --lib-dir C:/msys64/mingw64/lib --link
 python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
 python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
 python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+python main.py run examples/strike.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
 ```
 
 All of them are pure `extern` declarations, so no SDL headers are needed to
@@ -104,7 +108,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (554 tests) |
+| `tests/` | `unittest` suite (556 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -146,9 +150,10 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `sdl_gamepad.vnt` | SDL2 controllers: `SDL_GameControllerOpen`, button/axis polling, the dead-handle path |
 | `text_bench.vnt` | The measured before/after for `text_sprite`: one string drawn both ways; counts stable, milliseconds the machine's |
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
-| `gamekit/` | Nine reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), sprite animation, text (SDL_ttf), audio (tones and WAV files), random numbers |
+| `gamekit/` | Ten reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), sprite animation, text (SDL_ttf), audio (tones and WAV files), random numbers, and pure collision tests |
 | `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |
 | `breakout.vnt` | The third playable game: tinted sprite wall, animated ball, auto-playing paddle, WAV hits — built on the game kit |
+| `strike.vnt` | The fourth playable game: animated ship, three waves of tinted saucers, text HUD, WAV hits, gamepad fallback, collision tests — built on the game kit |
 
 ## Tests
 
@@ -186,7 +191,7 @@ assemble strings with `StrBuilder`, name states and modes with enums and
 branch on them exhaustively with `match`, and build and run real SDL2 games
 on the game kit, text rendering, sprite images, sprite-sheet animation, and
 WAV sound files included
-(eight SDL examples, three of them playable games) — but the remaining gaps
+(nine SDL examples, four of them playable games) — but the remaining gaps
 are real:
 
 - strings come from a fixed 64 KiB pool that is never freed; there is no
@@ -206,10 +211,10 @@ are real:
   data; `==`/`!=` and `match` are the operations on them (they may appear in
   `extern` signatures)
 - windowing, images, and sound are shipped as SDL2 examples plus the game
-  kit: there is no gamepad wrapper, no sprite-animation helper (sheet frames
-  are drawn by hand with `tex_draw_src`), and events are read by hand (an
-  `SDL_Event` is viewed as raw `i32`s); `text_draw` uploads a texture per
-  call — fine for HUDs, wasteful for walls of text
+  kit: the kit wraps controllers, sprite-sheet animation, textures, text,
+  audio, and rectangle/circle collision; events are still read by hand (an
+  `SDL_Event` is viewed as raw `i32`s), and `text_draw` uploads a texture
+  per call — fine for HUDs, wasteful for walls of text
 - pointers have no null safety beyond `ptr_is_null` / `ptr_null::<T>()`;
   `ptr<void>` widening
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
