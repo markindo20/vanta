@@ -282,8 +282,9 @@ one is not, and memory behind a `ptr<T>` is always writable.
 
 ## Strings and formatted output
 
-`str` values come from literals or helpers like `str_concat` (which
-allocates from a fixed, resettable pool). `print_fmt` formats a literal
+`str` values are immutable and reference-counted: literals are zero-copy,
+while helpers like `str_concat` return an owned result that is freed
+automatically when the last copy goes away. `print_fmt` formats a literal
 template with `{}` placeholders.
 
 ```vanta
@@ -299,9 +300,10 @@ hello, player (hp 7)
 hi, player
 ```
 
-The pool is fine for a value or two, but assembling a line piece by piece
-with `str_concat` in a loop allocates an intermediate string every time. For
-that, build into an arena-backed `StrBuilder` and take the result once:
+`str_concat` is fine for a value or two, but assembling a line piece by piece
+in a loop allocates an intermediate string every time. For that, build into an
+arena-backed `StrBuilder` and take the result once; `to_str()` returns an
+owned string that survives the builder and its arena:
 
 ```vanta
 func main() -> void:
@@ -1150,4 +1152,4 @@ libraries automatically.
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (573 tests).
+- `python -m unittest discover -s tests` — run the test suite (586 tests).

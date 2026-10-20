@@ -1011,9 +1011,9 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_file_read_pool_overflow_fails_loudly(self):
-        # A file larger than the 64 KiB string pool must fail loudly with a
-        # specific message rather than returning garbage or a truncated read.
+    def test_file_read_large_owned_string(self):
+        # file_read used to be capped by the 64 KiB string pool. Owned strings
+        # have no pool, so a larger file is read in full.
         name, path = find_cxx_compiler()
         src = (
             "func main() -> void:\n"
@@ -1036,26 +1036,234 @@ class IntegrationTests(unittest.TestCase):
 
             big = os.path.join(tmp, 'big.txt')
             with open(big, 'w', encoding='utf-8') as f:
-                f.write('x' * 70000)
+                f.write('x' * 100000)
             r = subprocess.run([exe, big], capture_output=True, text=True)
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn('does not fit the 65536-byte string pool', r.stderr)
-            self.assertIn('(70000 bytes)', r.stderr)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip(), '100000')
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_string_pool_exhaustion_fails_loudly(self):
+    def test_string_growth_has_no_pool_limit(self):
+        # Each discarded result is freed, so a long loop cannot exhaust a
+        # global pool. This would have failed after roughly 21k allocations
+        # with the old 64 KiB pool.
         src = (
             "func main() -> void:\n"
-            "    mut s = \"x\"\n"
+            "    mut total = 0\n"
             "    for i in range(0, 100000):\n"
-            "        s = str_concat(s, \"y\")\n"
-            "    print_i32(str_len(s))\n"
+            "        let s = str_concat(\"a\", \"b\")\n"
+            "        total += str_len(s)\n"
+            "    print_i32(total)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_growth_')
+        try:
+            path = os.path.join(tmp, 'growth.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['200000'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_owned_string_survives_str_pool_reset(self):
+        # str_pool_reset is retained as a compatibility no-op. It must not
+        # invalidate owned strings.
+        src = (
+            "func main() -> void:\n"
+            "    let s = str_concat(\"hello\", \" world\")\n"
+            "    str_pool_reset()\n"
+            "    print_str(s)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_reset_')
+        try:
+            path = os.path.join(tmp, 'reset.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['hello world'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_builder_result_outlives_arena(self):
+        # to_str copies the builder's bytes into an owned string; returning
+        # it after the builder's arena dies is safe.
+        src = (
+            "func build() -> str:\n"
+            "    let a = Arena(256)\n"
+            "    let b = a.str_builder()\n"
+            "    b.append_str(\"built \")\n"
+            "    b.append_i32(42)\n"
+            "    return b.to_str()\n"
+            "func main() -> void:\n"
+            "    print_str(build())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_builder_')
+        try:
+            path = os.path.join(tmp, 'builder.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['built 42'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_owned_strings_in_arena_survive_reset_by_copy(self):
+        # Arena allocation now constructs Str elements and reset destroys
+        # them; an independent copy keeps the bytes alive.
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(256)\n"
+            "    let xs = a.alloc::<str>(2)\n"
+            "    xs[0] = str_concat(\"one\", \"!\")\n"
+            "    xs[1] = str_concat(\"two\", \"!\")\n"
+            "    let keep = xs[0]\n"
+            "    a.reset()\n"
+            "    print_str(keep)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_arena_')
+        try:
+            path = os.path.join(tmp, 'arena.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['one!'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_extern_c_string_argument(self):
+        # The C boundary still takes const char*; a Vanta Str converts at the
+        # call site. puts is available from the C library on every platform.
+        src = (
+            'extern "C" {\n'
+            "    func puts(s: str) -> i32\n"
+            "}\n"
+            "func main() -> void:\n"
+            "    puts(str_concat(\"hel\", \"lo\"))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_extern_')
+        try:
+            path = os.path.join(tmp, 'extern.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['hello'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_callbacks_end_to_end(self):
+        # Vanta functions and builtins passed to C callbacks still take owned
+        # Str values on the Vanta side while C sees const char*. A str-returning
+        # callback exercises the other direction of the adapter.
+        ar = shutil.which('ar')
+        if ar is None:
+            self.skipTest('ar not available (needed to archive the C fixture)')
+        cc = shutil.which('gcc') or shutil.which('clang') or shutil.which('cc')
+        if cc is None:
+            self.skipTest('no C compiler available for the fixture')
+        name, path = find_cxx_compiler()
+        if _is_msvc(name):
+            self.skipTest('fixture is a GNU archive; MSVC would need a .lib')
+        tmp = tempfile.mkdtemp(prefix='vanta_str_cb_')
+        try:
+            c_src = (
+                '#include <stddef.h>\n'
+                'void callit(void (*cb)(const char*)) { cb("from c"); }\n'
+                'const char* callret(const char* (*cb)(const char*)) {\n'
+                '    return cb("x");\n'
+                '}\n'
+            )
+            c_path = os.path.join(tmp, 'strcb.c')
+            with open(c_path, 'w', encoding='utf-8') as f:
+                f.write(c_src)
+            obj = os.path.join(tmp, 'strcb.o')
+            p = subprocess.run([cc, '-c', c_path, '-o', obj],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            lib = os.path.join(tmp, 'libstrcb.a')
+            p = subprocess.run([ar, 'rcs', lib, obj],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+
+            src = (
+                'extern "strcb" {\n'
+                "    func callit(cb: func(str)) -> void\n"
+                "    func callret(cb: func(str) -> str) -> str\n"
+                "}\n"
+                "func say(s: str) -> void:\n"
+                "    print_str(str_concat(\"got \", s))\n"
+                "func echo(s: str) -> str:\n"
+                "    return str_concat(\"got \", s)\n"
+                "func main() -> void:\n"
+                "    callit(say)\n"
+                "    callit(print_str)\n"
+                "    print_str(callret(echo))\n"
+            )
+            src_path = os.path.join(tmp, 'cb.vnt')
+            with open(src_path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            prog, tc = _frontend_only(src_path)
+            cpp = os.path.join(tmp, 'main.cpp')
+            _emit_source(prog, tc, cpp)
+            exe = os.path.join(tmp, 'prog.exe' if os.name == 'nt' else 'prog')
+            from compiler.driver import _compiler_cmd
+            cmd = _compiler_cmd(name, path, cpp, exe, release=True,
+                                lib_dirs=[tmp], libs=['strcb'])
+            p = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['got from c', 'from c', 'got x'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_list_of_owned_strings(self):
+        # List<str> grows and copies Str values; the arena destroys the
+        # backing elements when it goes away, while returned copies stay alive.
+        src = (
+            "func main() -> void:\n"
+            "    let a = Arena(2048)\n"
+            "    let xs = a.list::<str>()\n"
+            "    for i in range(0, 20):\n"
+            "        xs.push(str_concat(\"item\", to_str_i32(i)))\n"
+            "    print_str(xs.pop())\n"
+            "    print_i32(len(xs))\n"
+            "    print_str(xs.remove(0))\n"
+            "    print_str(xs.at(0))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_list_')
+        try:
+            path = os.path.join(tmp, 'list.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['item19', '19', 'item0', 'item1'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_string_const_initializer(self):
+        src = (
+            'const PREFIX: str = "vanta"\n'
+            "func main() -> void:\n"
+            "    print_str(str_concat(PREFIX, \"!\"))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_str_const_')
+        try:
+            path = os.path.join(tmp, 'const.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['vanta!'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_file_io_preserves_embedded_nul(self):
+        # file_read/file_write carry the full byte length, not strlen. The
+        # returned Str keeps the NUL and the trailing byte; str_len reports 4.
+        src = (
+            "func main() -> void:\n"
+            "    let p = arg_str(1)\n"
+            "    let data = file_read(p)\n"
+            "    print_i32(str_len(data))\n"
+            "    print_i32(file_write(str_concat(p, \".out\"), data))\n"
         )
         name, path = find_cxx_compiler()
-        tmp = tempfile.mkdtemp(prefix='vanta_pool_')
+        tmp = tempfile.mkdtemp(prefix='vanta_str_nul_')
         try:
-            src_path = os.path.join(tmp, 'pool.vnt')
+            src_path = os.path.join(tmp, 'nul.vnt')
             with open(src_path, 'w', encoding='utf-8') as f:
                 f.write(src)
             prog, tc = _frontend_only(src_path)
@@ -1066,9 +1274,16 @@ class IntegrationTests(unittest.TestCase):
             cmd = _compiler_cmd(name, path, cpp, exe, release=True)
             p = subprocess.run(cmd, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, msg=p.stdout + p.stderr)
-            r = subprocess.run([exe], capture_output=True, text=True)
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn('string pool exhausted', r.stderr)
+
+            inp = os.path.join(tmp, 'in.bin')
+            payload = b'a\x00b\xff'
+            with open(inp, 'wb') as f:
+                f.write(payload)
+            r = subprocess.run([exe, inp], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['4', '4'])
+            with open(inp + '.out', 'rb') as f:
+                self.assertEqual(f.read(), payload)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

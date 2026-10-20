@@ -92,14 +92,17 @@ distinct semantics.
 `runtime/vanta_runtime.hpp` is a single-header runtime providing:
 
 - `Vec2`, `Vec3`, `Quat`, `Matrix4` (row-major) with their operators
-- the `Arena` bump allocator
+- `Str` — immutable, reference-counted strings; literals are zero-copy static
+  views, and owned buffers are freed by the last copy
+- the `Arena` bump allocator; it constructs and destroys non-trivial element
+  types, so `alloc::<str>` and structs containing `Str` are well-defined
 - `List<T>` with `list_new` / `list_push` / `list_pop` / `list_insert` /
   `list_remove` / `list_sort` (a stable merge sort driven by the caller's
   comparator function value) / `list_at_checked[_ref]` — the arena-backed
   growable lists behind `arena.list::<T>()`
 - `StrBuilder` with `strb_append_*` / `strb_to_str` / `strb_clear` — arena-backed
-  string building behind `arena.str_builder()`; `to_str()` copies, so results
-  are stable
+  string building behind `arena.str_builder()`; `to_str()` returns an owned
+  `Str`, so results survive the builder and arena
 - `at_checked` / `at_checked_ref` (plus `index_fail`) — the bounds-checked
   access behind `xs.at(i)`; a bad index reports the array size and the
   access's source line
@@ -109,11 +112,12 @@ distinct semantics.
 - IO, `sqrt` and trig (`sin`/`cos`/`tan`/`atan2`), `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
 - `write_*` variants of the `print_*` functions (no trailing newline)
 - `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
-- `str_eq` (`strcmp`-backed string equality), `str_len`, and `str_to_i32`/`str_to_f32`
-- a 64 KiB process-lifetime string pool backing `str_concat`, `to_str_*`, and
-  `file_read`
+- `str_eq` (`memcmp`-backed byte equality), `str_len`, and
+  `str_to_i32`/`str_to_f32`
+- `str_concat` and `to_str_*` — return owned `Str` values; `str_pool_reset` is
+  a compatibility no-op
 - `file_exists` / `file_read` / `file_write` — byte-exact file I/O; `file_read`
-  allocates from the string pool and `file_write` returns the byte count or `-1`
+  returns an owned `Str` and `file_write` returns the byte count or `-1`
 - `rand_state` / `rand_seed` / `rand_f32` — xorshift32, fixed seed at startup
   so programs are reproducible unless explicitly seeded
 - `g_argc` / `g_argv`, populated by the generated `main`, exposed as
@@ -148,7 +152,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 573 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 586 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

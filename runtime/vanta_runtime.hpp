@@ -7,8 +7,153 @@
 #include <cstddef>
 #include <cstdarg>
 #include <array>
+#include <new>
+#include <type_traits>
+#include <vector>
 
 namespace vanta {
+
+// ---------- Strings ----------
+// `str` is an immutable byte string with reference-counted ownership.
+// String literals and argv borrow static storage; str_concat, to_str_*, and
+// file_read own a heap buffer that is freed when the last Str referencing it
+// dies. Copies are cheap (one refcount bump), and passing a Str never
+// invalidates another one.
+class Str {
+public:
+    Str() = default;
+
+    Str(const Str& other)
+        : data_(other.data_), len_(other.len_), rep_(other.rep_) {
+        if (rep_) rep_->refs += 1;
+    }
+
+    Str(Str&& other) noexcept
+        : data_(other.data_), len_(other.len_), rep_(other.rep_) {
+        other.data_ = "";
+        other.len_ = 0;
+        other.rep_ = nullptr;
+    }
+
+    Str& operator=(const Str& other) {
+        if (this != &other) {
+            release();
+            data_ = other.data_;
+            len_ = other.len_;
+            rep_ = other.rep_;
+            if (rep_) rep_->refs += 1;
+        }
+        return *this;
+    }
+
+    Str& operator=(Str&& other) noexcept {
+        if (this != &other) {
+            release();
+            data_ = other.data_;
+            len_ = other.len_;
+            rep_ = other.rep_;
+            other.data_ = "";
+            other.len_ = 0;
+            other.rep_ = nullptr;
+        }
+        return *this;
+    }
+
+    ~Str() { release(); }
+
+    // A view of compile-time storage: no allocation and no ownership.
+    static Str literal(const char* data, int32_t len) {
+        Str out;
+        out.data_ = data ? data : "";
+        out.len_ = len;
+        return out;
+    }
+
+    static Str borrow(const char* data) {
+        return literal(data, data ? (int32_t)std::strlen(data) : 0);
+    }
+
+    // Copy a C string or a byte range into a freshly owned buffer.
+    static Str copy(const char* data, int32_t len) {
+        if (!data || len <= 0) return Str();
+        Rep* rep = static_cast<Rep*>(
+            std::malloc(sizeof(Rep) + (size_t)len));
+        if (!rep) {
+            std::fprintf(stderr, "vanta: string allocation failed\n");
+            std::exit(1);
+        }
+        rep->refs = 1;
+        rep->len = len;
+        std::memcpy(rep->data, data, (size_t)len);
+        rep->data[len] = '\0';
+        Str out;
+        out.data_ = rep->data;
+        out.len_ = len;
+        out.rep_ = rep;
+        return out;
+    }
+
+    static Str from_cstr(const char* data) {
+        if (!data) return Str();
+        return copy(data, (int32_t)std::strlen(data));
+    }
+
+    static Str concat(const Str& a, const Str& b) {
+        int64_t total = (int64_t)a.size() + (int64_t)b.size();
+        if (total > (int64_t)INT32_MAX) {
+            std::fprintf(stderr, "vanta: concatenated string is too large\n");
+            std::exit(1);
+        }
+        int32_t len = (int32_t)total;
+        if (len <= 0) return Str();
+        Rep* rep = static_cast<Rep*>(
+            std::malloc(sizeof(Rep) + (size_t)len));
+        if (!rep) {
+            std::fprintf(stderr, "vanta: string allocation failed\n");
+            std::exit(1);
+        }
+        rep->refs = 1;
+        rep->len = len;
+        if (a.size() > 0) std::memcpy(rep->data, a.c_str(), (size_t)a.size());
+        if (b.size() > 0) {
+            std::memcpy(rep->data + a.size(), b.c_str(), (size_t)b.size());
+        }
+        rep->data[len] = '\0';
+        Str out;
+        out.data_ = rep->data;
+        out.len_ = len;
+        out.rep_ = rep;
+        return out;
+    }
+
+    const char* c_str() const { return data_ ? data_ : ""; }
+    int32_t size() const { return len_; }
+    bool empty() const { return len_ == 0; }
+
+    // Extern C functions still take raw const char*; this conversion keeps
+    // those calls source-compatible without exposing the representation.
+    operator const char*() const { return c_str(); }
+
+private:
+    struct Rep {
+        uint32_t refs;
+        int32_t len;
+        char data[1];
+    };
+
+    void release() {
+        if (rep_ && --rep_->refs == 0) {
+            std::free(rep_);
+        }
+        data_ = "";
+        len_ = 0;
+        rep_ = nullptr;
+    }
+
+    const char* data_ = "";
+    int32_t len_ = 0;
+    Rep* rep_ = nullptr;
+};
 
 // ---------- Vec2 ----------
 struct Vec2 {
@@ -165,7 +310,7 @@ public:
         data_ = static_cast<char*>(std::malloc((size_t)bytes));
         if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
     }
-    ~Arena() { std::free(data_); }
+    ~Arena() { reset(); std::free(data_); }
     Arena(const Arena&) = delete;
     Arena& operator=(const Arena&) = delete;
     Arena(Arena&&) = delete;
@@ -185,15 +330,50 @@ public:
 
     template <typename T>
     T* alloc(int32_t count) {
-        return static_cast<T*>(raw_alloc((uint32_t)(sizeof(T) * (size_t)count), (uint32_t)alignof(T)));
+        T* result = static_cast<T*>(
+            raw_alloc((uint32_t)(sizeof(T) * (size_t)count),
+                      (uint32_t)alignof(T)));
+        // Construct non-trivial elements (Str and aggregates containing it)
+        // so assignment and destruction are well-defined. Trivial types keep
+        // the old uninitialized bump-allocation behaviour.
+        if constexpr (std::is_default_constructible<T>::value) {
+            for (int32_t i = 0; i < count; i++) {
+                new (static_cast<void*>(result + i)) T;
+            }
+        }
+        if constexpr (std::is_default_constructible<T>::value &&
+                      !std::is_trivially_destructible<T>::value) {
+            if (count > 0) {
+                cleanups_.push_back(Cleanup{
+                    result, count,
+                    [](void* p, int32_t n) {
+                        T* items = static_cast<T*>(p);
+                        for (int32_t i = n - 1; i >= 0; i--) items[i].~T();
+                    }});
+            }
+        }
+        return result;
     }
 
-    void reset() { offset_ = 0; }
+    void reset() {
+        for (auto it = cleanups_.rbegin(); it != cleanups_.rend(); ++it) {
+            it->destroy(it->ptr, it->count);
+        }
+        cleanups_.clear();
+        offset_ = 0;
+    }
 
 private:
+    struct Cleanup {
+        void* ptr;
+        int32_t count;
+        void (*destroy)(void*, int32_t);
+    };
+
     char* data_;
     uint32_t size_;
     uint32_t offset_;
+    std::vector<Cleanup> cleanups_;
 };
 
 // ---------- Assertions ----------
@@ -390,11 +570,10 @@ inline T& list_at_checked_ref(List<T> xs, int32_t index, int32_t line) {
 
 // ---------- String builder (StrBuilder) ----------
 // A StrBuilder is a handle onto one growing, NUL-terminated byte buffer in
-// an Arena. Append pieces without touching the fixed string pool, then call
-// to_str() for the result. to_str() copies the current contents into a
-// fresh arena block, so the returned str stays stable — nothing is ever
-// freed, and arena.reset() invalidates everything in that arena. Like
-// List<T>, a builder is an indirection: appends work through a plain `let`.
+// an Arena. Append pieces, then call to_str() for the result. to_str() copies
+// the current contents into an owned, reference-counted str, so the result
+// stays valid after the builder or its arena dies. Like List<T>, a builder is
+// an indirection: appends work through a plain `let`.
 struct StrBuilder {
     struct Hdr {
         char* data;
@@ -434,8 +613,8 @@ inline void strb_append_n(StrBuilder b, const char* s, int32_t n) {
     b.h->data[b.h->len] = '\0';
 }
 
-inline void strb_append_str(StrBuilder b, const char* s) {
-    strb_append_n(b, s, (int32_t)std::strlen(s));
+inline void strb_append_str(StrBuilder b, Str s) {
+    strb_append_n(b, s.c_str(), s.size());
 }
 
 inline void strb_append_i32(StrBuilder b, int32_t v) {
@@ -463,7 +642,8 @@ inline void strb_append_f64(StrBuilder b, double v) {
 }
 
 inline void strb_append_bool(StrBuilder b, bool v) {
-    strb_append_str(b, v ? "true" : "false");
+    if (v) strb_append_n(b, "true", 4);
+    else strb_append_n(b, "false", 5);
 }
 
 inline void strb_clear(StrBuilder b) {
@@ -471,11 +651,8 @@ inline void strb_clear(StrBuilder b) {
     b.h->data[0] = '\0';
 }
 
-inline const char* strb_to_str(StrBuilder b) {
-    char* out = b.h->arena->alloc<char>(b.h->len + 1);
-    std::memcpy(out, b.h->data, (size_t)b.h->len);
-    out[b.h->len] = '\0';
-    return out;
+inline Str strb_to_str(StrBuilder b) {
+    return Str::copy(b.h->data, b.h->len);
 }
 
 // ---------- Built-in IO / math ----------
@@ -484,7 +661,7 @@ inline void print_u32(uint32_t v) { std::printf("%u\n", (unsigned)v); }
 inline void print_f32(float v) { std::printf("%f\n", (double)v); }
 inline void print_f64(double v) { std::printf("%lf\n", v); }
 inline void print_bool(bool v) { std::printf("%s\n", v ? "true" : "false"); }
-inline void print_str(const char* s) { std::printf("%s\n", s); }
+inline void print_str(Str s) { std::printf("%s\n", s.c_str()); }
 inline void print_newline() { std::printf("\n"); }
 inline float sqrt_f32(float v) { return std::sqrt(v); }
 inline double sqrt_f64(double v) { return std::sqrt(v); }
@@ -505,7 +682,7 @@ inline void write_u32(uint32_t v) { std::printf("%u", (unsigned)v); }
 inline void write_f32(float v) { std::printf("%f", (double)v); }
 inline void write_f64(double v) { std::printf("%lf", v); }
 inline void write_bool(bool v) { std::printf("%s", v ? "true" : "false"); }
-inline void write_str(const char* s) { std::printf("%s", s); }
+inline void write_str(Str s) { std::printf("%s", s.c_str()); }
 
 // ---------- Scalar math ----------
 inline int32_t abs_i32(int32_t v) { return v < 0 ? -v : v; }
@@ -518,18 +695,18 @@ inline float floor_f32(float v) { return std::floor(v); }
 inline float ceil_f32(float v) { return std::ceil(v); }
 
 // ---------- String helpers ----------
-inline bool str_eq(const char* a, const char* b) {
-    if (a == b) return true;
-    if (!a || !b) return false;
-    return std::strcmp(a, b) == 0;
+inline bool str_eq(const Str& a, const Str& b) {
+    if (a.size() != b.size()) return false;
+    if (a.size() == 0) return true;
+    return std::memcmp(a.c_str(), b.c_str(), (size_t)a.size()) == 0;
 }
-inline int32_t str_len(const char* s) { return (int32_t)std::strlen(s); }
+inline int32_t str_len(Str s) { return s.size(); }
 // strtol/strtod parse a leading number and yield 0 when there is none.
-inline int32_t str_to_i32(const char* s) {
-    return (int32_t)std::strtol(s ? s : "", nullptr, 10);
+inline int32_t str_to_i32(Str s) {
+    return (int32_t)std::strtol(s.c_str(), nullptr, 10);
 }
-inline float str_to_f32(const char* s) {
-    return (float)std::strtod(s ? s : "", nullptr);
+inline float str_to_f32(Str s) {
+    return (float)std::strtod(s.c_str(), nullptr);
 }
 
 // ---------- Formatted output ----------
@@ -542,90 +719,75 @@ inline void print_fmt_impl(const char* fmt, ...) {
     va_end(ap);
 }
 
-// ---------- String pool ----------
-// str_concat and the to_str_* helpers need somewhere to put their results.
-// Vanta's `str` is a plain const char*, and the Arena is user-scoped, so we
-// bump-allocate from a fixed process-lifetime pool. It is never freed; call
-// str_pool_reset() to reclaim it, and note that strings built from the pool
-// are invalidated by a reset.
-inline const uint32_t STR_POOL_SIZE = 1u << 16;  // 64 KiB
-inline char*& str_pool_base() { static char* p = nullptr; return p; }
-inline uint32_t& str_pool_used() { static uint32_t u = 0; return u; }
+// ---------- String ownership ----------
+// str_concat, to_str_*, and file_read return owned Str values. The old
+// process-lifetime pool is gone, so str_pool_reset() is retained as a no-op
+// for source compatibility; it no longer invalidates anything.
+inline void str_pool_reset() {}
 
-inline char* str_pool_alloc(uint32_t n) {
-    if (str_pool_base() == nullptr) {
-        str_pool_base() = (char*)std::malloc(STR_POOL_SIZE);
-        if (!str_pool_base()) { std::fprintf(stderr, "vanta: string pool alloc failed\n"); std::exit(1); }
-    }
-    if (str_pool_used() + n > STR_POOL_SIZE) {
-        std::fprintf(stderr, "vanta: string pool exhausted (%u bytes); call str_pool_reset()\n",
-                     (unsigned)STR_POOL_SIZE);
-        std::exit(1);
-    }
-    char* r = str_pool_base() + str_pool_used();
-    str_pool_used() += n;
-    return r;
+inline Str str_concat(Str a, Str b) {
+    return Str::concat(a, b);
 }
-inline void str_pool_reset() { str_pool_used() = 0; }
-
-inline const char* str_concat(const char* a, const char* b) {
-    uint32_t la = (uint32_t)std::strlen(a), lb = (uint32_t)std::strlen(b);
-    char* r = str_pool_alloc(la + lb + 1);
-    std::memcpy(r, a, la);
-    std::memcpy(r + la, b, lb);
-    r[la + lb] = '\0';
-    return r;
+inline Str to_str_i32(int32_t v) {
+    char buf[24];
+    int n = std::snprintf(buf, sizeof buf, "%d", (int)v);
+    if (n < 0) return Str();
+    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;
+    return Str::copy(buf, n);
 }
-inline const char* to_str_i32(int32_t v) {
-    char* r = str_pool_alloc(12);
-    std::snprintf(r, 12, "%d", (int)v);
-    return r;
+inline Str to_str_f32(float v) {
+    char buf[64];
+    int n = std::snprintf(buf, sizeof buf, "%f", (double)v);
+    if (n < 0) return Str();
+    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;
+    return Str::copy(buf, n);
 }
-inline const char* to_str_f32(float v) {
-    char* r = str_pool_alloc(32);
-    std::snprintf(r, 32, "%f", (double)v);
-    return r;
+inline Str to_str_bool(bool v) {
+    return v ? Str::literal("true", 4) : Str::literal("false", 5);
 }
-inline const char* to_str_bool(bool v) { return v ? "true" : "false"; }
 
 // ---------- File I/O ----------
-// Paths and contents are plain `str` (bare const char*). file_read allocates
-// from the string pool above, so it obeys the same rules: the result is valid
-// until the next str_pool_reset(). An empty file and a missing file both read
-// as "", so use file_exists() when the difference matters. "Text mode" is not
-// a thing here: files are read and written as bytes, but Vanta strings are
-// NUL-terminated, so file_read() of a file containing NUL bytes is truncated
-// at the first NUL when consumed by other string operations.
-inline bool file_exists(const char* path) {
-    std::FILE* f = std::fopen(path, "rb");
+// Paths and contents are `str` values. file_read returns an owned string, so
+// the result stays valid for as long as it is reachable — there is no pool to
+// reset. An empty file and a missing file both read as "", so use
+// file_exists() when the difference matters. Files are read and written as
+// bytes; embedded NUL bytes are preserved in the returned Str and in the
+// length reported by str_len.
+inline bool file_exists(Str path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return false;
     std::fclose(f);
     return true;
 }
-inline int32_t file_write(const char* path, const char* data) {
-    std::FILE* f = std::fopen(path, "wb");
+inline int32_t file_write(Str path, Str data) {
+    std::FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return -1;
-    size_t n = std::fwrite(data, 1, std::strlen(data), f);
+    size_t n = std::fwrite(data.c_str(), 1, (size_t)data.size(), f);
     if (std::fclose(f) != 0) return -1;
     return (int32_t)n;
 }
-inline const char* file_read(const char* path) {
-    std::FILE* f = std::fopen(path, "rb");
-    if (!f) return "";
-    if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return ""; }
+inline Str file_read(Str path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return Str();
+    if (std::fseek(f, 0, SEEK_END) != 0) { std::fclose(f); return Str(); }
     long sz = std::ftell(f);
-    if (sz < 0 || std::fseek(f, 0, SEEK_SET) != 0) { std::fclose(f); return ""; }
-    if ((uint64_t)sz + 1 > STR_POOL_SIZE) {
-        std::fprintf(stderr, "vanta: file '%s' (%ld bytes) does not fit the %u-byte string pool\n",
-                     path, sz, (unsigned)STR_POOL_SIZE);
+    if (sz < 0 || std::fseek(f, 0, SEEK_SET) != 0) { std::fclose(f); return Str(); }
+    if ((uint64_t)sz > (uint64_t)INT32_MAX) {
+        std::fprintf(stderr, "vanta: file '%s' is too large for str\n", path.c_str());
         std::exit(1);
     }
-    char* r = str_pool_alloc((uint32_t)sz + 1);
-    size_t got = std::fread(r, 1, (size_t)sz, f);
+    if (sz == 0) { std::fclose(f); return Str(); }
+    char* buf = static_cast<char*>(std::malloc((size_t)sz + 1));
+    if (!buf) {
+        std::fprintf(stderr, "vanta: file read allocation failed\n");
+        std::exit(1);
+    }
+    size_t got = std::fread(buf, 1, (size_t)sz, f);
     std::fclose(f);
-    if (got != (size_t)sz) return "";
-    r[got] = '\0';
-    return r;
+    if (got != (size_t)sz) { std::free(buf); return Str(); }
+    Str result = Str::copy(buf, (int32_t)sz);
+    std::free(buf);
+    return result;
 }
 
 // ---------- Pseudo-random (xorshift32) ----------
@@ -648,9 +810,9 @@ inline int32_t g_argc = 0;
 inline char** g_argv = nullptr;
 inline void set_args(int32_t argc, char** argv) { g_argc = argc; g_argv = argv; }
 inline int32_t arg_count() { return g_argc; }
-inline const char* arg_str(int32_t i) {
-    if (g_argv == nullptr || i < 0 || i >= g_argc) return "";
-    return g_argv[i];
+inline Str arg_str(int32_t i) {
+    if (g_argv == nullptr || i < 0 || i >= g_argc) return Str();
+    return Str::borrow(g_argv[i]);
 }
 
 }

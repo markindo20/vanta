@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.25.0)
+# Vanta Language Reference (v0.26.0)
 
-This is the reference for the language as implemented at tag `v0.25.0`. Every
+This is the reference for the language as implemented at tag `v0.26.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -33,7 +33,7 @@ Assigning to a `let` binding is a compile-time error.
 | `f32`, `f64` | 32/64-bit floats |
 | `bool` | `true` / `false` |
 | `void` | function return only |
-| `str` | string literal type (see [Strings](#strings)) |
+| `str` | immutable, reference-counted string (see [Strings](#strings)) |
 | `ptr<T>` | raw pointer: locals, parameters, and returns; `p.at(i, size)` is checked, `p[i]` is not; `ptr<void>` is the untyped C-style handle (see [Pointers and the Arena](#pointers-and-the-arena)) |
 | `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array; checked access with `xs.at(i)` (see [Checked indexing](#checked-indexing-at-v070)) |
 | `List<T>` | growable list whose storage lives in an `Arena`; `push`/`pop`/`len`/`at`/`xs[i]` (see [Dynamic lists](#dynamic-lists-listt-v090)) |
@@ -774,10 +774,10 @@ same arena. Iterate with `for x in xs` (v0.17.0, above) or an index range
 
 ## String building: `StrBuilder` (v0.10.0)
 
-The string pool is fine for one-off values, but building a string piece by
-piece with `str_concat` in a loop burns pool memory on every intermediate
-result. A `StrBuilder` is the arena-backed answer: one growing buffer, many
-appends, and no pool involvement.
+`str_concat` is fine for one-off values, but building a string piece by piece
+in a loop allocates an intermediate result on every iteration. A `StrBuilder`
+is the arena-backed answer: one growing buffer, many appends, and only the
+final `to_str()` allocation.
 
 ```vanta
 let arena = Arena(4096)
@@ -794,20 +794,21 @@ print_i32(len(b))         # 16
   / `append_f64` / `append_bool` format a value exactly like the matching
   `print_*` function.
 - `len(b)` returns the byte count appended so far as `i32`.
-- `to_str()` returns the current contents as a `str` — **copied into a fresh
-  arena block**, so the result is stable: later appends, growth, and `clear()`
-  do not change it.
+- `to_str()` returns the current contents as an owned, reference-counted
+  `str`, so the result is stable: later appends, growth, `clear()`, and even
+  `arena.reset()` do not change it.
 - `clear()` resets the builder to empty; the buffer is reused.
 
 Like `List<T>`, a `StrBuilder` is a handle: copies alias the same buffer, and
 appends work through a plain `let` — `mut` only controls rebinding. A helper
 function can take a `StrBuilder` parameter and append to the caller's builder.
 The buffer grows by doubling from 32 bytes, allocating from the arena;
-`arena.reset()` invalidates the builder and every string taken from it.
+`arena.reset()` invalidates the builder and the buffer it points at, but not
+strings already produced by `to_str()`.
 
-**When to use which:** `str_concat` / `to_str_*` for isolated values
-(pool-backed); `StrBuilder` for assembling lines, logs, and HUD text,
-especially per-frame — build with `clear()`, print with `to_str()`.
+**When to use which:** `str_concat` / `to_str_*` for isolated values;
+`StrBuilder` for assembling lines, logs, and HUD text, especially per-frame —
+build with `clear()`, print with `to_str()`.
 
 ## Function values (v0.6.0)
 
@@ -920,14 +921,18 @@ print_str("quote: \"hi\"")       # \"
 print_bool(greeting == "Hello, Vanta!")   # true — compares contents
 ```
 
-Supported escapes: `\t`, `\n`, `\"`, `\\`. `==` and `!=` compare string
-contents via `strcmp`, not pointers. Ordering comparisons (`<`) on `str` are
-rejected. `str` values may be `const`.
+Supported escapes: `\t`, `\n`, `\"`, `\\`. A `str` is **immutable**. Literals
+are zero-copy static views; strings built at runtime by `str_concat`,
+`to_str_*`, or `file_read` own a reference-counted heap buffer. Copying a
+`str` is cheap and keeps the bytes alive; the last copy frees them.
 
-There is no string indexing, and indexing a `str` is not supported. Concatenation
-(`str_concat`), length (`str_len`), and conversions are covered under
-[Strings and the string pool](#strings-and-the-string-pool-v026); for building
-many pieces into one string, see
+`==` and `!=` compare the full byte contents, not pointers or refcounts.
+Ordering comparisons (`<`) on `str` are rejected. `str` values may be `const`.
+
+There is no string indexing or slicing. Concatenation (`str_concat`), length
+(`str_len`), and conversions are covered under
+[Strings and ownership](#strings-and-ownership-v0260); for building many
+pieces into one string, see
 [String building](#string-building-strbuilder-v0100).
 
 ## Vector and matrix types
@@ -999,17 +1004,17 @@ let r = from_quat(q)
 | `rand_seed` | `(i32) -> void` | selects the random stream |
 | `arg_count` | `() -> i32` | includes the program name |
 | `arg_str` | `(i32) -> str` | `""` when out of range |
-| `str_len` | `(str) -> i32` | |
-| `str_concat` | `(str, str) -> str` | allocates from the string pool |
+| `str_len` | `(str) -> i32` | byte length |
+| `str_concat` | `(str, str) -> str` | returns an owned string |
 | `str_to_i32` | `(str) -> i32` | leading number; `0` if there is none |
 | `str_to_f32` | `(str) -> f32` | leading number; `0.0` if there is none |
-| `to_str_i32` | `(i32) -> str` | allocates from the string pool |
-| `to_str_f32` | `(f32) -> str` | allocates from the string pool |
-| `to_str_bool` | `(bool) -> str` | no allocation |
-| `str_pool_reset` | `() -> void` | reclaims the string pool |
+| `to_str_i32` | `(i32) -> str` | returns an owned string |
+| `to_str_f32` | `(f32) -> str` | returns an owned string |
+| `to_str_bool` | `(bool) -> str` | zero-copy literal (`"true"` / `"false"`) |
+| `str_pool_reset` | `() -> void` | compatibility no-op (v0.26.0) |
 | `file_exists` | `(str) -> bool` | `false` on any error |
 | `file_write` | `(str, str) -> i32` | bytes written, or `-1` on failure |
-| `file_read` | `(str) -> str` | reads into the string pool; `""` on any failure |
+| `file_read` | `(str) -> str` | returns an owned string; `""` on any failure |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
 | `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
 | `ptr_is_null` | `(ptr<T>) -> bool` | `true` when the pointer is null; `T` may be `void` |
@@ -1081,30 +1086,41 @@ Pass arguments through the driver with `python main.py run prog.vnt 3`.
 There is no integer-argument builtin: read the string and convert with
 `str_to_i32` / `str_to_f32`.
 
-## Strings and the string pool (v0.2.6)
+## Strings and ownership (v0.26.0)
 
-`str` is a `const char*`. Literals need no allocation, but anything built at
-runtime must live somewhere, so `str_concat`, `to_str_i32`/`to_str_f32`, and
-`file_read` allocate from a fixed **process-lifetime string pool** of 64 KiB.
+`str` is an immutable value with automatic ownership. A literal is a
+zero-copy static view; `str_concat`, `to_str_i32`/`to_str_f32`, `file_read`,
+and `StrBuilder.to_str()` return an owned buffer with a reference count.
+Copying a `str` shares that buffer and increments the count; the last owner
+frees it. There is no global pool, no fixed limit, and no reset step that can
+invalidate a value you still hold.
 
 ```vanta
-let label = str_concat("scale", to_str_i32(3))
-print_fmt("{} has {} chars", label, str_len(label))
-# scale3 has 6 chars
+func main() -> void:
+    let label = str_concat("scale", to_str_i32(3))
+    print_fmt("{} has {} chars", label, str_len(label))
+    let copy = label
+    str_pool_reset()          # compatibility no-op since v0.26.0
+    print_str(copy)
 ```
 
-- The pool is bump-allocated and **never freed**. `str_pool_reset()` reclaims
-  all of it, but doing so invalidates every string previously built from it.
-- Exhausting the pool is a hard error: the program prints
-  `vanta: string pool exhausted (65536 bytes); call str_pool_reset()` and exits
-  with code 1. It does not silently corrupt memory.
-- `to_str_bool` returns a literal and allocates nothing.
-- Building incrementally? `str_concat` in a loop allocates an intermediate
-  string per iteration. The arena-backed
-  [`StrBuilder`](#string-building-strbuilder-v0100) appends into one growing
-  buffer instead and never touches the pool.
+```
+scale3 has 6 chars
+scale3
+```
 
-There is no string indexing and no per-value ownership.
+- `str_pool_reset()` remains available so old programs keep compiling, but it
+  does nothing and invalidates nothing.
+- `to_str_bool` returns a zero-copy literal and allocates nothing.
+- `file_read` is no longer capped by a string pool: it reads the whole file.
+  A file larger than `i32` can address is a hard error, not a silent
+  truncation.
+- Building incrementally? `str_concat` in a loop allocates an intermediate
+  string per iteration, but each discarded result is freed. The arena-backed
+  [`StrBuilder`](#string-building-strbuilder-v0100) appends into one growing
+  buffer and produces one owned result.
+
+There is no string indexing or slicing.
 
 ## Extern declarations (v0.3.0)
 
@@ -1143,6 +1159,12 @@ extern "demo" {
   `int32_t` underlying type, forward-declared ahead of the `extern "C"`
   block together with the struct tags, so the C side may declare the
   parameter/result as `int32_t` or a matching C enum.
+- `str` crosses the boundary as `const char*`. The pointer is valid for the
+  duration of the call; a C function declared to return `str` returns a
+  NUL-terminated `const char*`, which Vanta copies into an owned `str`
+  immediately. Extern functions with `str` parameters still work as function
+  values: codegen emits a small adapter so the Vanta side keeps `Str`
+  semantics while the C side sees `const char*`.
 - A name declared twice — in one block, across blocks, or colliding with a
   Vanta function, builtin, or type — is a compile error.
 
@@ -1674,16 +1696,16 @@ if file_exists(path):
 - `file_write(path, data) -> i32` — creates or truncates `path` and writes the
   bytes of `data`; returns the byte count, or `-1` if the file cannot be
   created or written.
-- `file_read(path) -> str` — reads the whole file into the string pool, so the
-  result stays valid until `str_pool_reset()`; returns `""` on any failure. A
-  file too large for the pool is a hard error:
-  `vanta: file '<path>' (<n> bytes) does not fit the 65536-byte string pool`,
-  exit code 1 — nothing is truncated silently.
+- `file_read(path) -> str` — reads the whole file into an owned string; returns
+  `""` on any failure. There is no fixed pool limit; a file larger than `i32`
+  can address is a hard error (`vanta: file '<path>' is too large for str`,
+  exit code 1), so nothing is truncated silently.
 
 An empty file and a missing file both read as `""`; use `file_exists` when the
-difference matters. Reads and writes are byte-exact (`"rb"`/`"wb"`), but Vanta
-strings are NUL-terminated, so a file containing NUL bytes is cut short at the
-first NUL when its contents are passed to string operations.
+difference matters. Reads and writes are byte-exact (`"rb"`/`"wb"`), and
+`str_len` and `file_write` preserve embedded NUL bytes. Passing such a string
+to a C function or `print_str` still stops at the first NUL because those use a
+`const char*`.
 
 `examples/file_io.vnt` reads a file named on the command line and writes a copy
 to `<path>.copy`.

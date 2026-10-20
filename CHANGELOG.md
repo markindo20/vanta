@@ -2,6 +2,40 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.26.0 — 2026-10-20
+
+- `str` now owns its storage automatically. It is an immutable,
+  reference-counted value: literals and command-line arguments are zero-copy
+  static views, while `str_concat`, `to_str_i32`, `to_str_f32`, `file_read`,
+  and `StrBuilder.to_str()` return owned buffers. Copies share the buffer and
+  the last copy frees it.
+- The fixed 64 KiB process-lifetime string pool is gone. Long-running string
+  loops no longer exhaust a global limit, `file_read` reads arbitrarily large
+  files (up to the `i32` length limit), and `str_pool_reset()` remains only as
+  a compatibility no-op that invalidates nothing.
+- `file_read` and `file_write` stay byte-exact: embedded NUL bytes are kept in
+  the returned `str`, counted by `str_len`, and written by `file_write`. C
+  functions and `print_str` still see a `const char*` and stop at the first
+  NUL.
+- The C boundary is unchanged for existing code: extern declarations keep
+  `str` as `const char*`, direct calls convert at the call site, and a C
+  function returning `str` has its result copied into an owned value. Small
+  generated adapters let extern functions with `str` signatures be used as
+  `func(str)` values and let Vanta functions/builtins with `str` signatures be
+  passed to C callbacks.
+- `Arena` now constructs and destroys non-trivial element types, and
+  `arena.reset()` runs those destructors. `alloc::<str>`, arrays of `str`, and
+  structs containing `str` therefore work without leaking or double-freeing.
+- 15 new tests (13 net, after replacing the two pool-exhaustion tests): large
+  file reads, pool-free allocation loops, string reset compatibility,
+  builder/arena lifetime, arena string destruction, owned `List<str>`, const
+  strings, embedded NUL round-trips, extern `str` arguments, extern `str`
+  function values, and C callbacks with `str` arguments and returns. 586
+  total.
+- Documentation: the reference, tutorial, architecture notes, README, roadmap,
+  and file-I/O example all describe owned strings; every new snippet was
+  executed with its output frozen.
+
 ## v0.25.0 — 2026-10-20
 
 - Checked pointer access: `p.at(i, size)` reads, writes, and compound-assigns

@@ -179,11 +179,43 @@ class CodegenTests(unittest.TestCase):
 
     def test_string_lit_emit(self):
         cpp = gen('func main() -> void:\n    print_str("hi")\n')
-        self.assertIn('vanta::print_str("hi")', cpp)
+        self.assertIn('vanta::print_str(vanta::Str::literal("hi", 2))', cpp)
 
     def test_string_escape_emit(self):
         cpp = gen(r'func main() -> void:' + '\n' + r'    print_str("a\nb")' + '\n')
         self.assertIn('\\n', cpp)
+
+    def test_string_const_uses_const_not_constexpr(self):
+        cpp = gen('const GREETING: str = "hi"\n'
+                  'func main() -> void:\n    print_str(GREETING)\n')
+        self.assertIn('const vanta::Str v_GREETING = '
+                      'vanta::Str::literal("hi", 2);', cpp)
+
+    def test_fmt_string_argument_uses_c_str(self):
+        cpp = gen('func main() -> void:\n    print_fmt("{}", "hi")\n')
+        self.assertIn('(vanta::Str::literal("hi", 2)).c_str()', cpp)
+
+    def test_extern_str_return_is_copied(self):
+        cpp = gen('extern "c" {\n    func get() -> str\n}\n'
+                  'func main() -> void:\n    print_str(get())\n')
+        self.assertIn('const char* get()', cpp)
+        self.assertIn('vanta::print_str(vanta::Str::from_cstr(get()))', cpp)
+
+    def test_extern_str_function_value_uses_adapter(self):
+        cpp = gen('extern "C" {\n    func puts(s: str) -> i32\n}\n'
+                  'func main() -> void:\n'
+                  '    let f: func(str) -> i32 = puts\n'
+                  '    f("hi")\n')
+        self.assertIn('int32_t vanta_ev_puts(vanta::Str v_s)', cpp)
+        self.assertIn('puts(v_s.c_str())', cpp)
+        self.assertIn('FnPtr0 v_f = vanta_ev_puts;', cpp)
+
+    def test_str_callback_argument_uses_c_adapter(self):
+        cpp = gen('extern "C" {\n    func callit(cb: func(str)) -> void\n}\n'
+                  'func say(s: str) -> void:\n    print_str(s)\n'
+                  'func main() -> void:\n    callit(say)\n')
+        self.assertIn('void vanta_cb_fn_say(const char* v_s)', cpp)
+        self.assertIn('callit(vanta_cb_fn_say);', cpp)
 
     def test_str_eq_emit(self):
         cpp = gen('func main() -> void:\n    let b = "a" == "b"\n')
@@ -210,7 +242,7 @@ class CodegenTests(unittest.TestCase):
                   "    print_newline()\n"
                   "    let a = min_i32(1, 2)\n"
                   "    let b = floor_f32(1.5)\n")
-        self.assertIn('vanta::write_str("x")', cpp)
+        self.assertIn('vanta::write_str(vanta::Str::literal("x", 1))', cpp)
         self.assertIn('vanta::print_newline()', cpp)
         self.assertIn('vanta::min_i32(1, 2)', cpp)
         self.assertIn('vanta::floor_f32(1.5f)', cpp)
@@ -238,21 +270,23 @@ class CodegenTests(unittest.TestCase):
 
     def test_str_concat_emit(self):
         cpp = gen('func main() -> void:\n    let s = str_concat("a", "b")\n')
-        self.assertIn('vanta::str_concat("a", "b")', cpp)
+        self.assertIn('vanta::str_concat(vanta::Str::literal("a", 1), '
+                      'vanta::Str::literal("b", 1))', cpp)
 
 
     def test_str_to_number_emit(self):
         cpp = gen('func main() -> void:\n    let a = str_to_i32("12")\n')
-        self.assertIn('vanta::str_to_i32("12")', cpp)
+        self.assertIn('vanta::str_to_i32(vanta::Str::literal("12", 2))', cpp)
 
     def test_file_io_emit(self):
         cpp = gen('func main() -> void:\n'
                   '    let e = file_exists("a")\n'
                   '    let w = file_write("a", "b")\n'
                   '    let r = file_read("a")\n')
-        self.assertIn('vanta::file_exists("a")', cpp)
-        self.assertIn('vanta::file_write("a", "b")', cpp)
-        self.assertIn('vanta::file_read("a")', cpp)
+        self.assertIn('vanta::file_exists(vanta::Str::literal("a", 1))', cpp)
+        self.assertIn('vanta::file_write(vanta::Str::literal("a", 1), '
+                      'vanta::Str::literal("b", 1))', cpp)
+        self.assertIn('vanta::file_read(vanta::Str::literal("a", 1))', cpp)
 
     def test_extern_block_emitted_outside_namespace(self):
         cpp = gen('extern "mylib" {\n    func add(a: i32, b: i32) -> i32\n}\n'
@@ -271,7 +305,7 @@ class CodegenTests(unittest.TestCase):
         cpp = gen('extern "c" {\n    func log(msg: str)\n}\n'
                   'func main() -> void:\n    log("hi")\n')
         self.assertIn('void log(const char* v_msg);', cpp)
-        self.assertIn('log("hi")', cpp)
+        self.assertIn('log((vanta::Str::literal("hi", 2)).c_str())', cpp)
 
     def test_extern_callback_param_declarator(self):
         cpp = gen('extern "c" {\n'
@@ -320,7 +354,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_builtin_function_value(self):
         cpp = gen("func main() -> void:\n    let logger: func(str) = print_str\n")
-        self.assertIn('using FnPtr0 = void(*)(const char*);', cpp)
+        self.assertIn('using FnPtr0 = void(*)(vanta::Str);', cpp)
         self.assertIn('FnPtr0 v_logger = vanta::print_str;', cpp)
 
     def test_indirect_call_emit(self):
@@ -562,7 +596,7 @@ class CodegenTests(unittest.TestCase):
                   "    b.append_str(\"x=\")\n"
                   "    b.append_i32(41)\n"
                   "    b.append_bool(false)\n")
-        self.assertIn('vanta::strb_append_str(v_b, "x=");', cpp)
+        self.assertIn('vanta::strb_append_str(v_b, vanta::Str::literal("x=", 2));', cpp)
         self.assertIn('vanta::strb_append_i32(v_b, 41);', cpp)
         self.assertIn('vanta::strb_append_bool(v_b, false);', cpp)
 
@@ -647,7 +681,7 @@ class CodegenTests(unittest.TestCase):
                   "        return \"pos\"\n"
                   "func main() -> void:\n"
                   "    print_str(name(1))\n")
-        self.assertIn('return "";', cpp)
+        self.assertIn('return vanta::Str();', cpp)
         self.assertNotIn('return const char*{};', cpp)
 
     def test_extern_ptr_void_emit(self):

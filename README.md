@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.25.0)
+# Vanta - a game-oriented systems language (v0.26.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -140,7 +140,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (573 tests) |
+| `tests/` | `unittest` suite (586 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -221,16 +221,18 @@ exact-width integers (`i8`/`u8`/`i16`/`u16`) whose memory layout matches C,
 compare structs field by field with `==`, reinterpret pointers with
 `ptr_cast::<T>(p)`, step them by elements with `ptr_offset(p, n)`, build
 explicit nulls with `ptr_null::<T>()`,
-assemble strings with `StrBuilder`, name states and modes with enums and
+build strings incrementally with `StrBuilder`, own runtime strings with
+automatic reference counting, name states and modes with enums and
 branch on them exhaustively with `match`, and build and run real SDL2 games
 on the game kit, text rendering, sprite images, sprite-sheet animation, and
 WAV sound files included
 (nine SDL examples, four of them playable games) — but the remaining gaps
 are real:
 
-- strings come from a fixed 64 KiB pool that is never freed; there is no
-  per-value ownership, and `str_pool_reset()` invalidates everything built from
-  it (`StrBuilder` builds without the pool, but a `str` is still a bare pointer)
+- strings are immutable and reference-counted, so runtime-built values are
+  freed automatically and copies share storage; there is still no string
+  indexing or slicing, and string refcounts are not atomic (Vanta is
+  single-threaded)
 - function values are plain pointers: no closures; they compare by address
   with `==`/`!=` (ordering is rejected), `ptr_is_null` tests them, and C
   callbacks work in both directions — `extern` parameters and return types

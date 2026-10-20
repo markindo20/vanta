@@ -4,9 +4,9 @@
 #   python main.py run examples/file_io.vnt <path>
 #
 # Reads <path>, writes a copy next to it as <path>.copy, and reports the
-# byte counts. file_read allocates from the string pool, so the contents
-# stay valid until str_pool_reset(). file_exists tells a missing file
-# apart from an empty one (both read back as "").
+# byte counts. file_read returns an owned string, so the contents stay
+# valid for as long as they are reachable. file_exists tells a missing
+# file apart from an empty one (both read back as "").
 
 func main() -> void:
     if arg_count() < 2:

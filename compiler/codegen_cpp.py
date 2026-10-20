@@ -98,7 +98,7 @@ def cpp_type(t):
     if t is F64: return 'double'
     if t is BOOL: return 'bool'
     if t is VOID: return 'void'
-    if t is STR: return 'const char*'
+    if t is STR: return 'vanta::Str'
     if t is INT_LIT: return 'int32_t'
     if t is FLOAT_LIT: return 'float'
     if isinstance(t, FuncType):
@@ -111,6 +111,20 @@ def cpp_type(t):
         return t.name
     if isinstance(t, EnumType): return t.name
     raise ValueError(f"unknown type {t}")
+
+
+def _contains_str(t):
+    """True when t has a str anywhere in its layout; such values are not
+    C++ literal types, so namespace constants holding them use `const`."""
+    if t is STR:
+        return True
+    if isinstance(t, (PtrType, ArrayType, ListType)):
+        return _contains_str(t.inner)
+    if isinstance(t, FuncType):
+        return any(_contains_str(p) for p in t.params) or _contains_str(t.ret)
+    if isinstance(t, StructType) and not t.builtin:
+        return any(_contains_str(ft) for ft in t.fields.values())
+    return False
 
 
 def _func_types_in(t):
@@ -147,6 +161,12 @@ class CodeGen:
         self.lines = []
         self.indent = 0
         self.temp_counter = 0
+        # ABI adapters are registered only when an expression actually uses
+        # one, so programs that never cross the C/str boundary do not emit a
+        # pile of unused wrapper functions.
+        self.wrapper_specs = {}
+        self.wrapper_order = []
+        self.wrapper_decl_index = None
 
     def emit(self, s=''):
         self.lines.append('    ' * self.indent + s)
@@ -180,7 +200,10 @@ class CodeGen:
     def _ctype_c(self, t) -> str:
         """C spelling for extern signatures: function types expand inline
         (the FnPtr aliases live inside the namespace and come later), and
-        user structs are qualified (their tags are forward-declared above)."""
+        user structs are qualified (their tags are forward-declared above).
+        `str` is still a bare C string at the extern boundary."""
+        if t is STR:
+            return 'const char*'
         ft, _stars = self._func_target(t)
         if ft is not None:
             return self._declarator_c(t, '')
@@ -206,6 +229,139 @@ class CodeGen:
             return f'{self._ctype_c(t)}{sep}{name}'
         params = ', '.join(self._ctype_c(p) for p in ft.params)
         return self._declarator_c(ft.ret, f'(*{"*" * stars}{name})({params})')
+
+    def _simple_str_boundary(self, sig) -> bool:
+        """True when str appears only as a direct parameter or return type.
+        Nested str (inside a function type, array, List, pointer, or struct)
+        would need a second representation conversion that these small ABI
+        adapters do not attempt."""
+        param_types = [pt for _, pt in sig.params]
+        if not any(_contains_str(pt) for pt in param_types) and not _contains_str(sig.ret):
+            return False
+        for pt in param_types:
+            if pt is not STR and _contains_str(pt):
+                return False
+        return sig.ret is STR or not _contains_str(sig.ret)
+
+    def _register_wrapper(self, kind: str, name: str):
+        key = (kind, name)
+        if key in self.wrapper_specs:
+            return
+        sig = self.tc.functions.get(name)
+        if sig is None or not self._simple_str_boundary(sig):
+            return
+        self.wrapper_specs[key] = sig
+        self.wrapper_order.append(key)
+
+    def _wrapper_name(self, key) -> str:
+        kind, name = key
+        if kind == 'builtin':
+            return f'vanta_cb_builtin_{name}'
+        if kind == 'vanta':
+            return f'vanta_cb_fn_{name}'
+        return f'vanta_ev_{name}'
+
+    def _wrapper_decl(self, key) -> str:
+        kind, name = key
+        sig = self.wrapper_specs[key]
+        wrapper = self._wrapper_name(key)
+        if kind == 'extern':
+            params = ', '.join(f'{self._ctype(pt)} v_{pname}'
+                               for pname, pt in sig.params)
+            return f'{self._ctype(sig.ret)} {wrapper}({params});'
+        params = ', '.join(self._declarator_c(pt, f'v_{pname}')
+                           for pname, pt in sig.params)
+        return f'{self._declarator_c(sig.ret, f"{wrapper}({params})")};'
+
+    def _emit_wrapper_decls(self):
+        if not self.wrapper_order:
+            return
+        decls = ['    ' * self.indent + self._wrapper_decl(key)
+                 for key in self.wrapper_order]
+        decls.append('')
+        self.lines[self.wrapper_decl_index:self.wrapper_decl_index] = decls
+
+    def _emit_wrapper_defs(self):
+        if not self.wrapper_order:
+            return
+        for key in self.wrapper_order:
+            kind, name = key
+            sig = self.wrapper_specs[key]
+            wrapper = self._wrapper_name(key)
+            if kind == 'extern':
+                self._gen_vanta_wrapper(sig, name, wrapper)
+            elif kind == 'builtin':
+                self._gen_c_wrapper(sig, BUILTIN_FN[name], wrapper)
+            else:
+                self._gen_c_wrapper(sig, f'fn_{name}', wrapper)
+        self.emit('')
+
+    def _c_callback_expr(self, a) -> str:
+        """Spell a function value for a C callback parameter. Named Vanta
+        functions and builtins with str need their C-ABI adapter; externs
+        already have the C signature."""
+        if not isinstance(a, A.Name) or not getattr(a, 'is_func_ref', False):
+            return self._expr(a)
+        if a.name in BUILTIN_FN:
+            self._register_wrapper('builtin', a.name)
+            return f'vanta_cb_builtin_{a.name}'
+        sig = self.tc.functions.get(a.name)
+        if sig is None:
+            return self._expr(a)
+        if sig.is_extern:
+            return a.name
+        if self._simple_str_boundary(sig):
+            self._register_wrapper('vanta', a.name)
+            return f'vanta_cb_fn_{a.name}'
+        return self._expr(a)
+
+    def _gen_c_wrapper(self, sig, callee: str, wrapper: str):
+        """Emit a C-ABI adapter for a Vanta/builtin function taking str.
+
+        The C side sees const char*; the Vanta side sees owned Str values.
+        A str return uses a thread-local holder: C must copy it if it needs
+        the pointer after the callback returns.
+        """
+        params = ', '.join(self._declarator_c(pt, f'v_{name}')
+                           for name, pt in sig.params)
+        self.emit(f'{self._declarator_c(sig.ret, f"{wrapper}({params})")} {{')
+        self.indent += 1
+        args = ', '.join(
+            f'vanta::Str::from_cstr(v_{name})' if pt is STR else f'v_{name}'
+            for name, pt in sig.params)
+        call = f'{callee}({args})'
+        if sig.ret is VOID:
+            self.emit(f'{call};')
+        elif sig.ret is STR:
+            self.emit('static thread_local vanta::Str v_result;')
+            self.emit(f'v_result = {call};')
+            self.emit('return v_result.c_str();')
+        else:
+            self.emit(f'return {call};')
+        self.indent -= 1
+        self.emit('}')
+
+    def _gen_vanta_wrapper(self, sig, callee: str, wrapper: str):
+        """Emit a Vanta-ABI adapter around an extern function that uses str.
+
+        This is what makes an extern such as `puts` usable as a
+        `func(str) -> i32` value: the C call still receives const char*.
+        """
+        params = ', '.join(f'{self._ctype(pt)} v_{name}'
+                           for name, pt in sig.params)
+        self.emit(f'{self._ctype(sig.ret)} {wrapper}({params}) {{')
+        self.indent += 1
+        args = ', '.join(f'v_{name}.c_str()' if pt is STR else f'v_{name}'
+                         for name, pt in sig.params)
+        call = f'{callee}({args})'
+        if sig.ret is STR:
+            self.emit(f'return vanta::Str::from_cstr({call});')
+        elif sig.ret is VOID:
+            self.emit(f'{call};')
+        else:
+            self.emit(f'return {call};')
+        self.indent -= 1
+        self.emit('}')
 
     def _ordered_func_types(self):
         """Registered function types, innermost first so aliases can nest."""
@@ -282,7 +438,8 @@ class CodeGen:
         consts = [d for d in self.program.decls if isinstance(d, A.ConstDecl)]
         for cd in consts:
             t = self.tc.constants[cd.name]
-            self.emit(f'constexpr {self._ctype(t)} v_{cd.name} = {self._expr(cd.value)};')
+            qual = 'const' if _contains_str(t) else 'constexpr'
+            self.emit(f'{qual} {self._ctype(t)} v_{cd.name} = {self._expr(cd.value)};')
         if consts:
             self.emit('')
 
@@ -293,8 +450,11 @@ class CodeGen:
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
         self.emit('')
+        self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
             self._gen_func(fd)
+        self._emit_wrapper_defs()
+        self._emit_wrapper_decls()
         self.indent -= 1
         self.emit('}  // namespace vanta_user')
         self.emit('')
@@ -402,7 +562,7 @@ class CodeGen:
         ret_type = self.tc.functions[fn.name].ret
         if ret_type is not VOID:
             if ret_type is STR:
-                self.emit('return "";')
+                self.emit('return vanta::Str();')
             elif isinstance(ret_type, PtrType):
                 self.emit('return nullptr;')
             else:
@@ -604,7 +764,9 @@ class CodeGen:
         if isinstance(e, A.BoolLit):
             return 'true' if e.value else 'false'
         if isinstance(e, A.StringLit):
-            return _escape_cpp_string(e.value)
+            # Keep literals zero-copy: the runtime tags this as a static view.
+            n = len(e.value.encode('utf-8'))
+            return f'vanta::Str::literal({_escape_cpp_string(e.value)}, {n})'
         if isinstance(e, A.ArrayLit):
             t = e.type
             inner_t = self._ctype(t.inner)
@@ -618,8 +780,14 @@ class CodeGen:
                 if e.name in BUILTIN_MATH_CTOR:
                     return BUILTIN_MATH_CTOR[e.name]
                 sig = self.tc.functions.get(e.name)
-                prefix = '' if (sig is not None and sig.is_extern) else 'fn_'
-                return f'{prefix}{e.name}'
+                if sig is not None and sig.is_extern:
+                    # A str-bearing extern needs the Vanta-ABI adapter so the
+                    # value can live in a func(str) variable or array.
+                    if self._simple_str_boundary(sig):
+                        self._register_wrapper('extern', e.name)
+                        return f'vanta_ev_{e.name}'
+                    return e.name
+                return f'fn_{e.name}'
             return f'v_{e.name}'
         if isinstance(e, A.BinOp):
             op = e.op
@@ -663,6 +831,8 @@ class CodeGen:
             type_names.append(tname)
             if tname == 'bool':
                 rendered.append(f'({self._expr(a)} ? "true" : "false")')
+            elif tname == 'str':
+                rendered.append(f'({self._expr(a)}).c_str()')
             else:
                 rendered.append(self._expr(a))
         fmt = build_fmt_c_string(fmt_lit.value, type_names, newline=(name == 'print_fmt'))
@@ -717,11 +887,29 @@ class CodeGen:
             # User-defined or extern function, or a local variable holding
             # a function value.
             fn_sig = self.tc.functions.get(name)
-            args = ', '.join(self._expr(a) for a in c.args)
             if fn_sig is None:
+                args = ', '.join(self._expr(a) for a in c.args)
                 return f'v_{name}({args})'
-            prefix = '' if fn_sig.is_extern else 'fn_'
-            return f'{prefix}{name}({args})'
+            if fn_sig.is_extern:
+                # The C boundary is raw const char*: spell the conversion out
+                # rather than relying on an implicit operator.
+                rendered = []
+                for a, (_, pt) in zip(c.args, fn_sig.params):
+                    if pt is STR:
+                        rendered.append(f'({self._expr(a)}).c_str()')
+                    elif isinstance(pt, FuncType) and _contains_str(pt):
+                        rendered.append(self._c_callback_expr(a))
+                    else:
+                        rendered.append(self._expr(a))
+                args = ', '.join(rendered)
+                call_expr = f'{name}({args})'
+                # A C function returns a borrowed char*; copy it into an owned
+                # Str before it can escape the call.
+                if getattr(c, 'type', None) is STR:
+                    return f'vanta::Str::from_cstr({call_expr})'
+                return call_expr
+            args = ', '.join(self._expr(a) for a in c.args)
+            return f'fn_{name}({args})'
         if isinstance(f, A.Member):
             if getattr(c, 'is_checked_at', False):
                 line = c.pos.line if c.pos else 0

@@ -284,11 +284,8 @@ func main() -> void:
                   230, 240, 255)
         gfx_present(screen)
 
-        # The HUD's strings are rebuilt each frame and are dead the moment
-        # the frame is presented, so reclaim the pool rather than let a
-        # long session exhaust its 64 KiB.
-        str_pool_reset()
-
+        # HUD strings are rebuilt each frame; their owned buffers are freed
+        # automatically when the iteration's locals go out of scope.
         ship_anim = anim_tick(ship_anim, 1.0 / 60.0)
         frames += 1
         if max_frames > 0 and frames >= max_frames:
