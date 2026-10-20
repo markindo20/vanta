@@ -6,7 +6,9 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
 
 - Accept a UTF-8 byte-order mark at the start of source files. Windows
   editors and PowerShell may write one; it is now ignored instead of producing
-  `unexpected character '\ufeff'` at `1:1`. 616 tests total.
+  `unexpected character '\ufeff'` at `1:1`.
+- Diagnostics now print the offending source line and a caret at the reported
+  column for lexer, parser, loader, and type-checker errors. 619 tests total.
 
 ## v0.29.0 — 2026-10-20
 

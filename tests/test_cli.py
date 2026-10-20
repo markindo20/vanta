@@ -16,6 +16,7 @@ from compiler.driver import (
     _merge_link_libs,
     _normalize_argv,
     _starter_source,
+    cmd_check,
     cmd_doctor,
     cmd_new,
     find_cxx_compiler,
@@ -48,6 +49,54 @@ class CliTests(unittest.TestCase):
             with open(target, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(source)
             _frontend_only(target)
+
+    def test_check_shows_source_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'bad.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write("func main() -> void:\n    let x: i32 = 1.5\n")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = cmd_check(SimpleNamespace(source=path))
+            self.assertEqual(code, 1)
+            text = err.getvalue()
+            self.assertIn('let x: i32 = 1.5', text)
+            self.assertTrue(any(line.strip() == '^'
+                                for line in text.splitlines()))
+
+    def test_check_shows_context_for_imported_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = os.path.join(tmp, 'lib.vnt')
+            with open(lib, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func bad() -> i32:\n    return "oops"\n')
+            main = os.path.join(tmp, 'main.vnt')
+            with open(main, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('import "lib.vnt"\nfunc main() -> void:\n    return\n')
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = cmd_check(SimpleNamespace(source=main))
+            self.assertEqual(code, 1)
+            text = err.getvalue()
+            self.assertIn('return "oops"', text)
+            self.assertTrue(any(line.strip() == '^'
+                                for line in text.splitlines()))
+
+    def test_check_shows_context_for_lex_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'bad.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write("func main() -> void:\n    let x = @\n")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = cmd_check(SimpleNamespace(source=path))
+            self.assertEqual(code, 1)
+            text = err.getvalue()
+            self.assertIn('let x = @', text)
+            self.assertTrue(any(line.strip() == '^'
+                                for line in text.splitlines()))
 
     def test_new_refuses_to_overwrite_without_force(self):
         with tempfile.TemporaryDirectory() as tmp:

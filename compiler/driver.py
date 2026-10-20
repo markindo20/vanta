@@ -447,8 +447,44 @@ def _frontend_only(source_path):
     return program, tc
 
 
+def _error_location(exc):
+    """Return (filename, line, col) for an exception that has a source position."""
+    filename = getattr(exc, 'filename', None)
+    line = getattr(exc, 'line', None)
+    col = getattr(exc, 'col', None)
+    if line is None or col is None:
+        pos = getattr(exc, 'pos', None)
+        if pos is not None:
+            filename = getattr(pos, 'file', None) or filename
+            line = getattr(pos, 'line', None)
+            col = getattr(pos, 'col', None)
+    return filename, line, col
+
+
+def _write_source_context(exc):
+    """Show the line and column that a diagnostic points at, when possible."""
+    filename, line_no, col_no = _error_location(exc)
+    if not filename or line_no is None:
+        return
+    try:
+        with open(filename, 'r', encoding='utf-8-sig') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeError):
+        return
+    if not (1 <= line_no <= len(lines)):
+        return
+    source = lines[line_no - 1]
+    # Expand tabs so the caret lines up with the printed source text. Vanta
+    # rejects tabs in indentation, but a tab could still appear in a string.
+    indent = '  '
+    caret_col = len(source[:max(0, (col_no or 1) - 1)].expandtabs(4))
+    sys.stderr.write(f"{indent}{source.expandtabs(4)}\n")
+    sys.stderr.write(f"{indent}{' ' * caret_col}^\n")
+
+
 def _report_error(exc):
     sys.stderr.write(str(exc) + '\n')
+    _write_source_context(exc)
 
 
 def _gamekit_import(target):
