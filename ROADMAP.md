@@ -5,16 +5,17 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.27.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.28.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: language (candidate v0.28.0)
+## Next: language (candidate v0.29.0)
 
-The breakout polish pass landed in v0.27.0 with three walls, pause, high-score
-persistence, and per-sound gain. The next language item is enum extensions;
-checked pointer access and automatic string ownership are already in.
+The installable release landed in v0.28.0: the runtime and game kit travel
+inside the wheel, `vanta doctor` checks a machine, and tagging builds and
+attaches the distribution. The next language item is enum extensions; checked
+pointer access and automatic string ownership are already in.
 
 1. **Enums with explicit values and associated data — large.** Enums are
    named constants with `==` and `match`; explicit member values are the
@@ -33,6 +34,12 @@ checked pointer access and automatic string ownership are already in.
 
 ## Tooling and documentation
 
+- Distribution is now wheel-based. The release workflow can publish to PyPI
+  through Trusted Publishing once the project and the `pypi` environment are
+  configured there and `PUBLISH_PYPI=true` is set; until then the wheel is
+  attached to each GitHub release and installs with
+  `pip install <release wheel URL>`. Homebrew, Scoop, and winget formulas are
+  follow-ups.
 - The VS Code extension (`editors/vscode/`) provides syntax highlighting
   only. A language server (diagnostics, hover, go-to-definition) is a
   substantial separate project and is not scheduled.

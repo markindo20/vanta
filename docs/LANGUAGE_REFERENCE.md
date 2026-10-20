@@ -1,8 +1,25 @@
-# Vanta Language Reference (v0.27.0)
+# Vanta Language Reference (v0.28.0)
 
-This is the reference for the language as implemented at tag `v0.27.0`. Every
+This is the reference for the language as implemented at tag `v0.28.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
+
+## Installing and running
+
+```powershell
+pipx install vanta-lang       # or: python -m pip install vanta-lang
+vanta --version
+vanta doctor                  # compiler, runtime header, and SDL2 check
+vanta check hello.vnt         # type-check only (fast, no C++)
+vanta hello.vnt               # shorthand for `vanta run hello.vnt`
+vanta build hello.vnt --release
+```
+
+A wheel install carries the C++ runtime header and the game kit, so only a
+C++17 compiler is needed for non-game programs; the SDL2 examples and games
+also need SDL2, SDL_ttf, and SDL2_image. From a checkout, `python main.py`
+takes the same commands, and `python -m pip install -e .` installs an editable
+`vanta`.
 
 ## Comments and layout
 
@@ -1081,7 +1098,8 @@ func main() -> void:
 `arg_count()` includes the program name at index 0. `arg_str(i)` returns `""`
 for an out-of-range index rather than failing, so bounds need no checking.
 
-Pass arguments through the driver with `python main.py run prog.vnt 3`.
+Pass arguments through the driver with `vanta run prog.vnt 3` (or
+`python main.py run prog.vnt 3` from a checkout).
 
 There is no integer-argument builtin: read the string and convert with
 `str_to_i32` / `str_to_f32`.
@@ -1774,6 +1792,7 @@ All source-level errors carry `file:line:col`:
 examples/boids.vnt:3:5: argument: cannot assign i32 to u32
 ```
 
-Use `python main.py check <file>` to type-check without invoking a C++ compiler.
+Use `vanta check <file>` (or `python main.py check <file>` from a checkout) to
+type-check without invoking a C++ compiler.
 When C++ compilation fails during `build`, the generated source is saved to
 `build/vanta_failed.cpp`.

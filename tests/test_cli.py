@@ -9,12 +9,16 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from compiler.driver import (
+    RUNTIME_DIR,
+    _GAMEKIT_DIR,
     _auto_link_libs,
     _frontend_only,
     _merge_link_libs,
     _normalize_argv,
     _starter_source,
+    cmd_doctor,
     cmd_new,
+    find_cxx_compiler,
 )
 
 
@@ -31,6 +35,7 @@ class CliTests(unittest.TestCase):
                          ['new', 'game.vnt'])
         self.assertEqual(_normalize_argv(['run', 'game.vnt']),
                          ['run', 'game.vnt'])
+        self.assertEqual(_normalize_argv(['doctor']), ['doctor'])
         self.assertEqual(_normalize_argv(['--version']), ['--version'])
         self.assertEqual(_normalize_argv([]), [])
 
@@ -56,6 +61,23 @@ class CliTests(unittest.TestCase):
             args.force = True
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(cmd_new(args), 0)
+
+    def test_shipped_data_dirs_exist(self):
+        self.assertTrue(os.path.exists(
+            os.path.join(RUNTIME_DIR, 'vanta_runtime.hpp')))
+        self.assertTrue(os.path.exists(
+            os.path.join(_GAMEKIT_DIR, 'sdl.vnt')))
+
+    def test_doctor_reports_a_working_toolchain(self):
+        if find_cxx_compiler()[1] is None:
+            self.skipTest('no C++ compiler on PATH')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cmd_doctor(SimpleNamespace())
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn('vanta ', text)
+        self.assertIn('compile test: ok', text)
 
     def test_sdl_extern_blocks_auto_link(self):
         program, _ = _frontend_only(os.path.join(EXAMPLES, 'strike.vnt'))

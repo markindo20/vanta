@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,11 +7,27 @@ name = "vanta-lang"
 description = "Vanta, a game-oriented systems language"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["language", "compiler", "gamedev", "systems-programming"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Interpreters",
+]
 dynamic = ["version"]
 
 [project.scripts]
 vanta = "compiler.driver:cli"
+
+[project.urls]
+Homepage = "https://github.com/markindo20/vanta"
+Repository = "https://github.com/markindo20/vanta"
+Changelog = "https://github.com/markindo20/vanta/blob/master/CHANGELOG.md"
 
 [tool.setuptools]
 packages = ["compiler"]

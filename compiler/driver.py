@@ -15,7 +15,26 @@ from .codegen_cpp import CodeGen
 from .ast_nodes import ExternDecl, FuncDecl
 
 
-RUNTIME_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'runtime')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_HERE)
+
+
+def _first_existing_dir(*candidates):
+    """Pick the checkout or installed location for a data directory."""
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return candidates[-1]
+
+
+# A wheel installs the runtime, game kit, and assets inside the compiler
+# package; a checkout keeps them at the repo root.
+RUNTIME_DIR = _first_existing_dir(os.path.join(_HERE, 'runtime'),
+                                  os.path.join(_REPO_ROOT, 'runtime'))
+_GAMEKIT_DIR = _first_existing_dir(os.path.join(_HERE, 'templates', 'gamekit'),
+                                   os.path.join(_REPO_ROOT, 'examples', 'gamekit'))
+_ASSETS_DIR = _first_existing_dir(os.path.join(_HERE, 'templates', 'assets'),
+                                  os.path.join(_REPO_ROOT, 'examples', 'assets'))
 
 # Extern block names that name a library the driver knows how to link. The
 # block string is documentation for custom C libraries, but for the libraries
@@ -26,9 +45,6 @@ _AUTO_LIBS = {
     'sdl2_image': 'SDL2_image',
 }
 _AUTO_LIB_ORDER = ('SDL2_image', 'SDL2_ttf', 'SDL2')
-
-_ROOT = os.path.dirname(RUNTIME_DIR)
-_GAMEKIT_DIR = os.path.join(_ROOT, 'examples', 'gamekit')
 
 _GAME_TEMPLATE = '''\
 # My first Vanta game. Move the paddle with Left/Right (or A/D), catch the
@@ -333,14 +349,16 @@ def _bundle_windows_dlls(exe_path, compiler_path):
 
 
 def _bundle_repo_assets(out_dir):
-    """Copy the repo's example assets, so a bundled example stays runnable."""
+    """Copy the shipped example assets, so a bundled example stays runnable."""
     copied = []
-    for rel in (('examples', 'assets'), ('examples', 'gamekit', 'fonts')):
-        source = os.path.join(_ROOT, *rel)
-        target = os.path.join(out_dir, *rel)
+    pairs = ((_ASSETS_DIR, os.path.join('examples', 'assets')),
+             (os.path.join(_GAMEKIT_DIR, 'fonts'),
+              os.path.join('examples', 'gamekit', 'fonts')))
+    for source, rel in pairs:
+        target = os.path.join(out_dir, rel)
         if os.path.isdir(source):
             shutil.copytree(source, target, dirs_exist_ok=True)
-            copied.append(os.path.join(*rel))
+            copied.append(rel)
     return copied
 
 
@@ -474,6 +492,77 @@ def cmd_check(args):
     return 0
 
 
+def _sdl_lib_found(lib, compiler_path):
+    """Best-effort check for an SDL development library (games only)."""
+    if compiler_path and os.name == 'nt':
+        prefix = os.path.dirname(os.path.dirname(os.path.abspath(compiler_path)))
+        libdir = os.path.join(prefix, 'lib')
+        names = (f'lib{lib}.dll.a', f'lib{lib}.a', f'{lib}.lib')
+        if any(os.path.exists(os.path.join(libdir, n)) for n in names):
+            return True
+    pkg = {'SDL2': 'sdl2', 'SDL2_ttf': 'SDL2_ttf', 'SDL2_image': 'SDL2_image'}[lib]
+    pkg_config = shutil.which('pkg-config')
+    if pkg_config:
+        try:
+            if subprocess.run([pkg_config, '--exists', pkg],
+                              capture_output=True).returncode == 0:
+                return True
+        except OSError:
+            pass
+    if lib == 'SDL2' and shutil.which('sdl2-config'):
+        return True
+    dirs = _auto_lib_dirs([lib]) + ['/usr/local/lib', '/opt/homebrew/lib',
+                                    '/usr/lib', '/usr/lib/x86_64-linux-gnu']
+    for directory in _dedupe_paths([d for d in dirs if os.path.isdir(d)]):
+        for ext in ('.so', '.dylib', '.a'):
+            if os.path.exists(os.path.join(directory, f'lib{lib}{ext}')):
+                return True
+    return False
+
+
+def cmd_doctor(args):
+    print(f"vanta {VERSION}")
+    print(f"python {sys.version.split()[0]} ({sys.executable})")
+    name, path = find_cxx_compiler()
+    if path is None:
+        sys.stderr.write("error: no C++17 compiler found. Install clang++, g++, or cl and retry.\n")
+        return 1
+    print(f"c++ compiler: {name} ({path})")
+    print(f"runtime header: {os.path.join(RUNTIME_DIR, 'vanta_runtime.hpp')}")
+    print(f"game kit: {_GAMEKIT_DIR}")
+
+    # Compile and run the smallest possible program: this checks the compiler,
+    # the include path, and the runtime header in one step.
+    tmp = tempfile.mkdtemp(prefix='vanta_doctor_')
+    try:
+        src = os.path.join(tmp, 'main.cpp')
+        with open(src, 'w', encoding='utf-8') as f:
+            f.write('#include "vanta_runtime.hpp"\nint main() { return 0; }\n')
+        exe = os.path.join(tmp, 'probe.exe' if os.name == 'nt' else 'probe')
+        cmd = _compiler_cmd(name, path, src, exe, release=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              env=_runtime_env(path, []))
+        if proc.returncode != 0:
+            sys.stderr.write(proc.stdout + proc.stderr)
+            sys.stderr.write("error: the C++ compiler could not build a probe program\n")
+            return 1
+        print("compile test: ok")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    missing = [lib for lib in ('SDL2', 'SDL2_ttf', 'SDL2_image')
+               if not _sdl_lib_found(lib, path)]
+    if missing:
+        print("SDL2 (games): not detected: " + ', '.join(missing))
+        hint = _link_hint(missing, name, path)
+        if hint:
+            print(hint)
+        print("non-game programs are ready; install SDL2 to run the game kit")
+    else:
+        print("SDL2 (games): found (SDL2, SDL2_ttf, SDL2_image)")
+    return 0
+
+
 def cmd_build(args):
     try:
         program, tc = _frontend_only(args.source)
@@ -578,7 +667,7 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'build', 'run')
+_COMMANDS = ('new', 'check', 'doctor', 'build', 'run')
 
 
 def _normalize_argv(argv):
@@ -604,6 +693,8 @@ def main(argv):
 
     p_check = sub.add_parser('check', help='type-check a source file')
     p_check.add_argument('source')
+
+    sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
 
     p_build = sub.add_parser('build', help='build a native executable')
     p_build.add_argument('source')
@@ -636,6 +727,8 @@ def main(argv):
         return cmd_new(args)
     if args.cmd == 'check':
         return cmd_check(args)
+    if args.cmd == 'doctor':
+        return cmd_doctor(args)
     if args.cmd == 'build':
         return cmd_build(args)
     if args.cmd == 'run':

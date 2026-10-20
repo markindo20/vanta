@@ -53,3 +53,77 @@ jobs:
         run: python main.py --version
       - name: Tests
         run: python -m unittest discover -s tests
+
+  # Build the wheel and sdist, then install the wheel into a fresh venv and
+  # use only the installed `vanta` command. This is the check that a user's
+  # `pip install vanta-lang` works without a checkout: the runtime header and
+  # game kit must travel inside the package.
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+
+      - name: Set up SDL2, SDL_ttf, and SDL2_image (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
+      - name: Set up UCRT64 (Windows)
+        id: msys2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_ttf mingw-w64-ucrt-x86_64-SDL2_image
+      - name: Expose UCRT64 on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build wheel and sdist
+        shell: bash
+        run: python -m pip install --upgrade build twine && python -m build && python -m twine check dist/*
+
+      - name: Install and smoke-test (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install dist/*.whl
+          .venv/bin/vanta --version
+          .venv/bin/vanta doctor
+          mkdir -p /tmp/vanta-smoke
+          printf 'func main() -> void:\n    print_str("installed ok")\n' > /tmp/vanta-smoke/hello.vnt
+          .venv/bin/vanta /tmp/vanta-smoke/hello.vnt
+          cd /tmp/vanta-smoke
+          "$GITHUB_WORKSPACE/.venv/bin/vanta" new game.vnt
+          "$GITHUB_WORKSPACE/.venv/bin/vanta" check game.vnt
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$GITHUB_WORKSPACE/.venv/bin/vanta" game.vnt 1
+
+      - name: Install and smoke-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          Get-ChildItem dist\*.whl | ForEach-Object { .venv\Scripts\python.exe -m pip install $_.FullName }
+          .venv\Scripts\vanta.exe --version
+          .venv\Scripts\vanta.exe doctor
+          New-Item -ItemType Directory -Force -Path "$env:TEMP\vanta-smoke" | Out-Null
+          Set-Content -Path "$env:TEMP\vanta-smoke\hello.vnt" -Value "func main() -> void:`n    print_str(`"installed ok`")`n"
+          .venv\Scripts\vanta.exe "$env:TEMP\vanta-smoke\hello.vnt"
+          Push-Location "$env:TEMP\vanta-smoke"
+          & "$env:GITHUB_WORKSPACE\.venv\Scripts\vanta.exe" new game.vnt
+          & "$env:GITHUB_WORKSPACE\.venv\Scripts\vanta.exe" check game.vnt
+          $env:SDL_VIDEODRIVER = 'dummy'
+          $env:SDL_AUDIODRIVER = 'dummy'
+          & "$env:GITHUB_WORKSPACE\.venv\Scripts\vanta.exe" game.vnt 1
+          Pop-Location

@@ -7,6 +7,9 @@ sound files, poll a game controller, and end with a playable game. Every code
 block below is a complete program that was run to produce the output shown —
 copy it into a file with a `.vnt` extension and run it.
 
+**Install:** `pipx install vanta-lang` (or `python -m pip install vanta-lang`),
+then run `vanta doctor` to check the install.
+
 **Prerequisites:** Python 3.10+ and a C++17 compiler (`g++`, `clang++`, or
 MSVC `cl`). See the Quick start in the [README](../README.md). The SDL2
 sections at the end additionally need the SDL2, SDL_ttf, and SDL2_image
@@ -1129,8 +1132,9 @@ vanta examples/sdl_gamepad.vnt
 
 `vanta new game.vnt` writes a small playable game: a paddle, a falling block,
 lives, and a deterministic frame-limited mode for smoke tests. It imports
-`sdl.vnt`, `input.vnt`, and `gfx.vnt` with a path relative to the new file, so
-the file runs from where you create it:
+`sdl.vnt`, `input.vnt`, and `gfx.vnt` with a path relative to the new file,
+pointing at the game kit inside the installed compiler, so the file runs from
+where you create it:
 
 ```powershell
 vanta new game.vnt
@@ -1154,4 +1158,4 @@ libraries automatically.
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (586 tests).
+- `python -m unittest discover -s tests` — run the test suite (588 tests).

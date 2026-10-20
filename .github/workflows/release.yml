@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: build and attach
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+
+      - name: Check the tag matches the compiler version
+        run: |
+          python - <<'PY'
+          import os
+          from compiler import VERSION
+          tag = os.environ['GITHUB_REF_NAME']
+          expected = 'v' + VERSION
+          if tag != expected:
+              raise SystemExit(f'tag {tag} does not match {expected}')
+          print(f'releasing {tag}')
+          PY
+
+      - name: Build wheel and sdist
+        run: python -m pip install --upgrade build twine && python -m build && python -m twine check dist/*
+
+      - name: Smoke-test the installed wheel
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install dist/*.whl
+          .venv/bin/vanta --version
+          .venv/bin/vanta doctor
+          mkdir -p /tmp/vanta-smoke
+          printf 'func main() -> void:\n    print_str("installed ok")\n' > /tmp/vanta-smoke/hello.vnt
+          .venv/bin/vanta /tmp/vanta-smoke/hello.vnt
+
+      - name: Keep the distributions for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Attach the wheel and sdist to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  # Trusted Publishing is enabled by setting the repository variable
+  # PUBLISH_PYPI=true and configuring this repo + the `pypi` environment on
+  # PyPI. Until then the release job still builds and attaches the wheel, so
+  # `pip install <release wheel URL>` works.
+  publish:
+    name: publish to PyPI
+    needs: release
+    if: vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

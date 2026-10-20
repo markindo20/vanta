@@ -125,6 +125,26 @@ distinct semantics.
 - `g_argc` / `g_argv`, populated by the generated `main`, exposed as
   `arg_count` / `arg_str`
 
+## Packaging (v0.28.0)
+
+A checkout keeps the runtime at `runtime/` and the kit at `examples/gamekit/`,
+so the examples and tests use the canonical copies. A wheel has no checkout
+around it, so `setup.py` overrides `build_py` to copy those directories into
+the build tree as `compiler/runtime/`, `compiler/templates/gamekit/`, and
+`compiler/templates/assets/`; setuptools then packs them into the wheel.
+`MANIFEST.in` includes the same files in the sdist, so building a wheel from
+the sdist works too.
+
+The driver resolves each directory through `_first_existing_dir`: it looks
+beside `compiler/` first (the installed layout) and falls back to the repo root
+(the checkout layout). `vanta doctor` reports which paths won, compiles a
+one-line probe against the runtime header, and makes a best-effort SDL2 check.
+The CI `package` job builds the wheel, installs it into a fresh venv, and runs
+only the installed `vanta` command; `.github/workflows/release.yml` repeats the
+smoke test on tags, attaches the wheel and sdist to the GitHub release, and can
+publish to PyPI through Trusted Publishing (enabled with the
+`PUBLISH_PYPI=true` repository variable).
+
 ## Versioning
 
 `compiler/__init__.py` holds the single `VERSION` string. The driver reports it
@@ -154,7 +174,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 586 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 588 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

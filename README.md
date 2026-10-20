@@ -1,15 +1,43 @@
-# Vanta - a game-oriented systems language (v0.27.0)
+# Vanta - a game-oriented systems language (v0.28.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
 mutability, built-in vector types, and a stack-scoped arena allocator.
 
-## Quick start
+## Install
 
-Prerequisites:
+Vanta is a Python package with a native compile step, so it needs:
 
 - Python 3.10+ (tested on 3.10.11 and 3.14)
 - A C++17 compiler: `clang++`, `g++`, or MSVC's `cl`
+
+Install the `vanta` command with pipx (recommended) or pip:
+
+```powershell
+pipx install vanta-lang
+# or
+python -m pip install vanta-lang
+```
+
+Check the install and the toolchain:
+
+```powershell
+vanta --version
+vanta doctor
+```
+
+`vanta doctor` reports the Python version, the C++ compiler it found, the
+installed runtime header, and whether SDL2 is available for games. Non-game
+programs only need the C++ compiler; the game kit additionally needs SDL2,
+SDL2_ttf, and SDL2_image.
+
+For compiler development, install an editable checkout instead:
+
+```powershell
+python -m pip install -e .
+```
+
+## Quick start
 
 Write a program:
 
@@ -25,21 +53,13 @@ func main() -> void:
 Run it:
 
 ```powershell
-python main.py check examples/vector_math.vnt   # type-check only (fast, no C++)
-python main.py run   examples/vector_math.vnt   # compile and run
-python main.py run   examples/report.vnt 3      # args after the source are passed through
-python main.py build examples/vector_math.vnt --release
-python main.py --version
+vanta check hello.vnt          # type-check only (fast, no C++)
+vanta hello.vnt                # shorthand for `vanta run hello.vnt`
+vanta build hello.vnt --release
 ```
 
-Install the `vanta` command once (editable, so it always uses this checkout):
-
-```powershell
-python -m pip install -e .
-```
-
-Then run a source file directly — `vanta game.vnt` is shorthand for
-`vanta run game.vnt`, and the SDL link flags are added for you:
+Arguments after the source are passed through, so `vanta report.vnt 3` reaches
+the program. In a checkout, the same commands work on the examples:
 
 ```powershell
 vanta examples/vector_math.vnt
@@ -53,8 +73,10 @@ vanta new game.vnt
 vanta game.vnt
 ```
 
-Build a shareable Windows bundle — the executable, its runtime DLLs, the
-example assets, and the kit font go into one folder:
+The starter imports the game kit from the installed compiler, so `vanta new`
+works the same from a checkout or a wheel install. Build a shareable Windows
+bundle — the executable, its runtime DLLs, the example assets, and the kit font
+go into one folder:
 
 ```powershell
 vanta build examples/strike.vnt --release --bundle
@@ -136,12 +158,13 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 
 | Path | Contents |
 |---|---|
-| `main.py` | CLI entry point |
-| `pyproject.toml` | Editable install that creates the `vanta` command |
+| `main.py` | CLI entry point for a checkout |
+| `pyproject.toml` | Package metadata; installing creates the `vanta` command |
+| `setup.py` | Build hook that puts the runtime, game kit, and assets in the wheel |
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
-| `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
+| `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (586 tests) |
+| `tests/` | `unittest` suite (588 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples

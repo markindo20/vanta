@@ -2,6 +2,34 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.28.0 — 2026-10-20
+
+- Installable Vanta. `pip install vanta-lang` (or `pipx install vanta-lang`)
+  now installs the `vanta` command without a checkout. A `setup.py` build hook
+  copies `runtime/vanta_runtime.hpp` and the game kit into the wheel as
+  `compiler/runtime/` and `compiler/templates/`, and `MANIFEST.in` keeps the
+  same files in the sdist. The driver resolves either layout, so a checkout and
+  an installed wheel behave the same.
+- `vanta doctor` reports the Python and C++ compiler versions, the resolved
+  runtime header and game kit paths, compiles a one-line runtime probe, and
+  makes a best-effort SDL2 / SDL2_ttf / SDL2_image check. Missing SDL only
+  warns: non-game programs need nothing beyond the C++ compiler.
+- `vanta new` keeps working from an installed wheel because the starter points
+  at the game kit inside the installed compiler.
+- Packaging checks. CI gains a `package` job that builds the wheel and sdist,
+  runs `twine check`, installs the wheel into a fresh venv, and exercises
+  `--version`, `doctor`, a hello program, `new`, `check`, and a headless game
+  run on Linux and Windows. `.github/workflows/release.yml` repeats the smoke
+  test on version tags, attaches the wheel and sdist to the GitHub release, and
+  publishes to PyPI through Trusted Publishing when the `PUBLISH_PYPI`
+  repository variable is set.
+- Metadata is release-ready: SPDX `MIT`, license files, classifiers, project
+  URLs, and `setuptools>=77`. 588 tests total.
+- Docs: README and the tutorial lead with `pipx install vanta-lang`,
+  `vanta doctor`, and the installed-command workflow; the reference gains an
+  installing/running section and the architecture notes describe the build
+  hook and layout resolution.
+
 ## v0.27.0 — 2026-10-20
 
 - Breakout polish. `examples/breakout.vnt` now has three walls of 4, 5, and 6
