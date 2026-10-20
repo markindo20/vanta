@@ -166,26 +166,24 @@ class CodeGen:
             return f'vanta::List<{self._ctype(t.inner)}>'
         return cpp_type(t)
 
-    def _funcptr_parts(self, t):
-        """(return spelling, pointer-star count, parameter list) when t is a
-        function type or a chain of pointers to one, else None."""
+    def _func_target(self, t):
+        """(function type, extra pointer levels) for a function type or a
+        chain of pointers to one; (None, 0) otherwise."""
         stars = 0
         while isinstance(t, PtrType):
             stars += 1
             t = t.inner
         if not isinstance(t, FuncType):
-            return None
-        params = ', '.join(self._ctype_c(p) for p in t.params)
-        return (self._ctype_c(t.ret), stars, params)
+            return None, 0
+        return t, stars
 
     def _ctype_c(self, t) -> str:
         """C spelling for extern signatures: function types expand inline
         (the FnPtr aliases live inside the namespace and come later), and
         user structs are qualified (their tags are forward-declared above)."""
-        fp = self._funcptr_parts(t)
-        if fp is not None:
-            ret, stars, params = fp
-            return f'{ret}(*{"*" * stars})({params})'
+        ft, _stars = self._func_target(t)
+        if ft is not None:
+            return self._declarator_c(t, '')
         if isinstance(t, PtrType):
             return self._ctype_c(t.inner) + '*'
         if isinstance(t, ArrayType):
@@ -199,13 +197,15 @@ class CodeGen:
         return cpp_type(t)
 
     def _declarator_c(self, t, name: str) -> str:
-        """A C parameter declarator: the name folds into function-pointer
-        stars — 'int32_t (*v_f)(int32_t)', never 'int32_t(*)(int32_t) v_f'."""
-        fp = self._funcptr_parts(t)
-        if fp is not None:
-            ret, stars, params = fp
-            return f'{ret}(*{"*" * stars}{name})({params})'
-        return f'{self._ctype_c(t)} {name}'
+        """C declarator for a value called `name`: a function type folds the
+        name into its stars, and a function-typed return nests around it —
+        'int32_t(*v_f)(int32_t)', 'int32_t(*(*get())(void))(void)'."""
+        ft, stars = self._func_target(t)
+        if ft is None:
+            sep = '' if name.startswith('(') else ' '
+            return f'{self._ctype_c(t)}{sep}{name}'
+        params = ', '.join(self._ctype_c(p) for p in ft.params)
+        return self._declarator_c(ft.ret, f'(*{"*" * stars}{name})({params})')
 
     def _ordered_func_types(self):
         """Registered function types, innermost first so aliases can nest."""
@@ -316,15 +316,15 @@ class CodeGen:
             raise RuntimeError(f"internal: return type of '{fn.name}' was not inferred")
         if extern:
             # Extern signatures are spelled in plain C terms: no aliases.
-            ret_s = self._ctype_c(ret)
+            # A function-typed return folds the declarator into the name:
+            # int32_t(*get())(int32_t), not a bare type before the name.
             params = ', '.join(self._declarator_c(sig.params[i][1], f'v_{p.name}')
                                for i, p in enumerate(fn.params))
-        else:
-            ret_s = self._ctype(ret)
-            params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
-                               for i, p in enumerate(fn.params))
-        prefix = '' if sig.is_extern else 'fn_'
-        return f'{ret_s} {prefix}{fn.name}({params})'
+            return self._declarator_c(ret, f'{fn.name}({params})')
+        ret_s = self._ctype(ret)
+        params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
+                           for i, p in enumerate(fn.params))
+        return f'{ret_s} fn_{fn.name}({params})'
 
     def _gen_enum(self, ed: A.EnumDecl):
         et = self.tc.enums[ed.name]

@@ -18,6 +18,14 @@ def _contains_func_type(t) -> bool:
     return False
 
 
+def _is_function_pointer(t) -> bool:
+    """True for a function type or a chain of pointers to one — the shapes a
+    C signature can spell as a function-pointer declarator."""
+    while isinstance(t, PtrType):
+        t = t.inner
+    return isinstance(t, FuncType)
+
+
 class CheckError(Exception):
     def __init__(self, msg, filename, pos):
         self.msg = msg; self.filename = filename; self.pos = pos
@@ -245,10 +253,10 @@ class TypeChecker:
             for p in fd.params:
                 params.append((p.name, self._resolve_type(p.type)))
             ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
-            if _contains_func_type(ret):
+            if _contains_func_type(ret) and not _is_function_pointer(ret):
                 raise CheckError(
-                    f"extern function '{fd.name}' cannot return a function type yet; "
-                    f"wrap it in a C shim that calls it",
+                    f"extern function '{fd.name}' can return a function type "
+                    f"or a pointer to one, not {ret}",
                     self.filename, fd.pos)
             self.functions[fd.name] = FuncSig(fd.name, params, ret, is_extern=True)
 
@@ -708,8 +716,15 @@ class TypeChecker:
             return BOOL
         if op in ('==', '!=', '<', '<=', '>', '>='):
             if isinstance(lt, FuncType) or isinstance(rt, FuncType):
-                raise CheckError("function values cannot be compared",
-                                 self.filename, expr.pos)
+                if op in ('==', '!=') and isinstance(lt, FuncType) and lt == rt:
+                    return BOOL
+                if op in ('==', '!='):
+                    raise CheckError(f"cannot compare {lt} and {rt} with '{op}'",
+                                     self.filename, expr.pos)
+                raise CheckError(
+                    "ordering comparisons are not supported on function values; "
+                    "use '==' or '!='",
+                    self.filename, expr.pos)
             if isinstance(lt, EnumType) or isinstance(rt, EnumType):
                 if lt == rt and op in ('==', '!='):
                     return BOOL
@@ -981,9 +996,10 @@ class TypeChecker:
             raise CheckError(f"ptr_is_null takes one argument, got {len(call.args)}",
                              self.filename, call.pos)
         at = self._check_expr(call.args[0])
-        if not isinstance(at, PtrType):
-            raise CheckError(f"ptr_is_null expects a pointer, got {at}",
-                             self.filename, call.pos)
+        if not isinstance(at, (PtrType, FuncType)):
+            raise CheckError(
+                f"ptr_is_null expects a pointer or a function value, got {at}",
+                self.filename, call.pos)
         call.type = BOOL
         return BOOL
 

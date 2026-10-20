@@ -355,6 +355,39 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('FnPtr0 fn_pick();', cpp)
         self.assertIn('return fn_inc;', cpp)
 
+    def test_extern_function_return_emit(self):
+        cpp = gen('extern "c" {\n    func get() -> func(i32) -> i32\n}\n'
+                  'func main() -> void:\n'
+                  '    let g = get()\n'
+                  '    print_i32(g(1))\n')
+        self.assertIn('int32_t(*get())(int32_t);', cpp)
+        self.assertIn('FnPtr0 v_g = get();', cpp)
+        self.assertIn('vanta::print_i32(v_g(1))', cpp)
+
+    def test_extern_ptr_function_return_emit(self):
+        cpp = gen('extern "c" {\n    func get() -> ptr<func(i32) -> i32>\n}\n'
+                  'func main() -> void:\n    return\n')
+        self.assertIn('int32_t(**get())(int32_t);', cpp)
+
+    def test_extern_nested_function_return_emit(self):
+        cpp = gen('extern "c" {\n'
+                  '    func get() -> func() -> func() -> i32\n'
+                  '}\n'
+                  'func main() -> void:\n    return\n')
+        self.assertIn('int32_t(*(*get())())();', cpp)
+
+    def test_function_equality_emit(self):
+        cpp = gen("func sq(x: i32) -> i32:\n    return x\n"
+                  "func main() -> void:\n"
+                  "    let a = sq\n"
+                  "    let b = sq\n"
+                  "    print_bool(a == b)\n"
+                  "    print_bool(a != b)\n"
+                  "    print_bool(ptr_is_null(a))\n")
+        self.assertIn('vanta::print_bool((v_a == v_b));', cpp)
+        self.assertIn('vanta::print_bool((v_a != v_b));', cpp)
+        self.assertIn('vanta::print_bool(((v_a) == nullptr));', cpp)
+
     def test_nested_function_type_alias_order(self):
         cpp = gen("func inc(x: i32) -> i32:\n    return x + 1\n"
                   "func twice(f: func(i32) -> i32, x: i32) -> i32:\n"
@@ -749,6 +782,14 @@ class CodegenTests(unittest.TestCase):
                       'vanta::str_eq(a.v_names[1], b.v_names[1])) && '
                       '(a.v_inner == b.v_inner);', cpp)
         self.assertIn('inline bool operator!=(const P& a, const P& b) { return !(a == b); }', cpp)
+
+    def test_struct_eq_function_field_emit(self):
+        cpp = gen("struct Handler:\n"
+                  "    cb: func(i32) -> i32\n"
+                  "    n: i32\n"
+                  "func main() -> void:\n"
+                  "    print_i32(1)\n")
+        self.assertIn('return (a.v_cb == b.v_cb) && (a.v_n == b.v_n);', cpp)
 
     def test_struct_eq_not_emitted_for_uncomparable(self):
         cpp = gen("struct Q:\n"

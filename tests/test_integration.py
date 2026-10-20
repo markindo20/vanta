@@ -956,6 +956,20 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_extern_return_example(self):
+        # C returns a function pointer, and Vanta calls it, compares it by
+        # address, and tests it for null — the extern return path end to end.
+        tmp = tempfile.mkdtemp(prefix='vanta_extret_')
+        try:
+            lib = self._build_c_fixture(tmp, 'extern_return_lib.c')
+            exe = self._build_example_linked('extern_return.vnt', tmp, [lib])
+            r = subprocess.run([exe], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['42', '-7', 'false', 'true', 'true', 'false', 'true'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_file_io_example(self):
         # Build examples/file_io.vnt and exercise all three branches:
         # missing argument, missing file, and a real read/write round-trip

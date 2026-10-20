@@ -115,7 +115,7 @@ def eq_blocker(t, path=""):
     """Walk t looking for a value that '==' cannot compare. Returns a
     (path, type) pair naming the first blocker, or None when t has equality.
     Only Vec2 and Vec3 have equality among the builtin structs."""
-    if isinstance(t, PrimType) or isinstance(t, EnumType):
+    if isinstance(t, (PrimType, EnumType, FuncType)):
         return None
     if isinstance(t, StructType):
         if t.builtin:

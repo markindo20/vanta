@@ -526,13 +526,42 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaisesRegex(CheckError, "cannot use type 'Vec3' as a value"):
             run("func f() -> void:\n    let g = Vec3\n")
 
-    def test_function_equality_rejected(self):
-        with self.assertRaisesRegex(CheckError, "function values cannot be compared"):
+    def test_function_equality(self):
+        run("func sq(x: i32) -> i32:\n    return x\n"
+            "func f() -> void:\n"
+            "    let a = sq\n"
+            "    let b = sq\n"
+            "    let same: bool = a == b\n"
+            "    print_bool(a != b)\n")
+
+    def test_function_equality_different_types_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                r"cannot compare func\(i32\) -> i32 and func\(i32\) -> bool with '=='"):
+            run("func sq(x: i32) -> i32:\n    return x\n"
+                "func pos(x: i32) -> bool:\n    return x > 0\n"
+                "func f() -> void:\n"
+                "    let a = sq\n"
+                "    let b = pos\n"
+                "    print_bool(a == b)\n")
+
+    def test_function_ordering_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                "ordering comparisons are not supported on function values"):
             run("func sq(x: i32) -> i32:\n    return x\n"
                 "func f() -> void:\n"
                 "    let a = sq\n"
-                "    let b = sq\n"
-                "    print_bool(a == b)\n")
+                "    print_bool(a < a)\n")
+
+    def test_function_equality_with_null(self):
+        run("func sq(x: i32) -> i32:\n    return x\n"
+            "func f() -> void:\n"
+            "    let a = sq\n"
+            "    let n: func(i32) -> i32 = ptr_null::<func(i32) -> i32>()\n"
+            "    print_bool(a != n)\n"
+            "    print_bool(ptr_is_null(n))\n"
+            "    print_bool(ptr_is_null(a))\n")
 
     def test_const_function_rejected(self):
         with self.assertRaisesRegex(CheckError, "constant cannot hold a function value"):
@@ -570,14 +599,26 @@ class TypeCheckerTests(unittest.TestCase):
             run('extern "c" {\n    func on(cb: func(i32) -> i32) -> void\n}\n'
                 'func f() -> void:\n    let n: i32 = 3\n    on(n)\n')
 
-    def test_extern_func_return_rejected(self):
-        with self.assertRaisesRegex(CheckError,
-                                    "extern function 'get' cannot return a function type"):
-            run('extern "c" {\n    func get() -> func(i32) -> i32\n}\n'
-                'func f() -> void:\n    return\n')
-        with self.assertRaisesRegex(CheckError,
-                                    "extern function 'get2' cannot return a function type"):
-            run('extern "c" {\n    func get2() -> ptr<func()>\n}\n'
+    def test_extern_func_return_ok(self):
+        run('extern "c" {\n'
+            '    func get() -> func(i32) -> i32\n'
+            '    func get_ptr() -> ptr<func()>\n'
+            '    func get_nested() -> func() -> func() -> i32\n'
+            '}\n'
+            'func f() -> void:\n'
+            '    let g = get()\n'
+            '    print_i32(g(1))\n'
+            '    let p = get_ptr()\n'
+            '    print_bool(ptr_is_null(p))\n'
+            '    let h = get_nested()\n'
+            '    let h2 = h()\n'
+            '    print_i32(h2())\n')
+
+    def test_extern_func_return_array_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError,
+                "can return a function type or a pointer to one"):
+            run('extern "c" {\n    func get() -> [func(), 2]\n}\n'
                 'func f() -> void:\n    return\n')
 
     def test_reserved_fnptr_struct_name_rejected(self):
@@ -1731,8 +1772,17 @@ class TypeCheckerTests(unittest.TestCase):
             "    if not ptr_is_null(mk()):\n"
             "        print_str(\"got\")\n")
 
+    def test_ptr_is_null_on_function_value(self):
+        run("func sq(x: i32) -> i32:\n"
+            "    return x\n"
+            "func main() -> void:\n"
+            "    let f = sq\n"
+            "    print_bool(ptr_is_null(f))\n")
+
     def test_ptr_is_null_wrong_arg(self):
-        with self.assertRaisesRegex(CheckError, "ptr_is_null expects a pointer, got <int-lit>"):
+        with self.assertRaisesRegex(
+                CheckError,
+                "ptr_is_null expects a pointer or a function value, got <int-lit>"):
             run("func main() -> void:\n"
                 "    print_bool(ptr_is_null(3))\n")
 
@@ -2051,14 +2101,16 @@ class TypeCheckerTests(unittest.TestCase):
                 "    if a == b:\n"
                 "        print_i32(1)\n")
 
-    def test_struct_eq_func_field_rejected(self):
-        with self.assertRaisesRegex(CheckError,
-                r"cannot compare struct 'Q' with '!=': field 'cb' \(func\(i32\) -> i32\) has no equality"):
-            run("struct Q:\n"
-                "    cb: func(i32) -> i32\n"
-                "func f(a: Q, b: Q) -> void:\n"
-                "    if a != b:\n"
-                "        print_i32(1)\n")
+    def test_struct_eq_func_field_ok(self):
+        run("struct Q:\n"
+            "    cb: func(i32) -> i32\n"
+            "func inc(x: i32) -> i32:\n"
+            "    return x + 1\n"
+            "func f(a: Q, b: Q) -> void:\n"
+            "    if a != b:\n"
+            "        print_i32(1)\n"
+            "func g() -> void:\n"
+            "    f(Q(cb: inc), Q(cb: inc))\n")
 
     def test_struct_eq_list_field_rejected(self):
         with self.assertRaisesRegex(CheckError,

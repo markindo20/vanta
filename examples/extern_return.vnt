@@ -1,0 +1,27 @@
+# extern_return.vnt — C hands function pointers back to Vanta.
+#
+# The C side is in extern_return_lib.c. Build it once, then run:
+#
+#     gcc -c examples/extern_return_lib.c -o build/extern_return_lib.o
+#     ar rcs build/libextret.a build/extern_return_lib.o
+#     python main.py run examples/extern_return.vnt --lib-dir build --link extret
+#
+# An extern may return a function type. The value is an ordinary function
+# value: call it, compare it by address, or test it for null.
+
+extern "extern return demo" {
+    func extret_pick(which: i32) -> func(i32) -> i32
+}
+
+func main() -> void:
+    let dbl = extret_pick(0)
+    let neg = extret_pick(1)
+    let none = extret_pick(2)
+
+    print_i32(dbl(21))                        # 42
+    print_i32(neg(7))                         # -7
+    print_bool(ptr_is_null(dbl))              # false
+    print_bool(ptr_is_null(none))             # true
+    print_bool(dbl == dbl)                    # true: the same address
+    print_bool(dbl == neg)                    # false: different functions
+    print_bool(none == ptr_null::<func(i32) -> i32>())  # true
