@@ -32,6 +32,20 @@ python main.py build examples/vector_math.vnt --release
 python main.py --version
 ```
 
+Install the `vanta` command once (editable, so it always uses this checkout):
+
+```powershell
+python -m pip install -e .
+```
+
+Then run a source file directly — `vanta game.vnt` is shorthand for
+`vanta run game.vnt`, and the SDL link flags are added for you:
+
+```powershell
+vanta examples/vector_math.vnt
+vanta examples/strike.vnt
+```
+
 `run` compiles to a temporary executable and deletes it afterwards. `build`
 writes to `build/<name>` (or `-o <path>`), and `--emit-cpp <path>` also writes
 the generated C++. On C++ compilation failure the generated source is saved to
@@ -50,8 +64,10 @@ extern "SDL2" {
 
 `--include-dir`, `--lib-dir`, and `--link` are repeatable flags on `build` and
 `run`. On GCC-style toolchains they become `-I`, `-L`, and `-l`; on MSVC they
-become `/I`, `/LIBPATH:`, and `<lib>.lib`. A self-contained example ships with
-its C side in `examples/extern_demo_lib.c`:
+become `/I`, `/LIBPATH:`, and `<lib>.lib`. The SDL libraries the game kit uses
+are detected from their extern block names — `extern "SDL2"`,
+`"SDL2_ttf"`, and `"SDL2_image"` — and linked automatically. A self-contained
+example ships with its C side in `examples/extern_demo_lib.c`:
 
 ```powershell
 gcc -c examples/extern_demo_lib.c -o build/extern_demo_lib.o
@@ -82,14 +98,14 @@ and hits, a gamepad fallback, and a deterministic autopilot clear;
 sprites.
 
 ```powershell
-python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-python main.py run examples/sdl_text.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
-python main.py run examples/sdl_texture.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2
-python main.py run examples/sdl_audio.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
-python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
-python main.py run examples/strike.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta examples/sdl_game.vnt
+vanta examples/sdl_text.vnt
+vanta examples/sdl_texture.vnt
+vanta examples/sdl_audio.vnt
+vanta examples/sdl_gamepad.vnt
+vanta examples/pong.vnt
+vanta examples/breakout.vnt
+vanta examples/strike.vnt
 ```
 
 All of them are pure `extern` declarations, so no SDL headers are needed to
@@ -105,10 +121,11 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | Path | Contents |
 |---|---|
 | `main.py` | CLI entry point |
+| `pyproject.toml` | Editable install that creates the `vanta` command |
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (556 tests) |
+| `tests/` | `unittest` suite (560 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples

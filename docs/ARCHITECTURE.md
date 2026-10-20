@@ -74,6 +74,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    code generator (which turns them into printf conversions).
 9. `driver.py` — orchestrates the frontend and native compilation, detects
    `clang++`/`g++`/`cl` (honouring `$CXX`), and implements `check`/`build`/`run`.
+   A bare source path is the same as `run`, and known extern block names
+   (`SDL2`, `SDL2_ttf`, `SDL2_image`) add their link flags automatically.
    `--include-dir`/`--lib-dir`/`--link` (repeatable, on `build` and `run`) pass
    `-I`/`-L`/`-l` — or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents —
    through to the C++ compiler.
@@ -139,7 +141,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 556 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 560 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

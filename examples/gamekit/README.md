@@ -242,13 +242,13 @@ true
 true
 ```
 
-Build it like any SDL2 program — `text.vnt` links SDL_ttf and `image.vnt`
-links SDL2_image as well as SDL2, and `audio.vnt`, `gamepad.vnt`, and
-`collide.vnt` need nothing beyond the core library (`collide.vnt` needs no
-library at all):
+Run it like any Vanta program — `text.vnt` brings in SDL_ttf and `image.vnt`
+brings in SDL2_image, both linked automatically from their extern block
+names, and `audio.vnt`, `gamepad.vnt`, and `collide.vnt` need nothing beyond
+the core library (`collide.vnt` needs no library at all):
 
 ```powershell
-python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta game.vnt
 ```
 
 Notes:

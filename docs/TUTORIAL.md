@@ -637,13 +637,15 @@ func main() -> void:
 a blue window, then gone
 ```
 
-Run it with the library on the command line (Windows / MSYS2 paths — on
-Linux and macOS SDL2 lives in the default search path, so `--link SDL2`
-alone is enough):
+Run it directly — the `extern "SDL2"` block tells the driver which library to
+link:
 
 ```powershell
-python main.py run window.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+vanta window.vnt
 ```
+
+The same works for `"SDL2_ttf"` and `"SDL2_image"`. Custom C libraries still
+use `--lib-dir` and `--link`.
 
 Things worth noticing:
 
@@ -815,11 +817,11 @@ first, then compute the x. **Rendering happens per call**: each `text_draw`
 renders the string into a texture and frees it immediately — just right for
 scores and timers that change.
 
-Programs that import `text.vnt` link SDL_ttf as well as SDL2;
+Programs that import `text.vnt` get SDL_ttf linked from its extern block;
 `examples/pong.vnt` now draws its score this way:
 
 ```powershell
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
+vanta examples/pong.vnt
 ```
 
 Text that stays the same but redraws every frame — a label, a wall of
@@ -909,7 +911,7 @@ arena, because SDL copies them during the call.
 and a paddle:
 
 ```powershell
-python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta examples/breakout.vnt
 ```
 
 ## Animated sprites
@@ -959,7 +961,7 @@ strip (zero frames) draws nothing.
 the assets script generates beside the static ball:
 
 ```powershell
-python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta examples/breakout.vnt
 ```
 
 ## Sound
@@ -1042,8 +1044,8 @@ and `examples/breakout.vnt` fires WAV files for its hits, bricks, and lost
 balls:
 
 ```powershell
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
-python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta examples/pong.vnt
+vanta examples/breakout.vnt
 ```
 
 ## Gamepads
@@ -1092,7 +1094,7 @@ index, poll A, d-pad-left, the left stick, and the left trigger, close. With
 no controller it prints the dead path too:
 
 ```powershell
-python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+vanta examples/sdl_gamepad.vnt
 ```
 
 ## Where to go next
@@ -1106,4 +1108,4 @@ python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --li
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (556 tests).
+- `python -m unittest discover -s tests` — run the test suite (560 tests).

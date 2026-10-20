@@ -1067,9 +1067,10 @@ extern "demo" {
 
 - The block lists signatures only — no bodies. A `func` without `-> type`
   returns `void`.
-- The string names the library for the reader. Linking is decided on the
-  command line, not by the string: `--lib-dir` adds a library search path and
-  `--link` adds a library (both repeatable, on `build` and `run`).
+- The string names the library. `SDL2`, `SDL2_ttf`, and `SDL2_image` are
+  recognized and linked automatically; for any other library use `--lib-dir`
+  to add a search path and `--link` to add the library (both repeatable, on
+  `build` and `run`).
 - Extern functions are called like any other function and type-checked the
   same way. The generated C++ declares them in an `extern "C" {}` block outside
   `namespace vanta_user`, and calls keep the original (unmangled) name.
@@ -1177,11 +1178,11 @@ make sound (a queued tone, and a Vanta callback on SDL's audio thread);
 a game controller; and `examples/sdl_game.vnt` is the first playable Vanta
 game — move the paddle with Left/Right (or A/D) to catch falling coins; Esc
 or the close button quits. Every one of them talks to C only through
-`extern` declarations: no SDL headers are involved at compile time, only the
-library at link time:
+`extern` declarations: no SDL headers are involved at compile time, and the
+SDL libraries link automatically from the block names:
 
 ```powershell
-python main.py run examples/sdl_game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
+vanta examples/sdl_game.vnt
 ```
 
 A complete window in one program — event loop, one drawn rectangle, cleanup:
@@ -1284,7 +1285,7 @@ installs SDL2 on Linux, macOS, and Windows and runs the same smoke tests):
 
 ```powershell
 $env:SDL_VIDEODRIVER = "dummy"
-python main.py run examples/sdl_window.vnt 120 --lib-dir C:/msys64/mingw64/lib --link SDL2
+vanta examples/sdl_window.vnt 120
 ```
 
 Files follow the same recipe: `examples/sdl_texture.vnt` decodes PNG and BMP
@@ -1572,15 +1573,16 @@ true
 true
 ```
 
-Kit programs build like any other SDL2 program; `text.vnt` links SDL_ttf as
-well, `image.vnt` links SDL2_image (`audio.vnt`, `gamepad.vnt`, and
+Kit programs run like any other Vanta program; `text.vnt` brings in SDL_ttf,
+`image.vnt` brings in SDL2_image, and the kit's extern block names give the
+driver everything it needs to link them (`audio.vnt`, `gamepad.vnt`, and
 `collide.vnt` need nothing extra — the first two use SDL2's core library,
 and `collide.vnt` uses no library at all):
 
 ```powershell
-python main.py run examples/pong.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_ttf --link SDL2
-python main.py run examples/breakout.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
-python main.py run examples/strike.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+vanta examples/pong.vnt
+vanta examples/breakout.vnt
+vanta examples/strike.vnt
 ```
 
 `examples/pong.vnt` is the worked example for the first game: it imports six

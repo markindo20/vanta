@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## Unreleased
+
+- `vanta game.vnt` is shorthand for `vanta run game.vnt`: a bare source path
+  now compiles and runs. Installing the checkout once with
+  `python -m pip install -e .` creates the `vanta` command, so games launch
+  without repeating `python main.py` or spelling out link flags.
+- The driver links SDL2, SDL2_ttf, and SDL2_image automatically when it sees
+  their extern block names. Explicit `--link` values still work and are
+  deduplicated; custom C libraries still use `--include-dir`, `--lib-dir`,
+  and `--link`. On Windows the compiler's own `bin` directory is added to the
+  child `PATH`, so the SDL DLLs are found without a manual environment setup.
+- 4 new tests: command normalization, auto-link detection and ordering, custom
+  externs staying unlinked, and explicit-link deduplication. 560 total.
+
 ## v0.24.0 — 2026-10-20
 
 - The fourth playable game. `examples/strike.vnt` is a one-screen wave

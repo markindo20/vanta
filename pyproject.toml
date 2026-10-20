@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vanta-lang"
+description = "Vanta, a game-oriented systems language"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dynamic = ["version"]
+
+[project.scripts]
+vanta = "compiler.driver:cli"
+
+[tool.setuptools]
+packages = ["compiler"]
+
+[tool.setuptools.dynamic]
+version = { attr = "compiler.VERSION" }
