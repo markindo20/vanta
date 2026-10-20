@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 
@@ -61,6 +61,13 @@ class StructType(Type):
 class EnumType(Type):
     name: str
     members: Dict[str, int]
+    # Member name -> payload types. Members without a payload map to ().
+    payloads: Dict[str, Tuple[Type, ...]] = field(default_factory=dict)
+    @property
+    def has_payloads(self) -> bool:
+        return any(self.payloads.values())
+    def payload_of(self, member: str) -> Tuple[Type, ...]:
+        return self.payloads.get(member, ())
     def __eq__(self, other):
         return isinstance(other, EnumType) and self.name == other.name
     def __hash__(self): return hash(self.name)
@@ -115,7 +122,17 @@ def eq_blocker(t, path=""):
     """Walk t looking for a value that '==' cannot compare. Returns a
     (path, type) pair naming the first blocker, or None when t has equality.
     Only Vec2 and Vec3 have equality among the builtin structs."""
-    if isinstance(t, (PrimType, EnumType, FuncType)):
+    if isinstance(t, (PrimType, FuncType)):
+        return None
+    if isinstance(t, EnumType):
+        # Payload enums compare their tag and the active payload. A payload
+        # that cannot be compared makes the whole enum incomparable.
+        for mname, payload in t.payloads.items():
+            for i, ptype in enumerate(payload):
+                sub = eq_blocker(
+                    ptype, f"{path}.{mname}[{i}]" if path else f"{mname}[{i}]")
+                if sub is not None:
+                    return sub
         return None
     if isinstance(t, StructType):
         if t.builtin:

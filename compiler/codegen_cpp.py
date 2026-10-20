@@ -120,6 +120,9 @@ def _contains_str(t):
         return True
     if isinstance(t, (PtrType, ArrayType, ListType)):
         return _contains_str(t.inner)
+    if isinstance(t, EnumType):
+        return any(_contains_str(pt)
+                   for payload in t.payloads.values() for pt in payload)
     if isinstance(t, FuncType):
         return any(_contains_str(p) for p in t.params) or _contains_str(t.ret)
     if isinstance(t, StructType) and not t.builtin:
@@ -137,6 +140,10 @@ def _func_types_in(t):
         yield from _func_types_in(t.inner)
     elif isinstance(t, ListType):
         yield from _func_types_in(t.inner)
+    elif isinstance(t, EnumType):
+        for payload in t.payloads.values():
+            for pt in payload:
+                yield from _func_types_in(pt)
 
 
 def _escape_cpp_string(s: str) -> str:
@@ -401,7 +408,10 @@ class CodeGen:
             self.emit('namespace vanta_user {')
             self.indent += 1
             for ed in enums:
-                self.emit(f'enum class {ed.name} : int32_t;')
+                if self.tc.enums[ed.name].has_payloads:
+                    self.emit(f'struct {ed.name};')
+                else:
+                    self.emit(f'enum class {ed.name} : int32_t;')
             for sd in structs:
                 self.emit(f'struct {sd.name};')
             self.indent -= 1
@@ -416,14 +426,15 @@ class CodeGen:
         self.emit('namespace vanta_user {')
         self.indent += 1
 
-        # Enums first: structs, constants, and signatures may use them.
-        for ed in [d for d in self.program.decls if isinstance(d, A.EnumDecl)]:
-            self._gen_enum(ed)
-
-        # Struct tags come before the function-pointer aliases: an alias may
-        # mention a struct by value (a comparator func(Item, Item) -> i32),
-        # and the struct definitions come after the aliases because a struct
-        # field may hold a function value.
+        # Forward declarations come before the function-pointer aliases: an
+        # alias may mention a struct or enum by value (a comparator
+        # func(Item, Item) -> i32), and the definitions come after the
+        # aliases because a struct field may hold a function value.
+        for ed in enums:
+            if self.tc.enums[ed.name].has_payloads:
+                self.emit(f'struct {ed.name};')
+            else:
+                self.emit(f'enum class {ed.name} : int32_t;')
         for sd in structs:
             self.emit(f'struct {sd.name};')
         self.emit('')
@@ -435,6 +446,15 @@ class CodeGen:
                 self.emit(f'using {self.tc.func_types[ft]} = {self._ctype(ft.ret)}(*)({params});')
             self.emit('')
 
+        # Type definitions in source order. Payload types must be declared
+        # before the enum that carries them, and struct fields may use an
+        # earlier enum, so declaration order is a valid dependency order.
+        for d in self.program.decls:
+            if isinstance(d, A.StructDecl):
+                self._gen_struct(d)
+            elif isinstance(d, A.EnumDecl):
+                self._gen_enum(d)
+
         consts = [d for d in self.program.decls if isinstance(d, A.ConstDecl)]
         for cd in consts:
             t = self.tc.constants[cd.name]
@@ -443,9 +463,7 @@ class CodeGen:
         if consts:
             self.emit('')
 
-        for sd in structs:
-            self._gen_struct(sd)
-        self._gen_struct_eq(structs)
+        self._gen_equality(structs, enums)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
@@ -489,7 +507,34 @@ class CodeGen:
     def _gen_enum(self, ed: A.EnumDecl):
         et = self.tc.enums[ed.name]
         body = ', '.join(f'{m} = {v}' for m, v in et.members.items())
-        self.emit(f'enum class {ed.name} : int32_t {{ {body} }};')
+        if not et.has_payloads:
+            self.emit(f'enum class {ed.name} : int32_t {{ {body} }};')
+            self.emit('')
+            return
+
+        self.emit(f'struct {ed.name} {{')
+        self.indent += 1
+        self.emit(f'enum class VantaTag : int32_t {{ {body} }};')
+        self.emit('VantaTag v_tag;')
+        for member, payload in et.payloads.items():
+            for i, ptype in enumerate(payload):
+                self.emit(f'{self._ctype(ptype)} p_{member}_{i};')
+        self.indent -= 1
+        self.emit('};')
+        self.emit('')
+
+        for member, payload in et.payloads.items():
+            params = ', '.join(f'{self._ctype(ptype)} a{i}'
+                               for i, ptype in enumerate(payload))
+            self.emit(f'inline {ed.name} make_{ed.name}_{member}({params}) {{')
+            self.indent += 1
+            self.emit(f'{ed.name} v{{}};')
+            self.emit(f'v.v_tag = {ed.name}::VantaTag::{member};')
+            for i, _ptype in enumerate(payload):
+                self.emit(f'v.p_{member}_{i} = a{i};')
+            self.emit('return v;')
+            self.indent -= 1
+            self.emit('}')
         self.emit('')
 
     def _gen_struct(self, sd: A.StructDecl):
@@ -508,19 +553,44 @@ class CodeGen:
             return None
         return st
 
-    def _gen_struct_eq(self, structs):
-        """Component-wise == and != for user structs whose fields all have
-        equality. Declarations come first so nested structs can refer to
-        each other's operators in any declaration order."""
-        eqs = [st for st in (self._equality_fields(sd) for sd in structs)
-               if st is not None]
-        if not eqs:
+    def _gen_equality(self, structs, enums):
+        """Component-wise == and != for user structs and payload enums whose
+        values all have equality. Declarations come first so nested types
+        can refer to each other's operators in any declaration order."""
+        struct_eqs = [st for st in (self._equality_fields(sd) for sd in structs)
+                      if st is not None]
+        enum_eqs = [self.tc.enums[ed.name] for ed in enums
+                    if self.tc.enums[ed.name].has_payloads
+                    and eq_blocker(self.tc.enums[ed.name]) is None]
+        if not struct_eqs and not enum_eqs:
             return
-        for st in eqs:
+        for st in struct_eqs:
             self.emit(f'inline bool operator==(const {st.name}& a, const {st.name}& b);')
             self.emit(f'inline bool operator!=(const {st.name}& a, const {st.name}& b);')
+        for et in enum_eqs:
+            self.emit(f'inline bool operator==(const {et.name}& a, const {et.name}& b);')
+            self.emit(f'inline bool operator!=(const {et.name}& a, const {et.name}& b);')
         self.emit('')
-        for st in eqs:
+        for et in enum_eqs:
+            self.emit(f'inline bool operator==(const {et.name}& a, const {et.name}& b) {{')
+            self.indent += 1
+            self.emit('if (a.v_tag != b.v_tag) return false;')
+            self.emit('switch (a.v_tag) {')
+            self.indent += 1
+            for member, payload in et.payloads.items():
+                terms = [self._eq_expr(pt, f'a.p_{member}_{i}', f'b.p_{member}_{i}')
+                         for i, pt in enumerate(payload)]
+                body = ' && '.join(terms) if terms else 'true'
+                self.emit(f'case {et.name}::VantaTag::{member}: return {body};')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('return false;')
+            self.indent -= 1
+            self.emit('}')
+            self.emit(f'inline bool operator!=(const {et.name}& a, const {et.name}& b) '
+                      f'{{ return !(a == b); }}')
+            self.emit('')
+        for st in struct_eqs:
             terms = [self._eq_expr(ft, f'a.v_{fn}', f'b.v_{fn}')
                      for fn, ft in st.fields.items()]
             body = ' && '.join(terms) if terms else 'true'
@@ -565,6 +635,13 @@ class CodeGen:
                 self.emit('return vanta::Str();')
             elif isinstance(ret_type, PtrType):
                 self.emit('return nullptr;')
+            elif isinstance(ret_type, EnumType):
+                first = next(iter(ret_type.members))
+                if ret_type.has_payloads:
+                    self.emit(f'return {ret_type.name}'
+                              f'{{{ret_type.name}::VantaTag::{first}}};')
+                else:
+                    self.emit(f'return {ret_type.name}::{first};')
             else:
                 self.emit(f'return {self._ctype(ret_type)}{{}};')
         self.indent -= 1
@@ -688,6 +765,8 @@ class CodeGen:
         # chain. A C++ switch would capture `break` written in an arm body,
         # so the chain is what keeps break/continue meaning the enclosing
         # loop, as they do everywhere else in the language.
+        vt = getattr(stmt.value, 'type', None)
+        is_payload = isinstance(vt, EnumType) and vt.has_payloads
         self.temp_counter += 1
         n = self.temp_counter
         self.emit('{')
@@ -700,8 +779,14 @@ class CodeGen:
                 else:
                     self.emit('} else {')
             else:
-                cond = ' || '.join(f'__match_{n} == {tn}::{mn}'
-                                   for (tn, mn, _pos) in arm.patterns)
+                if is_payload:
+                    cond = ' || '.join(
+                        f'__match_{n}.v_tag == {pat.enum_name}::VantaTag::{pat.member}'
+                        for pat in arm.patterns)
+                else:
+                    cond = ' || '.join(
+                        f'__match_{n} == {pat.enum_name}::{pat.member}'
+                        for pat in arm.patterns)
                 if len(arm.patterns) > 1:
                     cond = f'({cond})'
                 if i == 0:
@@ -709,6 +794,13 @@ class CodeGen:
                 else:
                     self.emit(f'}} else if ({cond}) {{')
             self.indent += 1
+            if is_payload:
+                for pat in arm.patterns:
+                    for bind_i, bname in enumerate(pat.bindings or []):
+                        if bname == '_':
+                            continue
+                        self.emit(f'const auto& v_{bname} = '
+                                  f'__match_{n}.p_{pat.member}_{bind_i};')
             for s in arm.body:
                 self._gen_stmt(s)
             self.indent -= 1
@@ -805,6 +897,9 @@ class CodeGen:
             return f'(-{self._expr(e.operand)})'
         if isinstance(e, A.Member):
             if getattr(e, 'is_enum_member', False):
+                et = getattr(e, 'type', None)
+                if isinstance(et, EnumType) and et.has_payloads:
+                    return f'make_{et.name}_{e.field}()'
                 return f'{e.obj.name}::{e.field}'
             obj_t = getattr(e.obj, 'type', None)
             base = self._expr(e.obj)
@@ -841,6 +936,12 @@ class CodeGen:
 
     def _call(self, c: A.Call) -> str:
         f = c.func
+        if getattr(c, 'is_enum_ctor', False):
+            et = c.type
+            args = ', '.join(self._expr(a) for a in c.args)
+            if isinstance(et, EnumType) and et.has_payloads:
+                return f'make_{et.name}_{f.field}({args})'
+            return f'{et.name}::{f.field}'
         if getattr(c, 'is_indirect_call', False):
             # The checker resolved this through a function value: a variable,
             # a struct field, an indexed element, or another call.
@@ -855,6 +956,9 @@ class CodeGen:
                     return f'int32_t(({self._expr(c.args[0])}).h->len)'
                 return f'int32_t(({self._expr(c.args[0])}).size())'
             if name == 'enum_to_i32':
+                at = getattr(c.args[0], 'type', None)
+                if isinstance(at, EnumType) and at.has_payloads:
+                    return f'static_cast<int32_t>(({self._expr(c.args[0])}).v_tag)'
                 return f'static_cast<int32_t>({self._expr(c.args[0])})'
             if name == 'ptr_is_null':
                 return f'(({self._expr(c.args[0])}) == nullptr)'

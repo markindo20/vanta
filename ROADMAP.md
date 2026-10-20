@@ -5,22 +5,26 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.28.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.29.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: language (candidate v0.29.0)
+## Next: language (candidate v0.30.0)
 
-The installable release landed in v0.28.0: the runtime and game kit travel
-inside the wheel, `vanta doctor` checks a machine, and tagging builds and
-attaches the distribution. The next language item is enum extensions; checked
-pointer access and automatic string ownership are already in.
+Enum extensions landed in v0.29.0: members can name explicit `i32` values and
+carry payloads, and `match` destructures them exhaustively. The next structural
+gap is module boundaries. Imports currently merge every file into one flat
+namespace, which is workable for examples but blocks a real standard library
+and third-party packages.
 
-1. **Enums with explicit values and associated data — large.** Enums are
-   named constants with `==` and `match`; explicit member values are the
-   smaller half, and associated data would extend `match` exhaustiveness.
-   Design carefully — the current plainness is a feature.
+1. **Modules, namespaces, and privacy — large.** Give files or declared
+   modules their own scope, add qualified names, and let `pub` control what
+   crosses a boundary. Resolve cycles and keep the flat-import form working
+   for existing programs.
+2. **Error handling with `Option`/`Result` — medium.** A library-shaped
+   alternative to sentinel values, built on payload enums once module
+   boundaries make a standard library practical.
 
 ## Kit and examples
 
@@ -28,18 +32,19 @@ pointer access and automatic string ownership are already in.
   persisted in `breakout.score`, and `sound_load_gain` for per-sound volume.
   The pong and strike frozen runs stay untouched; breakout's frozen run now
   records the three-wall clear.
+- `examples/enums_advanced.vnt` exercises explicit member values, payload
+  enums, struct/str payloads, wildcard bindings, equality, and `enum_to_i32`;
+  its output is frozen in the integration suite.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.
 
 ## Tooling and documentation
 
-- Distribution is now wheel-based. The release workflow can publish to PyPI
-  through Trusted Publishing once the project and the `pypi` environment are
-  configured there and `PUBLISH_PYPI=true` is set; until then the wheel is
-  attached to each GitHub release and installs with
-  `pip install <release wheel URL>`. Homebrew, Scoop, and winget formulas are
-  follow-ups.
+- Distribution is live: `vanta-lang` is on PyPI and the release workflow
+  publishes each version tag through Trusted Publishing, attaching the wheel
+  and sdist to the GitHub release too. Homebrew, Scoop, and winget formulas
+  are follow-ups.
 - The VS Code extension (`editors/vscode/`) provides syntax highlighting
   only. A language server (diagnostics, hover, go-to-definition) is a
   substantial separate project and is not scheduled.

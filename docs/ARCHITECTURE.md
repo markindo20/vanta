@@ -53,22 +53,30 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    forward-declared ahead of the block. Each distinct function type is
    emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
    namespace, innermost first, and drives the in-namespace spellings.
-   Enum declarations are emitted before the aliases, since signatures and
-   fields may name them. A function that can fall through gets a
+   Struct and enum definitions are emitted in source order; forward tags and
+   aliases come first. Payload types must be declared before the enum that
+   carries them, so source order is a valid dependency order. A plain enum is
+   `enum class E : int32_t`; a payload enum is a struct with a nested
+   `VantaTag` and one field per payload value, plus a `make_E_Member`
+   constructor for each member. A function that can fall through gets a
    type-appropriate default return: `""` for `str`, `nullptr` for pointers,
-   value-initialization for everything else (`T{}` cannot be written for a
-   raw `T*`, which is why pointers are special-cased). `match` lowers to an
-   if/else chain over a single `const auto` binding of the matched value —
-   deliberately not a C++ `switch`, so a `break`/`continue` written in an
-   arm keeps its meaning for the enclosing loop. `for x in xs` lowers to an
-   index loop over a bound handle (Lists) or a const reference (arrays),
-   re-reading a list's length each pass. Comparable structs get non-member
-   `operator==`/`!=` emitted field by field (`str` through `str_eq`, arrays
-   element-wise), every declaration ahead of every definition so nesting
-   order does not matter, and narrow fields or elements get `static_cast<T>`
-   where C++ braced initialization would refuse the narrowing. Enum tags are
-   forward-declared with their fixed `int32_t` underlying type next to the
-   struct tags ahead of the `extern "C"` block.
+   the first member for enums, value-initialization for everything else
+   (`T{}` cannot be written for a raw `T*`, which is why pointers are
+   special-cased). `match` lowers to an if/else chain over a single
+   `const auto` binding of the matched value — deliberately not a C++
+   `switch`, so a `break`/`continue` written in an arm keeps its meaning for
+   the enclosing loop. Payload patterns compare `v_tag` and bind the active
+   fields with `const auto&` locals. `for x in xs` lowers to an index loop
+   over a bound handle (Lists) or a const reference (arrays), re-reading a
+   list's length each pass. Comparable structs and payload enums get
+   non-member `operator==`/`!=` (`str` through `str_eq`, arrays element-wise,
+   payload enums by tag and active payload), every declaration ahead of every
+   definition so nesting order does not matter, and narrow fields or elements
+   get `static_cast<T>` where C++ braced initialization would refuse the
+   narrowing. Plain enum tags are forward-declared with their fixed `int32_t`
+   underlying type next to the struct tags ahead of the `extern "C"` block;
+   payload enums are forward-declared as structs and rejected in extern
+   signatures.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
@@ -174,7 +182,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 588 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 613 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

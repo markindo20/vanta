@@ -183,8 +183,24 @@ class Parser:
         members = []
         while not self.check(TT.DEDENT):
             mn = self.expect(TT.IDENT)
+            payload = None
+            if self.match(TT.LPAREN):
+                payload = []
+                if not self.check(TT.RPAREN):
+                    while True:
+                        payload.append(self.parse_type())
+                        if self.match(TT.COMMA):
+                            continue
+                        break
+                self.expect(TT.RPAREN)
+            value = None
+            if self.match(TT.ASSIGN):
+                sign = -1 if self.match(TT.MINUS) else 1
+                vt = self.expect(TT.INT)
+                value = sign * vt.value
             self.expect(TT.NEWLINE)
-            members.append((mn.value, A.Pos(mn.line, mn.col)))
+            members.append(A.EnumMember(
+                mn.value, payload, value, A.Pos(mn.line, mn.col)))
         self.expect(TT.DEDENT)
         return A.EnumDecl(name, members, A.Pos(tok.line, tok.col))
 
@@ -357,7 +373,19 @@ class Parser:
             tn = self.expect(TT.IDENT)
             self.expect(TT.DOT, "match patterns are written Enum.Member")
             mn = self.expect(TT.IDENT)
-            patterns.append((tn.value, mn.value, A.Pos(tn.line, tn.col)))
+            bindings = None
+            if self.match(TT.LPAREN):
+                bindings = []
+                if not self.check(TT.RPAREN):
+                    while True:
+                        b = self.expect(TT.IDENT)
+                        bindings.append(b.value)
+                        if self.match(TT.COMMA):
+                            continue
+                        break
+                self.expect(TT.RPAREN)
+            patterns.append(A.MatchPattern(
+                tn.value, mn.value, bindings, A.Pos(tn.line, tn.col)))
             if not self.match(TT.COMMA):
                 break
         self.expect(TT.COLON)

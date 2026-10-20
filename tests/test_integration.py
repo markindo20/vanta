@@ -1399,6 +1399,11 @@ class IntegrationTests(unittest.TestCase):
                              'in game', 'in game', 'in game', 'in game',
                              'caught the run at in game'])
 
+    def test_enums_advanced_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'enums_advanced.vnt'),
+                            ['1', '2', '10', 'medium', 'segment',
+                             'true', 'hello', '3'])
+
     def test_match_break_binds_to_loop(self):
         # break/continue in an arm control the enclosing loop: match is
         # not a loop and never captures them (codegen uses if/else, not

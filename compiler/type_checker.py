@@ -15,7 +15,53 @@ def _contains_func_type(t) -> bool:
         return True
     if isinstance(t, (PtrType, ArrayType, ListType)):
         return _contains_func_type(t.inner)
+    if isinstance(t, EnumType):
+        return any(_contains_func_type(pt)
+                   for payload in t.payloads.values() for pt in payload)
     return False
+
+
+def _contains_noncopyable(t) -> bool:
+    """True for void and for values the C++ backend cannot copy by value.
+    Lists and pointers are handles, so only Arena (and structs/arrays that
+    contain one) make a payload non-copyable."""
+    if t is VOID:
+        return True
+    if isinstance(t, StructType):
+        if t.builtin:
+            return t.name == "Arena"
+        return any(_contains_noncopyable(ft) for ft in t.fields.values())
+    if isinstance(t, ArrayType):
+        return _contains_noncopyable(t.inner)
+    return False
+
+
+def _payload_enum_name(t, seen=None) -> str | None:
+    """The name of a payload enum appearing inside t, if any. A payload
+    enum has no C representation, even behind a pointer, so extern
+    signatures cannot mention one."""
+    if seen is None:
+        seen = set()
+    if isinstance(t, EnumType):
+        return t.name if t.has_payloads else None
+    if isinstance(t, (PtrType, ArrayType, ListType)):
+        return _payload_enum_name(t.inner, seen)
+    if isinstance(t, StructType):
+        if t.builtin or t.name in seen:
+            return None
+        seen.add(t.name)
+        for ft in t.fields.values():
+            found = _payload_enum_name(ft, seen)
+            if found is not None:
+                return found
+        return None
+    if isinstance(t, FuncType):
+        for pt in t.params:
+            found = _payload_enum_name(pt, seen)
+            if found is not None:
+                return found
+        return _payload_enum_name(t.ret, seen)
+    return None
 
 
 def _is_function_pointer(t) -> bool:
@@ -202,11 +248,43 @@ class TypeChecker:
         if d.name == 'List':
             raise CheckError("'List' is a reserved built-in type name", self.filename, d.pos)
         members = {}
-        for (mname, mpos) in d.members:
-            if mname in members:
-                raise CheckError(f"duplicate member '{mname}'", self.filename, mpos)
-            members[mname] = len(members)
-        self.enums[d.name] = EnumType(d.name, members)
+        payloads = {}
+        used_values = {}
+        next_value = 0
+        for m in d.members:
+            if m.name in members:
+                raise CheckError(f"duplicate member '{m.name}'", self.filename, m.pos)
+            value = next_value if m.value is None else m.value
+            if not (-2147483648 <= value <= 2147483647):
+                raise CheckError(
+                    f"enum member value {value} is outside the i32 range",
+                    self.filename, m.pos)
+            if value in used_values:
+                owner = used_values[value]
+                raise CheckError(
+                    f"enum '{d.name}' value {value} is already used by "
+                    f"'{owner}'; member values must be unique",
+                    self.filename, m.pos)
+            members[m.name] = value
+            used_values[value] = m.name
+            payload = []
+            for te in (m.payload or []):
+                ptype = self._resolve_type(te)
+                if _contains_noncopyable(ptype):
+                    where = f"value {len(payload) + 1} of '{m.name}'"
+                    raise CheckError(
+                        f"enum payload {where} cannot be {ptype}: "
+                        f"payload values must be copyable and non-void",
+                        self.filename, te.pos)
+                payload.append(ptype)
+            payloads[m.name] = tuple(payload)
+            next_value = value + 1
+        if any(payloads.values()) and 'VantaTag' in members:
+            member = next(m for m in d.members if m.name == 'VantaTag')
+            raise CheckError(
+                "member name 'VantaTag' is reserved in payload enums",
+                self.filename, member.pos)
+        self.enums[d.name] = EnumType(d.name, members, payloads)
 
     def _register_func(self, d):
         if d.name in self.functions:
@@ -251,8 +329,22 @@ class TypeChecker:
                 raise CheckError(f"function name '{fd.name}' collides with type", self.filename, fd.pos)
             params = []
             for p in fd.params:
-                params.append((p.name, self._resolve_type(p.type)))
+                ptype = self._resolve_type(p.type)
+                bad = _payload_enum_name(ptype)
+                if bad is not None:
+                    raise CheckError(
+                        f"extern function '{fd.name}' cannot use payload enum "
+                        f"'{bad}' in parameter '{p.name}'; payload enums have "
+                        f"no C representation",
+                        self.filename, fd.pos)
+                params.append((p.name, ptype))
             ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
+            bad_ret = _payload_enum_name(ret)
+            if bad_ret is not None:
+                raise CheckError(
+                    f"extern function '{fd.name}' cannot return payload enum "
+                    f"'{bad_ret}'; payload enums have no C representation",
+                    self.filename, fd.pos)
             if _contains_func_type(ret) and not _is_function_pointer(ret):
                 raise CheckError(
                     f"extern function '{fd.name}' can return a function type "
@@ -525,21 +617,56 @@ class TypeChecker:
         covered = []
         has_else = False
         for arm in m.arms:
+            bindings = []
             if arm.is_else:
                 has_else = True
             else:
-                for (tn, mn, ppos) in arm.patterns:
-                    if tn != vt.name:
-                        raise CheckError(f"cannot match {tn}.{mn} against '{vt.name}'",
-                                         self.filename, ppos)
-                    if mn not in vt.members:
-                        raise CheckError(f"enum '{vt.name}' has no member '{mn}'",
-                                         self.filename, ppos)
-                    if mn in covered:
-                        raise CheckError(f"duplicate match arm '{vt.name}.{mn}'",
-                                         self.filename, ppos)
-                    covered.append(mn)
+                for pat in arm.patterns:
+                    if pat.enum_name != vt.name:
+                        raise CheckError(
+                            f"cannot match {pat.enum_name}.{pat.member} "
+                            f"against '{vt.name}'",
+                            self.filename, pat.pos)
+                    if pat.member not in vt.members:
+                        raise CheckError(f"enum '{vt.name}' has no member "
+                                         f"'{pat.member}'",
+                                         self.filename, pat.pos)
+                    if pat.member in covered:
+                        raise CheckError(
+                            f"duplicate match arm '{vt.name}.{pat.member}'",
+                            self.filename, pat.pos)
+                    covered.append(pat.member)
+                    payload = vt.payload_of(pat.member)
+                    if pat.bindings is None:
+                        if payload:
+                            raise CheckError(
+                                f"enum member '{vt.name}.{pat.member}' carries "
+                                f"values; write {vt.name}.{pat.member}(...)",
+                                self.filename, pat.pos)
+                    elif len(pat.bindings) != len(payload):
+                        raise CheckError(
+                            f"'{vt.name}.{pat.member}' expects "
+                            f"{len(payload)} binding(s), got "
+                            f"{len(pat.bindings)}",
+                            self.filename, pat.pos)
+                    seen = set()
+                    for bname, btype in zip(pat.bindings or [], payload):
+                        if bname == '_':
+                            continue
+                        if bname in seen:
+                            raise CheckError(
+                                f"duplicate binding '{bname}' in match pattern",
+                                self.filename, pat.pos)
+                        seen.add(bname)
+                        bindings.append((bname, btype, pat.pos))
+                if len(arm.patterns) > 1 and bindings:
+                    raise CheckError(
+                        "a match arm with multiple patterns cannot bind payload "
+                        "values; use one pattern per arm",
+                        self.filename, arm.pos)
             self._push()
+            for bname, btype, bpos in bindings:
+                self._declare(bname, btype, False, bpos)
             for s in arm.body:
                 self._check_stmt(s)
             self._pop()
@@ -624,6 +751,11 @@ class TypeChecker:
                 if expr.field not in et.members:
                     raise CheckError(f"enum '{et.name}' has no member '{expr.field}'",
                                      self.filename, expr.pos)
+                if et.payload_of(expr.field):
+                    raise CheckError(
+                        f"enum member '{et.name}.{expr.field}' carries values; "
+                        f"construct it with {et.name}.{expr.field}(...)",
+                        self.filename, expr.pos)
                 expr.is_enum_member = True
                 expr.type = et
                 return et
@@ -731,6 +863,13 @@ class TypeChecker:
                     self.filename, expr.pos)
             if isinstance(lt, EnumType) or isinstance(rt, EnumType):
                 if lt == rt and op in ('==', '!='):
+                    blocker = eq_blocker(lt)
+                    if blocker is not None:
+                        path, bt = blocker
+                        raise CheckError(
+                            f"cannot compare enum '{lt.name}' with '{op}': "
+                            f"payload '{path}' ({bt}) has no equality",
+                            self.filename, expr.pos)
                     return BOOL
                 if lt == rt:
                     raise CheckError(
@@ -872,6 +1011,10 @@ class TypeChecker:
 
     def _check_call(self, call: A.Call) -> Type:
         f = call.func
+        if (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
+                and self._lookup(f.obj.name) is None
+                and f.obj.name in self.enums):
+            return self._check_enum_ctor(self.enums[f.obj.name], f.field, call)
         if isinstance(f, A.Name):
             name = f.name
             # A local binding (parameter or variable) shadows any function
@@ -937,6 +1080,32 @@ class TypeChecker:
         if isinstance(t, FuncType):
             return self._check_indirect_call(call, t)
         raise CheckError(f"cannot call a value of type {t}", self.filename, call.pos)
+
+    def _check_enum_ctor(self, et: EnumType, member: str, call: A.Call) -> Type:
+        if call.type_args:
+            raise CheckError("enum constructors do not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("enum constructors do not accept named arguments",
+                             self.filename, call.pos)
+        if member not in et.members:
+            raise CheckError(f"enum '{et.name}' has no member '{member}'",
+                             self.filename, call.pos)
+        payload = et.payload_of(member)
+        if len(call.args) != len(payload):
+            if not payload:
+                raise CheckError(f"'{et.name}.{member}' takes no values",
+                                 self.filename, call.pos)
+            raise CheckError(
+                f"'{et.name}.{member}' expects {len(payload)} value(s), "
+                f"got {len(call.args)}", self.filename, call.pos)
+        for i, (arg, ptype) in enumerate(zip(call.args, payload)):
+            at = self._check_expr(arg)
+            self._coerce_value(arg, at, ptype, call.pos,
+                               f"value {i + 1} of '{et.name}.{member}'")
+        call.is_enum_ctor = True
+        call.type = et
+        return et
 
     def _check_indirect_call(self, call: A.Call, ft: FuncType) -> Type:
         call.is_indirect_call = True

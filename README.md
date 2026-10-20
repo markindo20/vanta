@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.28.0)
+# Vanta - a game-oriented systems language (v0.29.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -164,7 +164,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (588 tests) |
+| `tests/` | `unittest` suite (613 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -197,6 +197,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `enums_extern.vnt` | Enum types in `extern` signatures, through `match` and back (C side: `enums_extern_lib.c`) |
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
+| `enums_advanced.vnt` | Explicit member values and payload enums, destructured by `match` |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
 | `sdl_text.vnt` | Text with SDL_ttf: `SDL_Color` by value, `TTF_SizeUTF8`, render to texture |
@@ -246,8 +247,9 @@ compare structs field by field with `==`, reinterpret pointers with
 `ptr_cast::<T>(p)`, step them by elements with `ptr_offset(p, n)`, build
 explicit nulls with `ptr_null::<T>()`,
 build strings incrementally with `StrBuilder`, own runtime strings with
-automatic reference counting, name states and modes with enums and
-branch on them exhaustively with `match`, and build and run real SDL2 games
+automatic reference counting, name states and modes with enums (including
+explicit values and payloads) and branch on them exhaustively with `match`,
+and build and run real SDL2 games
 on the game kit, text rendering, sprite images, sprite-sheet animation, and
 WAV sound files included
 (nine SDL examples, four of them playable games) — but the remaining gaps
@@ -269,9 +271,11 @@ are real:
   allocate from the arena, and `sort` needs a comparator function value (there
   is no default ordering); `arena.reset()` invalidates the lists made from that
   arena
-- enums are plain named constants: no explicit member values, no associated
-  data; `==`/`!=` and `match` are the operations on them (they may appear in
-  `extern` signatures)
+- enums name members with optional explicit `i32` values and payloads;
+  `==`/`!=` compare the tag and active payload, and `match` destructures
+  payloads with bindings. Payload enums have no C representation and cannot
+  appear in `extern` signatures; plain enums still map to fixed-`int32_t`
+  C++ enums
 - windowing, images, and sound are shipped as SDL2 examples plus the game
   kit: the kit wraps controllers, sprite-sheet animation, textures, text,
   audio, and rectangle/circle collision; events are still read by hand (an

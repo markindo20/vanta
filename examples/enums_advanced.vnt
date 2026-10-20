@@ -1,0 +1,51 @@
+# Enums can name explicit values, or carry a payload alongside their tag.
+
+enum Level:
+    Low = 1
+    Medium
+    High = 10
+
+struct Point:
+    x: i32
+    y: i32
+
+enum Shape:
+    Empty
+    Dot(Point)
+    Segment(Point, Point)
+    Named(str)
+
+func level_name(level: Level) -> str:
+    match level:
+        Level.Low:
+            return "low"
+        Level.Medium:
+            return "medium"
+        Level.High:
+            return "high"
+
+func describe(shape: Shape) -> str:
+    match shape:
+        Shape.Empty:
+            return "empty"
+        Shape.Dot(_):
+            return "dot"
+        Shape.Segment(a, b):
+            return "segment"
+        Shape.Named(name):
+            return name
+
+func main() -> void:
+    # Explicit values count up from the previous member unless set again.
+    print_i32(enum_to_i32(Level.Low))       # 1
+    print_i32(enum_to_i32(Level.Medium))    # 2
+    print_i32(enum_to_i32(Level.High))      # 10
+    print_str(level_name(Level.Medium))     # medium
+
+    # Payload members are constructed with (...) and destructured by match.
+    let p = Point(x: 1, y: 2)
+    let s = Shape.Segment(p, Point(x: 3, y: 4))
+    print_str(describe(s))                  # segment
+    print_bool(s == Shape.Segment(p, Point(x: 3, y: 4)))  # true
+    print_str(describe(Shape.Named("hello")))             # hello
+    print_i32(enum_to_i32(Shape.Named("x")))              # 3

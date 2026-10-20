@@ -122,9 +122,45 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, A.MatchStmt)
         self.assertEqual(len(stmt.arms), 2)
         self.assertFalse(stmt.arms[0].is_else)
-        self.assertEqual([p[:2] for p in stmt.arms[0].patterns],
+        self.assertEqual([(p.enum_name, p.member) for p in stmt.arms[0].patterns],
                          [('State', 'A'), ('State', 'B')])
         self.assertTrue(stmt.arms[1].is_else)
+
+    def test_enum_payload_and_values_parse(self):
+        prog = parse("enum E:\n"
+                     "    A = 1\n"
+                     "    B(f32, i32)\n"
+                     "    C(f32) = 7\n"
+                     "    D = -2\n")
+        decl = prog.decls[0]
+        self.assertIsInstance(decl, A.EnumDecl)
+        self.assertEqual([m.name for m in decl.members],
+                         ['A', 'B', 'C', 'D'])
+        self.assertIsNone(decl.members[0].payload)
+        self.assertEqual(decl.members[0].value, 1)
+        self.assertEqual(decl.members[1].value, None)
+        self.assertEqual([t.name for t in decl.members[1].payload],
+                         ['f32', 'i32'])
+        self.assertEqual(decl.members[2].value, 7)
+        self.assertEqual([t.name for t in decl.members[2].payload], ['f32'])
+        self.assertEqual(decl.members[3].value, -2)
+        self.assertIsNone(decl.members[3].payload)
+
+    def test_match_payload_bindings_parse(self):
+        src = ("func f(s: State) -> void:\n"
+               "    match s:\n"
+               "        State.A(x, _), State.B():\n"
+               "            return\n"
+               "        State.C:\n"
+               "            return\n")
+        prog = parse(src)
+        stmt = prog.decls[0].body[0]
+        first, second = stmt.arms[0].patterns
+        self.assertEqual((first.enum_name, first.member), ('State', 'A'))
+        self.assertEqual(first.bindings, ['x', '_'])
+        self.assertEqual((second.enum_name, second.member), ('State', 'B'))
+        self.assertEqual(second.bindings, [])
+        self.assertIsNone(stmt.arms[1].patterns[0].bindings)
 
     def test_match_else_must_be_last(self):
         with self.assertRaisesRegex(ParseError, "'else' must be the last match arm"):

@@ -52,9 +52,18 @@ class StructDecl:
 
 
 @dataclass
+class EnumMember:
+    name: str
+    # None when the member has no parentheses; [] for an explicit `Member()`.
+    payload: Optional[List[TypeExpr]]
+    value: Optional[int]
+    pos: Pos
+
+
+@dataclass
 class EnumDecl:
     name: str
-    members: List[Any]
+    members: List[EnumMember]
     pos: Pos
 
 
@@ -121,9 +130,19 @@ class IfStmt:
 
 
 @dataclass
+class MatchPattern:
+    enum_name: str
+    member: str
+    # None when the pattern has no parentheses; a list of binding names
+    # (including `_`) when it does.
+    bindings: Optional[List[str]]
+    pos: Pos
+
+
+@dataclass
 class MatchArm:
-    # One (enum name, member name, pos) triple per pattern; empty for else.
-    patterns: List[Any]
+    # One MatchPattern per pattern; empty for else.
+    patterns: List[MatchPattern]
     is_else: bool
     body: List[Any]
     pos: Pos

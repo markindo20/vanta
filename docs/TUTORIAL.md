@@ -184,10 +184,13 @@ wrong thing quietly.
 
 ## Enums
 
-An `enum` names a fixed set of states. Members are numbered from zero and
-written `Type.Member`; compare with `==`/`!=` and branch with `if`/`elif`
-(or `match` — next section). `enum_to_i32` turns a member into its number
-when you need to print it.
+An `enum` names a fixed set of states. Members are numbered from zero by
+default and written `Type.Member`; compare with `==`/`!=` and branch with
+`if`/`elif` (or `match` - next section). `enum_to_i32` turns a member into
+its value when you need to print it. v0.29.0 also lets a member set an
+explicit value (`Member = 10`) or carry a payload (`Circle(f32)`), which
+`match` destructures; see `examples/enums_advanced.vnt` and the
+[reference](LANGUAGE_REFERENCE.md#enums-v0110).
 
 ```vanta
 enum State:
@@ -1158,4 +1161,4 @@ libraries automatically.
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (588 tests).
+- `python -m unittest discover -s tests` - run the test suite (613 tests).

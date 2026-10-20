@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.29.0 — 2026-10-20
+
+- Explicit enum values. `Member = n` sets an `i32` value and following
+  members without a value continue from `n + 1`; duplicate and out-of-range
+  values are compile errors. `enum_to_i32` returns the explicit value (or the
+  tag for a payload enum).
+- Payload enums. A member written `Member(Type, ...)` carries associated
+  data; `Name.Member(value, ...)` constructs it, and `match` destructures it
+  with positional bindings: `Shape.Circle(center, radius):`. `_` discards a
+  value, binding counts are checked, and exhaustiveness covers payload
+  members. An arm with several comma-separated patterns cannot bind names.
+- Representation and equality. Plain enums remain fixed-`int32_t` C++
+  `enum class` values and still cross `extern` boundaries. A payload enum is
+  a tagged struct; `==`/`!=` compare the tag and active payload, so every
+  payload type must support equality. Payload enums have no C representation
+  and are rejected in `extern` signatures. Payload types must be declared
+  before the enum and must be copyable and non-void; `Arena` payloads are
+  rejected.
+- Examples and docs. `examples/enums_advanced.vnt` exercises explicit values,
+  struct/str payloads, wildcard bindings, equality, and `enum_to_i32`; the
+  reference, README, and roadmap are updated. 613 tests total; the frozen
+  pong, strike, and breakout runs are unchanged.
+
 ## v0.28.0 — 2026-10-20
 
 - Installable Vanta. `pip install vanta-lang` (or `pipx install vanta-lang`)

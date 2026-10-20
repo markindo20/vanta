@@ -1330,6 +1330,150 @@ class TypeCheckerTests(unittest.TestCase):
         et = tc.enums['State']
         self.assertEqual(et.members, {'Menu': 0, 'Playing': 1, 'Paused': 2})
 
+    def test_enum_explicit_values_and_auto_increment(self):
+        prog, tc = run("enum E:\n"
+                       "    A = 5\n"
+                       "    B\n"
+                       "    C = 2\n"
+                       "    D\n")
+        self.assertEqual(tc.enums['E'].members, {'A': 5, 'B': 6, 'C': 2, 'D': 3})
+
+    def test_enum_duplicate_value_rejected(self):
+        with self.assertRaisesRegex(CheckError, "already used by 'B'"):
+            run("enum E:\n"
+                "    A = 2\n"
+                "    B\n"
+                "    C = 3\n")
+
+    def test_enum_value_out_of_range_rejected(self):
+        with self.assertRaisesRegex(CheckError, "outside the i32 range"):
+            run("enum E:\n"
+                "    A = 2147483648\n")
+
+    def test_enum_payload_construct_and_match(self):
+        run("struct Point:\n"
+            "    x: i32\n"
+            "    y: i32\n"
+            "enum Shape:\n"
+            "    Empty\n"
+            "    Dot(Point)\n"
+            "    Line(Point, Point)\n"
+            "func f(s: Shape) -> i32:\n"
+            "    match s:\n"
+            "        Shape.Empty:\n"
+            "            return 0\n"
+            "        Shape.Dot(p):\n"
+            "            return p.x\n"
+            "        Shape.Line(a, b):\n"
+            "            return a.x + b.y\n"
+            "func main() -> void:\n"
+            "    let p = Point(x: 1, y: 2)\n"
+            "    print_i32(f(Shape.Line(p, p)))\n")
+
+    def test_enum_payload_bare_member_rejected(self):
+        with self.assertRaisesRegex(CheckError, "carries values; construct it"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "func main() -> void:\n"
+                "    let x = E.A\n")
+
+    def test_enum_payload_wrong_arity_rejected(self):
+        with self.assertRaisesRegex(CheckError, "expects 1 value\\(s\\), got 2"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "func main() -> void:\n"
+                "    let x = E.A(1, 2)\n")
+
+    def test_enum_payload_named_args_rejected(self):
+        with self.assertRaisesRegex(CheckError, "do not accept named arguments"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "func main() -> void:\n"
+                "    let x = E.A(v: 1)\n")
+
+    def test_enum_payload_match_arity_rejected(self):
+        with self.assertRaisesRegex(CheckError, "expects 2 binding\\(s\\), got 1"):
+            run("enum E:\n"
+                "    A(i32, i32)\n"
+                "func f(e: E) -> void:\n"
+                "    match e:\n"
+                "        E.A(x):\n"
+                "            return\n")
+
+    def test_enum_payload_multi_pattern_binding_rejected(self):
+        with self.assertRaisesRegex(CheckError, "multiple patterns cannot bind"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "    B\n"
+                "func f(e: E) -> void:\n"
+                "    match e:\n"
+                "        E.A(x), E.B:\n"
+                "            print_i32(x)\n")
+
+    def test_enum_payload_wildcard_ok(self):
+        run("enum E:\n"
+            "    A(i32)\n"
+            "    B\n"
+            "func f(e: E) -> void:\n"
+            "    match e:\n"
+            "        E.A(_):\n"
+            "            return\n"
+            "        E.B():\n"
+            "            return\n")
+
+    def test_enum_payload_extern_rejected(self):
+        with self.assertRaisesRegex(CheckError, "cannot use payload enum 'E'"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "extern \"c\" {\n"
+                "    func f(e: E) -> void\n"
+                "}\n")
+
+    def test_enum_payload_noncopyable_rejected(self):
+        with self.assertRaisesRegex(CheckError, "must be copyable and non-void"):
+            run("enum E:\n"
+                "    A(Arena)\n")
+
+    def test_enum_payload_equality_ok(self):
+        run("struct Point:\n"
+            "    x: i32\n"
+            "enum E:\n"
+            "    A(Point)\n"
+            "    B(str)\n"
+            "func main() -> void:\n"
+            "    let p = Point(x: 1)\n"
+            "    print_bool(E.A(p) == E.A(p))\n"
+            "    print_bool(E.B(\"x\") == E.B(\"x\"))\n")
+
+    def test_enum_payload_without_equality_rejected(self):
+        with self.assertRaisesRegex(CheckError, "payload 'A\\[0\\]' \\(Matrix4\\) has no equality"):
+            run("enum E:\n"
+                "    A(Matrix4)\n"
+                "func f(e: E) -> bool:\n"
+                "    return e == E.A(translation(0.0, 0.0, 0.0))\n")
+
+    def test_enum_payload_duplicate_binding_rejected(self):
+        with self.assertRaisesRegex(CheckError, "duplicate binding 'x'"):
+            run("enum E:\n"
+                "    A(i32, i32)\n"
+                "func f(e: E) -> void:\n"
+                "    match e:\n"
+                "        E.A(x, x):\n"
+                "            return\n")
+
+    def test_enum_payload_reserved_tag_name_rejected(self):
+        with self.assertRaisesRegex(CheckError, "reserved in payload enums"):
+            run("enum E:\n"
+                "    A(i32)\n"
+                "    VantaTag\n")
+
+    def test_enum_payload_type_must_be_declared_first(self):
+        with self.assertRaisesRegex(CheckError, "unknown type 'Later'"):
+            run("enum E:\n"
+                "    A(Later)\n"
+                "struct Later:\n"
+                "    x: i32\n")
+
     def test_enum_in_struct_and_signatures(self):
         run("enum Mode:\n"
             "    Off\n"

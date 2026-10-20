@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.28.0)
+# Vanta Language Reference (v0.29.0)
 
-This is the reference for the language as implemented at tag `v0.28.0`. Every
+This is the reference for the language as implemented at tag `v0.29.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -58,7 +58,7 @@ Assigning to a `let` binding is a compile-time error.
 | `Vec2`, `Vec3`, `Quat`, `Matrix4` | built-in math types |
 | `Arena` | stack-scoped allocator (see [Arena](#pointers-and-the-arena)) |
 | `StrBuilder` | arena-backed string builder; append pieces, then `to_str()` (see [String building](#string-building-strbuilder-v0100)) |
-| `Name` (enum) | named integer members; `Name.Member`, `==`/`!=`, `enum_to_i32` (see [Enums](#enums-v0110)) |
+| `Name` (enum) | named members with optional explicit values and payloads; `Name.Member`, `Name.Member(...)`, `==`/`!=`, `enum_to_i32` (see [Enums](#enums-v0110)) |
 
 Integer literals default to `i32`; float literals default to `f32`.
 
@@ -289,9 +289,10 @@ any function value.
 ## Enums (v0.11.0)
 
 `enum` declares a fixed set of named members, numbered from `0` in
-declaration order. A member is written `Name.Member`, and the enum is an
-ordinary type — variables, struct fields, parameters, returns, arrays,
-`List<T>`, function values, and imported modules all accept it:
+declaration order (explicit values and payloads arrived in v0.29.0). A member
+is written `Name.Member`, and the enum is an ordinary type — variables, struct
+fields, parameters, returns, arrays, `List<T>`, function values, and imported
+modules all accept it:
 
 ```vanta
 enum State:
@@ -322,17 +323,70 @@ menu
 false
 ```
 
-- Members are numbered `0`, `1`, `2`, ... in declaration order; there are no
-  explicit member values.
-- `==` and `!=` compare values of the same enum. Ordering comparisons
-  (`<`, `<=`, `>`, `>=`) are compile errors, as are compares between two
-  different enums or between an enum and a number.
-- `enum_to_i32(v)` returns a member's number — the bridge to printing and
-  arithmetic. `extern` signatures may also take and return enum types
-  directly (v0.17.0): the generated C++ uses the fixed-`int32_t` enum, so
-  the C side declares `int32_t` or a matching C enum.
-- An enum cannot be constructed: `State(1)` is an error. Enum types have no
-  fields either — `s.Menu` is rejected with a hint to write `State.Menu`.
+Members can also name an explicit value and carry associated data:
+
+```vanta
+enum Level:
+    Low = 1
+    Medium
+    High = 10
+
+struct Point:
+    x: i32
+    y: i32
+
+enum Shape:
+    Empty
+    Circle(Point, f32)
+
+func radius(shape: Shape) -> f32:
+    match shape:
+        Shape.Empty:
+            return 0.0
+        Shape.Circle(center, r):
+            return r + i32_to_f32(center.x)
+
+func main() -> void:
+    print_i32(enum_to_i32(Level.High))      # 10
+    let p = Point(x: 2, y: 3)
+    let s = Shape.Circle(p, 4.0)
+    print_f32(radius(s))                    # 6.000000
+    print_bool(s == Shape.Circle(p, 4.0))   # true
+```
+
+```
+10
+6.000000
+true
+```
+
+- Members are numbered `0`, `1`, `2`, ... in declaration order. `Member = n`
+  sets an explicit value; following members without a value continue from
+  `n + 1`. Values are integer literals (optionally negative), must fit
+  `i32`, and must be unique within the enum.
+- `enum_to_i32(v)` returns a member's value — the bridge to printing and
+  arithmetic. For a payload enum it returns the tag value.
+- `==` and `!=` compare values of the same enum. For a payload enum they
+  compare the tag and the active payload, so every payload type must support
+  `==` under the same rules as a struct field (`ptr<T>` and `List<T>` do not).
+  Ordering comparisons (`<`, `<=`, `>`, `>=`) are compile errors, as are
+  compares between two different enums or between an enum and a number.
+- A member written `Name.Member` with no payload is a value. A member with a
+  payload is constructed as `Name.Member(value, ...)`; `Name.Member()` is
+  also accepted for a member with no payload. Using a payload member without
+  its values is an error.
+- Payload types must be declared before the enum, and each must be copyable
+  and non-void. Payloads can be primitives, `str`, arrays, structs, enums,
+  pointers, function values, and `List<T>`. A payload cannot contain
+  `Arena`, directly or inside a struct or array; recursive payloads are not
+  supported because the type must be declared first.
+- Payload enums have no C representation: `extern` signatures cannot take or
+  return them, even behind a pointer. Plain enums remain fixed-`int32_t`
+  C++ `enum class` values and may cross the C boundary (v0.17.0); explicit
+  values are preserved.
+- An enum cannot be constructed as `State(1)`. Enum values have no fields
+  either — `s.Menu` is rejected with a hint to write `State.Menu`. Payload
+  values are reachable only through `match`.
 - Type names share one namespace: an enum cannot reuse the name of a struct,
   function, or constant. `List` and `FnPtrN` are reserved.
 - `match` (v0.13.0, below) switches on enum values; when every member has
@@ -342,9 +396,10 @@ false
 ## Match (v0.13.0)
 
 `match` chooses a branch by comparing an enum value against member
-patterns. Arms are written `Enum.Member:` — several patterns per arm are
-separated by commas — and run top to bottom; the first match wins.
-`else:` is the fallback branch:
+patterns. Arms are written `Enum.Member:` or, for a payload member,
+`Enum.Member(binding, ...):` — several patterns per arm are separated by
+commas — and run top to bottom; the first match wins. `else:` is the
+fallback branch:
 
 ```vanta
 enum State:
@@ -379,6 +434,12 @@ menu
 - Patterns must name members of the matched enum: `Mode.On` against a
   `State` value is an error, as are a misspelled member and the same
   member used by two arms.
+- A payload member binds its values by position: `Shape.Circle(center, r):`.
+  The number of bindings must match the payload exactly; `_` discards a
+  value. A member with no payload may be written `State.Menu` or
+  `State.Menu()`. Binding a payload member without parentheses is an error.
+- An arm with several comma-separated patterns cannot bind names; use one
+  pattern per arm when a payload value is needed.
 - When every member has an arm somewhere in the match, no `else` is
   needed — the checker proves it. With a member missing and no `else`,
   the error names the missing members, so adding a member to an enum
@@ -1033,7 +1094,7 @@ let r = from_quat(q)
 | `file_write` | `(str, str) -> i32` | bytes written, or `-1` on failure |
 | `file_read` | `(str) -> str` | returns an owned string; `""` on any failure |
 | `assert` | `(bool) -> void` | see [Assertions](#assertions-v012) |
-| `enum_to_i32` | `(E) -> i32` | a member's number; `E` is any enum type |
+| `enum_to_i32` | `(E) -> i32` | a member's value (its tag for a payload enum); `E` is any enum type |
 | `ptr_is_null` | `(ptr<T>) -> bool` | `true` when the pointer is null; `T` may be `void` |
 | `ptr_cast` | `ptr_cast::<T>(p) -> ptr<T>` | reinterprets the element type; `T` may not be a function type; see [pointer casts](#pointer-casts-ptr_castt-v0170) |
 | `ptr_offset` | `(ptr<T>, i32) -> ptr<T>` | moves `n` elements; `T` may not be `void`; see [pointer offsets](#pointer-offsets-ptr_offsetp-n-v0180) |
@@ -1173,10 +1234,12 @@ extern "demo" {
   [Pointer casts](#pointer-casts-ptr_castt-v0170)). Vanta struct types can
   appear in a signature — the generated code namespace-qualifies and
   forward-declares them — if the C side understands the layout, but a plain
-  C library cannot. An enum type is emitted as its `enum class` with a fixed
-  `int32_t` underlying type, forward-declared ahead of the `extern "C"`
+  C library cannot. A plain enum type is emitted as its `enum class` with a
+  fixed `int32_t` underlying type, forward-declared ahead of the `extern "C"`
   block together with the struct tags, so the C side may declare the
-  parameter/result as `int32_t` or a matching C enum.
+  parameter/result as `int32_t` or a matching C enum. A payload enum has no
+  C representation and is rejected in an `extern` signature, even behind a
+  pointer.
 - `str` crosses the boundary as `const char*`. The pointer is valid for the
   duration of the call; a C function declared to return `str` returns a
   NUL-terminated `const char*`, which Vanta copies into an owned `str`

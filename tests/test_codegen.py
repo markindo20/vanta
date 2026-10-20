@@ -653,6 +653,74 @@ class CodegenTests(unittest.TestCase):
                   "    print_i32(enum_to_i32(s))\n")
         self.assertIn('vanta::print_i32(static_cast<int32_t>(v_s));', cpp)
 
+    def test_enum_explicit_values_emit(self):
+        cpp = gen("enum E:\n"
+                  "    A = 5\n"
+                  "    B\n"
+                  "    C = -1\n"
+                  "func main() -> void:\n"
+                  "    print_str(\"x\")\n")
+        self.assertIn('enum class E : int32_t { A = 5, B = 6, C = -1 };', cpp)
+
+    def test_enum_payload_struct_emit(self):
+        cpp = gen("enum Shape:\n"
+                  "    Empty\n"
+                  "    Circle(f32)\n"
+                  "    Rect(f32, f32)\n"
+                  "func main() -> void:\n"
+                  "    print_str(\"x\")\n")
+        self.assertIn('struct Shape {', cpp)
+        self.assertIn('enum class VantaTag : int32_t '
+                      '{ Empty = 0, Circle = 1, Rect = 2 };', cpp)
+        self.assertIn('VantaTag v_tag;', cpp)
+        self.assertIn('float p_Circle_0;', cpp)
+        self.assertIn('float p_Rect_0;', cpp)
+        self.assertIn('inline Shape make_Shape_Circle(float a0) {', cpp)
+        self.assertIn('v.v_tag = Shape::VantaTag::Circle;', cpp)
+
+    def test_enum_payload_ctor_and_match_emit(self):
+        cpp = gen("enum Shape:\n"
+                  "    Empty\n"
+                  "    Circle(f32)\n"
+                  "    Rect(f32, f32)\n"
+                  "func area(s: Shape) -> f32:\n"
+                  "    match s:\n"
+                  "        Shape.Empty:\n"
+                  "            return 0.0\n"
+                  "        Shape.Circle(r):\n"
+                  "            return r\n"
+                  "        Shape.Rect(w, h):\n"
+                  "            return w * h\n"
+                  "func main() -> void:\n"
+                  "    print_f32(area(Shape.Rect(2.0, 3.0)))\n")
+        self.assertIn('if (__match_1.v_tag == Shape::VantaTag::Empty) {', cpp)
+        self.assertIn('const auto& v_r = __match_1.p_Circle_0;', cpp)
+        self.assertIn('const auto& v_w = __match_1.p_Rect_0;', cpp)
+        self.assertIn('const auto& v_h = __match_1.p_Rect_1;', cpp)
+        self.assertIn('make_Shape_Rect(2.0f, 3.0f)', cpp)
+
+    def test_enum_payload_equality_emit(self):
+        cpp = gen("enum Shape:\n"
+                  "    Empty\n"
+                  "    Circle(f32)\n"
+                  "func main() -> void:\n"
+                  "    let a = Shape.Circle(1.0)\n"
+                  "    print_bool(a == Shape.Circle(1.0))\n")
+        self.assertIn('inline bool operator==(const Shape& a, const Shape& b) {', cpp)
+        self.assertIn('case Shape::VantaTag::Empty: return true;', cpp)
+        self.assertIn('case Shape::VantaTag::Circle: '
+                      'return (a.p_Circle_0 == b.p_Circle_0);', cpp)
+
+    def test_enum_payload_enum_to_i32_emit(self):
+        cpp = gen("enum Shape:\n"
+                  "    Empty\n"
+                  "    Circle(f32)\n"
+                  "func main() -> void:\n"
+                  "    let s = Shape.Circle(1.0)\n"
+                  "    print_i32(enum_to_i32(s))\n")
+        self.assertIn('vanta::print_i32('
+                      'static_cast<int32_t>((v_s).v_tag));', cpp)
+
     def test_enum_struct_field_emit(self):
         cpp = gen("enum State:\n"
                   "    Menu\n"
