@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.25.0 — 2026-10-20
+
+- Checked pointer access: `p.at(i, size)` reads, writes, and compound-assigns
+  through a `ptr<T>` after checking `0 <= i < size`. The pointer has no length
+  of its own, so the caller supplies the accessible count. `ptr<void>` is
+  rejected, nested array elements work
+  (`rows.at(row, row_count).at(column)`), and the new `examples/ptr_at.vnt`
+  demonstrates the read/write paths.
+- An out-of-bounds pointer index stops the program with
+  `vanta: pointer index I out of bounds (size N) at line L`. The raw `p[i]`,
+  `ptr_cast::<T>(p)`, and `ptr_offset(p, n)` escape hatches are unchanged, and
+  `size` remains a programmer promise — null is still `ptr_is_null`'s job.
+- 10 new tests: pointer `at` reads/writes/compound assignment, nested array
+  access, `ptr<void>` rejection, size type checking, the `let`-pointer and
+  temporary-pointer write rules, generated-code shape, the new example, and
+  out-of-bounds read/write failures. 573 total.
+
 ## v0.24.1 — 2026-10-20
 
 - `vanta game.vnt` is shorthand for `vanta run game.vnt`: a bare source path

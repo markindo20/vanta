@@ -576,9 +576,16 @@ class CodeGen:
             f = expr.func
             line = expr.pos.line if expr.pos else 0
             recv = f.obj
-            if isinstance(getattr(recv, 'type', None), ListType):
+            recv_t = getattr(recv, 'type', None)
+            if isinstance(recv_t, ListType):
                 return (f'vanta::list_at_checked_ref({self._lvalue(recv)}, '
                         f'{self._expr(expr.args[0])}, {line})')
+            if isinstance(recv_t, PtrType):
+                # The helper takes the pointer by value and returns a reference
+                # to the element, so even a temporary pointer result can write.
+                return (f'vanta::ptr_at_checked_ref({self._expr(recv)}, '
+                        f'{self._expr(expr.args[0])}, '
+                        f'{self._expr(expr.args[1])}, {line})')
             return (f'vanta::at_checked_ref({self._lvalue(recv)}, '
                     f'{self._expr(expr.args[0])}, {line})')
         raise RuntimeError(f"invalid lvalue {type(expr).__name__}")
@@ -718,9 +725,14 @@ class CodeGen:
         if isinstance(f, A.Member):
             if getattr(c, 'is_checked_at', False):
                 line = c.pos.line if c.pos else 0
-                if isinstance(getattr(f.obj, 'type', None), ListType):
+                recv_t = getattr(f.obj, 'type', None)
+                if isinstance(recv_t, ListType):
                     return (f'vanta::list_at_checked({self._expr(f.obj)}, '
                             f'{self._expr(c.args[0])}, {line})')
+                if isinstance(recv_t, PtrType):
+                    return (f'vanta::ptr_at_checked({self._expr(f.obj)}, '
+                            f'{self._expr(c.args[0])}, '
+                            f'{self._expr(c.args[1])}, {line})')
                 return (f'vanta::at_checked({self._expr(f.obj)}, '
                         f'{self._expr(c.args[0])}, {line})')
             ot = getattr(f.obj, 'type', None)

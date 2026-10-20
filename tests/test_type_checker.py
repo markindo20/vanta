@@ -785,15 +785,36 @@ class TypeCheckerTests(unittest.TestCase):
             "    mut g: [[i32, 2], 2] = [[1, 2], [3, 4]]\n"
             "    g.at(0).at(1) = 7\n")
 
-    def test_at_rejected_on_pointer(self):
-        with self.assertRaisesRegex(CheckError, "a pointer has no length"):
+    def test_at_on_pointer_requires_size(self):
+        with self.assertRaisesRegex(CheckError, "p.at\\(i, size\\)"):
             run("func f() -> void:\n"
                 "    let a = Arena(64)\n"
                 "    let p = a.alloc::<i32>(4)\n"
                 "    print_i32(p.at(0))\n")
 
+    def test_at_write_through_let_pointer(self):
+        # Pointer memory is writable through a plain `let`, checked or not.
+        run("func f() -> void:\n"
+            "    let a = Arena(64)\n"
+            "    let p = a.alloc::<i32>(4)\n"
+            "    p.at(0, 4) = 7\n"
+            "    p.at(0, 4) += 1\n")
+
+    def test_at_rejected_on_void_pointer(self):
+        with self.assertRaisesRegex(CheckError, "ptr<void>"):
+            run("func f(p: ptr<void>) -> void:\n"
+                "    print_i32(p.at(0, 4))\n")
+
+    def test_at_pointer_size_type(self):
+        with self.assertRaisesRegex(CheckError, "size: cannot assign f32 to i32"):
+            run("func f() -> void:\n"
+                "    let a = Arena(64)\n"
+                "    let p = a.alloc::<i32>(4)\n"
+                "    let n: f32 = 4.0\n"
+                "    print_i32(p.at(0, n))\n")
+
     def test_at_rejected_on_non_array(self):
-        with self.assertRaisesRegex(CheckError, "'at' requires an array or a List"):
+        with self.assertRaisesRegex(CheckError, "'at' requires an array, a List, or a pointer"):
             run("func f() -> void:\n"
                 "    let x = 1\n"
                 "    print_i32(x.at(0))\n")

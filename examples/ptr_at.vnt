@@ -1,0 +1,39 @@
+# ptr_at.vnt — checked pointer access with p.at(i, size).
+#
+# A raw pointer carries no length, so p.at(i, size) takes the accessible
+# element count from the caller and checks 0 <= i < size before touching
+# memory. It reads, writes, and compound-assigns like p[i]; p[i] itself stays
+# the unchecked escape hatch, as do ptr_cast and ptr_offset.
+#
+# Usage:
+#   vanta examples/ptr_at.vnt
+
+func sum(xs: ptr<i32>, n: i32) -> i32:
+    mut total = 0
+    for i in range(0, n):
+        total += xs.at(i, n)
+    return total
+
+func main() -> void:
+    let arena = Arena(256)
+    let xs = arena.alloc::<i32>(5)
+    for i in range(0, 5):
+        xs.at(i, 5) = (i + 1) * 10
+    print_i32(sum(xs, 5))
+
+    # A checked write and compound assignment land in the same memory that
+    # plain p[i] reads.
+    xs.at(2, 5) += 5
+    print_i32(xs.at(2, 5))
+    print_i32(xs[2])
+
+    # The element type can be an array: check the row, then the column.
+    let rows = arena.alloc::<[i32, 3]>(2)
+    rows.at(1, 2).at(2) = 42
+    print_i32(rows[1][2])
+
+    # Checked access works after an unchecked pointer cast too.
+    let words = arena.alloc::<i32>(1)
+    words[0] = 1078530011        # the f32 bit pattern of pi
+    let f = ptr_cast::<f32>(words)
+    print_f32(f.at(0, 1))

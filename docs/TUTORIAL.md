@@ -13,9 +13,9 @@ sections at the end additionally need the SDL2, SDL_ttf, and SDL2_image
 libraries, but everything before them does not.
 
 ```powershell
-python main.py run hello.vnt     # compile and run
-python main.py check hello.vnt   # type-check only (fast, no C++)
-python main.py build hello.vnt --release
+vanta hello.vnt                  # compile and run
+vanta check hello.vnt            # type-check only (fast, no C++)
+vanta build hello.vnt --release
 ```
 
 `run` compiles to a temporary executable and deletes it afterwards; `build`
@@ -365,6 +365,30 @@ func main() -> void:
 ```
 10
 ```
+
+## Checked pointer access
+
+Plain `p[i]` trusts the index. When the element count is known, `p.at(i, size)`
+checks `0 <= i < size` before touching memory. It reads, writes, and
+compound-assigns just like an array's `at`:
+
+```vanta
+func main() -> void:
+    let arena = Arena(256)
+    let xs = arena.alloc::<i32>(3)
+    xs.at(0, 3) = 5
+    xs.at(1, 3) = xs.at(0, 3) * 2
+    print_i32(xs.at(1, 3))
+```
+
+```
+10
+```
+
+An out-of-bounds index stops the program with the pointer's size. The count is
+a programmer promise — the pointer does not carry its allocation length — and
+`p[i]`, `ptr_cast`, and `ptr_offset` remain available when you need unchecked
+access.
 
 ## Pointer casts
 
@@ -1126,4 +1150,4 @@ libraries automatically.
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (563 tests).
+- `python -m unittest discover -s tests` — run the test suite (573 tests).

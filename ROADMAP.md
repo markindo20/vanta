@@ -5,31 +5,28 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.24.1** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.25.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: breakout polish (candidate v0.25.0)
+## Next: breakout polish (candidate v0.26.0)
 
 The fourth game, `strike.vnt`, landed in v0.24.0 with `gamekit/collide.vnt`,
 so the kit now covers the core loop, animation, text, audio, controllers, and
 collision. The next kit step is the breakout polish pass: levels, pause,
 score persistence, and per-sound gain by scaling PCM at load. The language
-items below remain larger designs, so the kit is still the natural next step;
-checked pointer access is the smallest of them if a language milestone is
+items below remain larger designs; checked pointer access landed in v0.25.0,
+so string ownership is the next language item if a language milestone is
 preferred.
 
 ## Language
 
-1. **Checked pointer access — medium.** Arrays have opt-in `xs.at(i)`; raw
-   pointers have only `ptr_cast` / `ptr_offset`. Needs a design for a checked
-   accessor that does not sand off the escape hatches.
-2. **String ownership — large.** `str` comes from a fixed 64 KiB pool that is
+1. **String ownership — large.** `str` comes from a fixed 64 KiB pool that is
    never freed, and `str_pool_reset()` invalidates everything built from it.
    Arena-backed or length-carrying strings would remove the global footgun;
    this touches the runtime, the type checker, and every string builtin.
-3. **Enums with explicit values and associated data — large.** Enums are
+2. **Enums with explicit values and associated data — large.** Enums are
    named constants with `==` and `match`; explicit member values are the
    smaller half, and associated data would extend `match` exhaustiveness.
    Design carefully — the current plainness is a feature.

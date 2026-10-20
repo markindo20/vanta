@@ -103,6 +103,9 @@ distinct semantics.
 - `at_checked` / `at_checked_ref` (plus `index_fail`) — the bounds-checked
   access behind `xs.at(i)`; a bad index reports the array size and the
   access's source line
+- `ptr_at_checked` / `ptr_at_checked_ref` (plus `ptr_index_fail`) — the
+  bounds-checked access behind `p.at(i, size)`; the caller supplies the
+  accessible count because a raw pointer carries no length
 - IO, `sqrt` and trig (`sin`/`cos`/`tan`/`atan2`), `abs`/`min`/`max`/`floor`/`ceil`, and integer/float conversion helpers
 - `write_*` variants of the `print_*` functions (no trailing newline)
 - `print_fmt_impl` — the `printf`-backed target of `print_fmt`/`write_fmt`
@@ -134,7 +137,9 @@ The only rule enforced is that **`Arena` is non-copyable**: `let a2 = a1` (where
 rejected. `ptr<T>` has no borrow checking, lifetime tracking, or aliasing
 analysis, so dangling and aliased pointers are not detected; the checker only
 guards the conversions (widening to `ptr<void>` is implicit, the reverse is
-an error) and offers `ptr_is_null`. `ptr_cast::<T>(p)` (v0.17.0) is the
+an error) and offers `ptr_is_null`. `p.at(i, size)` (v0.25.0) is an opt-in
+bounds check; `p[i]` and the cast/offset escape hatches stay unchecked.
+`ptr_cast::<T>(p)` (v0.17.0) is the
 explicit, unchecked reinterpretation, `ptr_offset(p, n)` (v0.18.0) the
 explicit, unchecked element step, and `ptr_null::<T>()` (v0.19.0) the
 explicit null — a function-type `T` makes it a null callback — so the
@@ -143,7 +148,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 563 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 573 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

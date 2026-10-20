@@ -429,7 +429,7 @@ class TypeChecker:
                 # through a plain `let` — like pointer memory.
                 if getattr(node, 'is_checked_at', False):
                     recv = node.func.obj
-                    if isinstance(self._check_expr(recv), ListType):
+                    if isinstance(self._check_expr(recv), (ListType, PtrType)):
                         return True
                     node = recv
                     continue
@@ -635,6 +635,10 @@ class TypeChecker:
                 t = ot.fields[expr.field]
                 expr.type = t
                 return t
+            if expr.field == 'at' and isinstance(ot, PtrType):
+                raise CheckError("'at' on a pointer must be called with an index "
+                                 "and a size: p.at(i, size)",
+                                 self.filename, expr.pos)
             if expr.field == 'at' and isinstance(ot, (ArrayType, ListType)):
                 raise CheckError("'at' must be called with an index: xs.at(i)",
                                  self.filename, expr.pos)
@@ -919,13 +923,10 @@ class TypeChecker:
                 return self._check_method(ot, f.field, call)
             if f.field == 'at':
                 if isinstance(ot, PtrType):
-                    raise CheckError(
-                        "'at' is not available on pointers (a pointer has no "
-                        "length); use p[i] for unchecked access",
-                        self.filename, call.pos)
+                    return self._check_ptr_at(call, ot)
                 if isinstance(ot, (ArrayType, ListType)):
                     return self._check_at(call, ot)
-                raise CheckError(f"'at' requires an array or a List, got {ot}",
+                raise CheckError(f"'at' requires an array, a List, or a pointer, got {ot}",
                                  self.filename, call.pos)
             if isinstance(ot, ListType):
                 return self._check_list_method(ot, f.field, call)
@@ -1064,6 +1065,34 @@ class TypeChecker:
         t = inner if isinstance(inner, FuncType) else PtrType(inner)
         call.type = t
         return t
+
+    def _check_ptr_at(self, call: A.Call, ptr: PtrType) -> Type:
+        if call.type_args:
+            raise CheckError("'at' does not accept type arguments",
+                             self.filename, call.pos)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("'at' does not accept named arguments",
+                             self.filename, call.pos)
+        if ptr.inner is VOID:
+            raise CheckError(
+                "cannot use 'at' on a ptr<void> (it has no element type); "
+                "ptr_cast it to a typed pointer first",
+                self.filename, call.pos)
+        if len(call.args) != 2:
+            if len(call.args) == 1:
+                raise CheckError(
+                    "'at' on a pointer needs an index and a size: p.at(i, size)",
+                    self.filename, call.pos)
+            raise CheckError(
+                f"'at' on a pointer expects an index and a size, got {len(call.args)} arguments",
+                self.filename, call.pos)
+        it = self._check_expr(call.args[0])
+        self._coerce_value(call.args[0], it, I32, call.pos, "index")
+        st = self._check_expr(call.args[1])
+        self._coerce_value(call.args[1], st, I32, call.pos, "size")
+        call.is_checked_at = True
+        call.type = ptr.inner
+        return ptr.inner
 
     def _check_at(self, call: A.Call, arr: ArrayType) -> Type:
         if call.type_args:

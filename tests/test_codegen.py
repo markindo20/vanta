@@ -442,6 +442,40 @@ class CodegenTests(unittest.TestCase):
                   "    xs.at(1) += 2\n")
         self.assertIn('vanta::at_checked_ref(v_xs, 1, 3) = (vanta::at_checked(v_xs, 1, 3) + 2);', cpp)
 
+    def test_ptr_at_read_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(64)\n"
+                  "    let p = a.alloc::<i32>(4)\n"
+                  "    print_i32(p.at(1, 4))\n")
+        self.assertIn('vanta::print_i32(vanta::ptr_at_checked(v_p, 1, 4, 4))', cpp)
+
+    def test_ptr_at_write_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(64)\n"
+                  "    let p = a.alloc::<i32>(4)\n"
+                  "    p.at(0, 4) = 9\n"
+                  "    p.at(1, 4) += 2\n")
+        self.assertIn('vanta::ptr_at_checked_ref(v_p, 0, 4, 4) = 9;', cpp)
+        self.assertIn('vanta::ptr_at_checked_ref(v_p, 1, 4, 5) = '
+                      '(vanta::ptr_at_checked(v_p, 1, 4, 5) + 2);', cpp)
+
+    def test_ptr_at_write_through_temp_pointer_emit(self):
+        cpp = gen("func get(a: ptr<i32>) -> ptr<i32>:\n"
+                  "    return a\n"
+                  "func main() -> void:\n"
+                  "    let a = Arena(64)\n"
+                  "    let p = a.alloc::<i32>(4)\n"
+                  "    get(p).at(0, 4) = 9\n")
+        self.assertIn('vanta::ptr_at_checked_ref(fn_get(v_p), 0, 4, 6) = 9;', cpp)
+
+    def test_ptr_at_nested_array_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let a = Arena(64)\n"
+                  "    let rows = a.alloc::<[i32, 3]>(2)\n"
+                  "    rows.at(1, 2).at(2) = 42\n")
+        self.assertIn('vanta::at_checked_ref(vanta::ptr_at_checked_ref('
+                      'v_rows, 1, 2, 4), 2, 4) = 42;', cpp)
+
     def test_trig_builtins_emit(self):
         cpp = gen("func main() -> void:\n"
                   "    print_f32(sin_f32(0.5))\n"

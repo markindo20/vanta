@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.24.1)
+# Vanta Language Reference (v0.25.0)
 
-This is the reference for the language as implemented at tag `v0.24.1`. Every
+This is the reference for the language as implemented at tag `v0.25.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -34,7 +34,7 @@ Assigning to a `let` binding is a compile-time error.
 | `bool` | `true` / `false` |
 | `void` | function return only |
 | `str` | string literal type (see [Strings](#strings)) |
-| `ptr<T>` | raw pointer: locals, parameters, and returns; `ptr<void>` is the untyped C-style handle (see [Pointers and the Arena](#pointers-and-the-arena)) |
+| `ptr<T>` | raw pointer: locals, parameters, and returns; `p.at(i, size)` is checked, `p[i]` is not; `ptr<void>` is the untyped C-style handle (see [Pointers and the Arena](#pointers-and-the-arena)) |
 | `[T, N]` | fixed-size array of `N` elements; `T` may itself be an array; checked access with `xs.at(i)` (see [Checked indexing](#checked-indexing-at-v070)) |
 | `List<T>` | growable list whose storage lives in an `Arena`; `push`/`pop`/`len`/`at`/`xs[i]` (see [Dynamic lists](#dynamic-lists-listt-v090)) |
 | `func(T1, ...) -> R` | function value; arrow omitted means `-> void` (see [Function values](#function-values-v060)) |
@@ -467,9 +467,10 @@ vanta: index 4 out of bounds (size 4) at line 3
 - Writes obey the normal mutability rules: the storage chain must reach a
   `mut` binding, or index through a `ptr<T>` — pointer memory is always
   writable.
-- `at` is **not** available on `ptr<T>`: a pointer has no length, so there is
-  nothing to check against — use `p[i]`. There is no checked access for
-  pointers yet.
+- Pointers carry no length, so their checked form takes the accessible
+  element count: `p.at(i, size)`. See
+  [Checked pointer access](#checked-pointer-access-pati-size-v0250).
+- `p[i]` remains the unchecked escape hatch for pointers.
 - `at` is a call, not a value: `xs.at` alone is an error.
 
 ## Pointers and the Arena
@@ -511,6 +512,57 @@ error: cannot pass Arena to a function
 
 This is the only ownership rule enforced. `ptr<T>` has **no** borrow checking,
 so dangling or aliased pointers are not detected.
+
+### Checked pointer access: `p.at(i, size)` (v0.25.0)
+
+`p.at(i, size)` is the pointer counterpart of `xs.at(i)`. The pointer does not
+carry its length, so the caller supplies the accessible element count and the
+index is checked against it before memory is touched:
+
+```vanta
+func main() -> void:
+    let arena = Arena(256)
+    let xs = arena.alloc::<i32>(4)
+    xs.at(0, 4) = 10
+    xs.at(1, 4) = 20
+    xs.at(1, 4) += 2
+    print_i32(xs.at(0, 4))
+    print_i32(xs.at(1, 4))
+```
+
+```
+10
+22
+```
+
+Reads, writes, and compound assignment all work, including nested access such
+as `rows.at(row, row_count).at(column)` when the element type is an array.
+Pointer memory is writable through a plain `let` binding, exactly like
+`p[i]`.
+
+An out-of-bounds index stops the program with the pointer's element count:
+
+```vanta
+func main() -> void:
+    let arena = Arena(64)
+    let xs = arena.alloc::<i32>(4)
+    print_i32(xs.at(4, 4))
+```
+
+```
+vanta: pointer index 4 out of bounds (size 4) at line 4
+```
+
+- `size` is a promise made by the programmer. The runtime does not know the
+  allocation size; passing a count larger than the real block is still
+  unchecked memory access.
+- `ptr<void>` cannot use `at`: it has no element type. Cast it to a typed
+  pointer first.
+- `p[i]`, `ptr_cast::<T>(p)`, and `ptr_offset(p, n)` stay unchecked escape
+  hatches. Use them when the program is deliberately working below the
+  checked layer.
+- Null is still separate: `p.at(...)` checks the index, not the pointer value;
+  use `ptr_is_null(p)` when a C function may return NULL.
 
 ### Pointer casts: `ptr_cast::<T>` (v0.17.0)
 

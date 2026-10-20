@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.24.1)
+# Vanta - a game-oriented systems language (v0.25.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -140,7 +140,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (563 tests) |
+| `tests/` | `unittest` suite (573 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -162,6 +162,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
 | `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
+| `ptr_at.vnt` | Checked pointer access: `p.at(i, size)` reads and writes through raw pointers |
 | `lists.vnt` | Dynamic lists: `arena.list::<T>()`, `push`/`pop`/`insert`/`remove`, comparator sort |
 | `callbacks.vnt` | C callbacks: Vanta functions called from C, with pointer user data (C side: `callbacks_lib.c`) |
 | `narrow_ints.vnt` | Exact-width integers `i8`/`u8`/`i16`/`u16`: C ABI parameters and struct layout verified byte for byte (C side: `narrow_ints_lib.c`) |
@@ -213,7 +214,8 @@ Vanta is a prototype, not a finished language. Programs can span multiple
 files, link against C libraries (callbacks and enum types included), read
 command-line arguments, produce formatted output, read and write files, build
 2D grids, pass functions around,
-bounds-check array access with `xs.at(i)`, grow, edit, and sort arena-backed
+bounds-check array access with `xs.at(i)` and pointer access with
+`p.at(i, size)`, grow, edit, and sort arena-backed
 lists (`List<T>`) and walk lists and arrays with `for x in xs`, store
 exact-width integers (`i8`/`u8`/`i16`/`u16`) whose memory layout matches C,
 compare structs field by field with `==`, reinterpret pointers with
@@ -232,8 +234,10 @@ are real:
 - function values are plain pointers: no closures; they compare by address
   with `==`/`!=` (ordering is rejected), `ptr_is_null` tests them, and C
   callbacks work in both directions — `extern` parameters and return types
-- array indexing is unchecked unless you opt in with `xs.at(i)`; pointers have
-  no checked access, and there is no borrow checker for `ptr<T>` (only the
+- array indexing is unchecked unless you opt in with `xs.at(i)`; pointer
+  indexing is unchecked unless you pass the accessible element count with
+  `p.at(i, size)` (the count is a runtime promise, and null is still
+  `ptr_is_null`'s job), and there is no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)
 - `List<T>` is arena-backed: elements must be copyable, growth and sorting
   allocate from the arena, and `sort` needs a comparator function value (there

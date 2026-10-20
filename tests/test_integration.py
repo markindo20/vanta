@@ -1135,6 +1135,44 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_ptr_at_example(self):
+        self._build_and_run(os.path.join(EXAMPLES, 'ptr_at.vnt'),
+                            ['150', '35', '35', '42', '3.141593'])
+
+    def test_ptr_at_out_of_bounds_read_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let arena = Arena(64)\n"
+            "    let p = arena.alloc::<i32>(4)\n"
+            "    print_i32(p.at(2 + 2, 4))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_ptr_at_oob_')
+        try:
+            path = os.path.join(tmp, 'oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: pointer index 4 out of bounds (size 4) at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_ptr_at_out_of_bounds_write_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let arena = Arena(64)\n"
+            "    let p = arena.alloc::<i32>(4)\n"
+            "    p.at(-1, 4) = 9\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_ptr_at_oobw_')
+        try:
+            path = os.path.join(tmp, 'oobw.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path, 'vanta: pointer index -1 out of bounds (size 4) at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_enums_example(self):
         self._build_and_run(os.path.join(EXAMPLES, 'enums.vnt'),
                             ['menu', 'playing', '2', 'menu', 'playing',

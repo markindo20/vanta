@@ -228,6 +228,29 @@ inline T& at_checked_ref(std::array<T, N>& xs, int32_t index, int32_t line) {
     return xs[(size_t)index];
 }
 
+// ---------- Bounds-checked pointer access ----------
+// p.at(i, size) compiles down to these. The pointer carries no length, so the
+// caller supplies the accessible element count; the helper checks the index
+// against it before touching memory. p[i] remains the unchecked escape hatch.
+inline void ptr_index_fail(int32_t index, int32_t size, int32_t line) {
+    std::fprintf(stderr,
+                 "vanta: pointer index %d out of bounds (size %d) at line %d\n",
+                 (int)index, (int)size, (int)line);
+    std::exit(1);
+}
+
+template <typename T>
+inline T ptr_at_checked(const T* p, int32_t index, int32_t size, int32_t line) {
+    if (index < 0 || index >= size) ptr_index_fail(index, size, line);
+    return p[index];
+}
+
+template <typename T>
+inline T& ptr_at_checked_ref(T* p, int32_t index, int32_t size, int32_t line) {
+    if (index < 0 || index >= size) ptr_index_fail(index, size, line);
+    return p[index];
+}
+
 // ---------- Dynamic lists (List<T>) ----------
 // A List<T> is a handle: the value holds a pointer to a small header living
 // in an Arena (data pointer, length, capacity). Copying a List copies the
