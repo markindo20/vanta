@@ -5,19 +5,20 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.23.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.24.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: a fourth worked game (candidate v0.24.0)
+## Next: breakout polish (candidate v0.25.0)
 
-The three games cover the kit's core loop, and the recent milestones closed
-the kit's animation/text gaps and the small language loose ends. The next kit
-milestone is either a fourth small game (a shooter or a platformer built on
-`anim.vnt`, `collide.vnt`, and `text.vnt`) or the breakout polish pass
-(levels, pause, score persistence). The remaining language items below are
-larger designs, so the kit is the natural next step.
+The fourth game, `strike.vnt`, landed in v0.24.0 with `gamekit/collide.vnt`,
+so the kit now covers the core loop, animation, text, audio, controllers, and
+collision. The next kit step is the breakout polish pass: levels, pause,
+score persistence, and per-sound gain by scaling PCM at load. The language
+items below remain larger designs, so the kit is still the natural next step;
+checked pointer access is the smallest of them if a language milestone is
+preferred.
 
 ## Language
 
@@ -35,9 +36,11 @@ larger designs, so the kit is the natural next step.
 
 ## Kit and examples
 
-- A fourth worked game, or a polish pass on breakout (levels, pause, score
-  persistence, per-sound gain by scaling PCM at load). With the two game-loop
-  items landed, either is a fair next kit step.
+- Breakout polish: levels, pause, score persistence, and per-sound gain by
+  scaling PCM at load. The fourth game, `strike.vnt`, landed in v0.24.0
+  with `gamekit/collide.vnt`; keep the pong and strike frozen runs untouched,
+  and revise breakout's frozen run only when a polish item deliberately
+  changes that game.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.

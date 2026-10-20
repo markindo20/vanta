@@ -2,6 +2,36 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.24.0 — 2026-10-20
+
+- The fourth playable game. `examples/strike.vnt` is a one-screen wave
+  shooter: left/right arrows (or A/D, or a gamepad stick/D-pad) move the
+  ship, the cannon fires on a fixed cadence, and three waves of six saucers
+  descend, drift, and bounce off the walls. A bolt destroys a saucer; a
+  saucer that touches the ship or slips past the bottom costs one of three
+  lives. Clear all eighteen to win. The ship is an animated four-frame
+  strip, the saucers are one white texture tinted per wave, the HUD is
+  `text_draw`, and the shot/hit/boom sounds are WAV files. With no input the
+  autopilot lines up under the lowest saucer and clears the game without
+  losing a life at frame 1020 — the suite freezes those counts. The game
+  imports nine of the ten kit modules (all but `rng.vnt`) and links SDL2,
+  SDL2_ttf, and SDL2_image.
+- `gamekit/collide.vnt`, the tenth module, is pure Vanta with no externs and
+  no SDL dependency: `collide_rects`, `collide_point`, `collide_circles`,
+  and `collide_circle_rect`. Rectangles are `(x, y, w, h)`; edges that only
+  touch are not overlaps, `collide_point` is half-open, and the circle tests
+  compare squared distances, so none of them calls `sqrt`. The pure module
+  gets its own headless test on every machine with a C++ compiler.
+- New generated assets: `ship_anim.png` (four 24x24 frames), `enemy.png`,
+  `laser.png`, and `laser.wav` / `hit.wav` / `boom.wav`, all from
+  `examples/assets/gen_assets.py`.
+- No compiler changes: the kit and the game are plain Vanta. The new tests
+  are the collision semantics and the frozen strike run, for 556 total.
+- Documentation: the game-kit chapters in the tutorial and reference now
+  cover ten modules and collision, the README lists the fourth game and the
+  ten-module kit, and the game-kit README documents the new helpers. Every
+  new snippet was executed with its output frozen.
+
 ## v0.23.0 — 2026-10-20
 
 - `extern` functions can return function values. A signature like `func
