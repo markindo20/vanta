@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.29.0)
+# Vanta - a game-oriented systems language (v0.29.1)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -57,6 +57,9 @@ vanta check hello.vnt          # type-check only (fast, no C++)
 vanta hello.vnt                # shorthand for `vanta run hello.vnt`
 vanta build hello.vnt --release
 ```
+
+Diagnostics print the offending source line and a caret under the reported
+column. Source files may start with a UTF-8 BOM.
 
 Arguments after the source are passed through, so `vanta report.vnt 3` reaches
 the program. In a checkout, the same commands work on the examples:

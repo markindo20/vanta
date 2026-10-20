@@ -2,7 +2,7 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
-## Unreleased
+## v0.29.1 - 2026-10-20
 
 - Accept a UTF-8 byte-order mark at the start of source files. Windows
   editors and PowerShell may write one; it is now ignored instead of producing
