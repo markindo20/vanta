@@ -47,6 +47,8 @@ jobs:
         shell: pwsh
         run: |
           "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Keep setup-python's interpreter ahead of MSYS2's pip-less Python.
+          "$env:pythonLocation" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Version
@@ -87,6 +89,8 @@ jobs:
         shell: pwsh
         run: |
           "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Keep setup-python's interpreter ahead of MSYS2's pip-less Python.
+          "$env:pythonLocation" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build wheel and sdist
