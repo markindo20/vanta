@@ -1097,6 +1097,24 @@ no controller it prints the dead path too:
 vanta examples/sdl_gamepad.vnt
 ```
 
+## Start a new game
+
+`vanta new game.vnt` writes a small playable game: a paddle, a falling block,
+lives, and a deterministic frame-limited mode for smoke tests. It imports
+`sdl.vnt`, `input.vnt`, and `gfx.vnt` with a path relative to the new file, so
+the file runs from where you create it:
+
+```powershell
+vanta new game.vnt
+vanta game.vnt
+```
+
+On Windows, `vanta build game.vnt --release --bundle` writes the executable,
+the non-system DLLs it loads, and the example assets into `build/game/`, which
+can be moved or zipped as one folder. Add `image.vnt`, `text.vnt`, or
+`audio.vnt` to the starter as the game grows; the driver links their SDL
+libraries automatically.
+
 ## Where to go next
 
 - [`LANGUAGE_REFERENCE.md`](LANGUAGE_REFERENCE.md) — the full language,
@@ -1108,4 +1126,4 @@ vanta examples/sdl_gamepad.vnt
   modules alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (560 tests).
+- `python -m unittest discover -s tests` — run the test suite (563 tests).

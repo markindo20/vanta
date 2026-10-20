@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.24.0)
+# Vanta - a game-oriented systems language (v0.24.1)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -44,6 +44,21 @@ Then run a source file directly — `vanta game.vnt` is shorthand for
 ```powershell
 vanta examples/vector_math.vnt
 vanta examples/strike.vnt
+```
+
+Start a new game with a playable paddle-and-ball starter:
+
+```powershell
+vanta new game.vnt
+vanta game.vnt
+```
+
+Build a shareable Windows bundle — the executable, its runtime DLLs, the
+example assets, and the kit font go into one folder:
+
+```powershell
+vanta build examples/strike.vnt --release --bundle
+.\build\strike\strike.exe
 ```
 
 `run` compiles to a temporary executable and deletes it afterwards. `build`
@@ -125,7 +140,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (560 tests) |
+| `tests/` | `unittest` suite (563 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples

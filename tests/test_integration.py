@@ -1319,6 +1319,35 @@ class IntegrationTests(unittest.TestCase):
                    'breakout.vnt', 'strike.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
+    @unittest.skipUnless(os.name == 'nt' and SDL2, "Windows SDL2 bundling not available")
+    def test_bundle_copies_runtime_dlls(self):
+        # Build the starter game with --bundle and run it with a PATH that
+        # contains only Windows itself: the copied DLLs must carry the load.
+        import contextlib, io
+        from compiler.driver import main, _starter_source
+        tmp = tempfile.mkdtemp(prefix='vanta_bundle_')
+        try:
+            source = os.path.join(tmp, 'game.vnt')
+            with open(source, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(_starter_source(source))
+            out = os.path.join(tmp, 'bundle', 'game.exe')
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = main(['build', source, '--bundle', '-o', out])
+            self.assertEqual(code, 0, msg=buf.getvalue())
+            self.assertTrue(os.path.exists(os.path.join(tmp, 'bundle', 'SDL2.dll')))
+            self.assertTrue(os.path.exists(os.path.join(
+                tmp, 'bundle', 'examples', 'assets', 'laser.png')))
+            root = os.environ.get('SystemRoot', r'C:\Windows')
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy',
+                       PATH=os.path.join(root, 'System32') + os.pathsep + root)
+            r = subprocess.run([out, '3'], capture_output=True, text=True,
+                               env=env, cwd=os.path.join(tmp, 'bundle'))
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip(), 'frames 3 score 0 lives 3')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     @unittest.skipUnless(SDL2, "SDL2 not found")
     def test_sdl_window_headless(self):
         tmp = tempfile.mkdtemp(prefix='vanta_sdlwin_')

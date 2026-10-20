@@ -251,6 +251,11 @@ the core library (`collide.vnt` needs no library at all):
 vanta game.vnt
 ```
 
+To start a new game, `vanta new game.vnt` writes a playable starter that
+imports `sdl.vnt`, `input.vnt`, and `gfx.vnt` for you. On Windows,
+`vanta build game.vnt --release --bundle` puts the executable, its runtime
+DLLs, and the example assets in one folder.
+
 Notes:
 
 - **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit

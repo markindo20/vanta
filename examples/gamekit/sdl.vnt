@@ -14,11 +14,9 @@
 #   import "gamekit/audio.vnt"
 #   import "gamekit/rng.vnt"
 #
-# Build with the SDL2 library, e.g. on Windows with MSYS2 (image.vnt pulls
-# in SDL2_image, text.vnt pulls in SDL_ttf, audio is part of SDL2 itself —
-# link a satellite only when the game imports its module):
-#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2
-#   python main.py run game.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+# Run it with the vanta command; the extern block above tells the driver to
+# link SDL2, and image.vnt/text.vnt add their own SDL satellites:
+#   vanta game.vnt
 #
 # examples/pong.vnt is a complete game built on the kit; breakout.vnt adds
 # textures and sound files.

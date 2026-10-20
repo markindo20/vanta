@@ -2,19 +2,33 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
-## Unreleased
+## v0.24.1 — 2026-10-20
 
 - `vanta game.vnt` is shorthand for `vanta run game.vnt`: a bare source path
   now compiles and runs. Installing the checkout once with
   `python -m pip install -e .` creates the `vanta` command, so games launch
   without repeating `python main.py` or spelling out link flags.
+- `vanta new game.vnt` writes a playable starter — a paddle, a falling block,
+  three lives, and a frame-limited mode for headless smoke tests. Its imports
+  point at the checkout's game kit relative to the new file.
 - The driver links SDL2, SDL2_ttf, and SDL2_image automatically when it sees
   their extern block names. Explicit `--link` values still work and are
   deduplicated; custom C libraries still use `--include-dir`, `--lib-dir`,
   and `--link`. On Windows the compiler's own `bin` directory is added to the
   child `PATH`, so the SDL DLLs are found without a manual environment setup.
-- 4 new tests: command normalization, auto-link detection and ordering, custom
-  externs staying unlinked, and explicit-link deduplication. 560 total.
+- `vanta build --bundle` (Windows) writes `build/<name>/<name>.exe`, walks the
+  executable's PE imports with `objdump`, and copies every non-system DLL it
+  loads — SDL2, SDL2_ttf, SDL2_image, and their codec dependencies — beside
+  the executable. It also copies `examples/assets` and the kit font, so the
+  bundled example games run from a folder with only Windows on `PATH`.
+- Compile failures now print a platform-specific install hint for missing SDL
+  development libraries (MSYS2 package names on Windows, `brew` on macOS, and
+  `apt-get` on Linux), and MSVC users are told why the MinGW import libraries
+  cannot be used.
+- 7 new tests: command normalization, auto-link detection and ordering, custom
+  externs staying unlinked, explicit-link deduplication, starter generation,
+  overwrite protection, and a Windows bundle that runs with a system-only
+  `PATH`. 563 total.
 
 ## v0.24.0 — 2026-10-20
 

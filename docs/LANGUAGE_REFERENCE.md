@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.24.0)
+# Vanta Language Reference (v0.24.1)
 
-This is the reference for the language as implemented at tag `v0.24.0`. Every
+This is the reference for the language as implemented at tag `v0.24.1`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -1583,7 +1583,12 @@ and `collide.vnt` uses no library at all):
 vanta examples/pong.vnt
 vanta examples/breakout.vnt
 vanta examples/strike.vnt
+vanta new game.vnt
 ```
+
+`vanta new` writes a playable starter without assets, and on Windows
+`vanta build game.vnt --release --bundle` copies the executable's non-system
+DLL dependencies and the example assets beside it.
 
 `examples/pong.vnt` is the worked example for the first game: it imports six
 of the modules (all but `image.vnt` and `gamepad.vnt`), serves with `match`,
