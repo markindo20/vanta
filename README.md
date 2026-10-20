@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.26.0)
+# Vanta - a game-oriented systems language (v0.27.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -104,11 +104,12 @@ coins with Left/Right (or A/D), Esc or the close button quits. The game kit
 and `examples/pong.vnt`, `examples/breakout.vnt`, and `examples/strike.vnt`
 are the second, third, and fourth playable games built on it:
 pong is W/S or Up/Down against a tracking AI, first to 5 wins, with the score
-drawn as text and a beep on every hit and point; breakout is a wall of
-tinted sprites, a spinning animated ball, a tracking paddle, and WAV hits,
-and with no key held the paddle plays its own demo; strike is a one-screen
-wave shooter with an animated ship, three waves of tinted saucers, WAV shots
-and hits, a gamepad fallback, and a deterministic autopilot clear;
+drawn as text and a beep on every hit and point; breakout is three walls of
+tinted sprites, a spinning animated ball, a tracking paddle, WAV hits, a
+persisted best score, and P/Space pause; with no key held the paddle plays its
+own demo; strike is a one-screen wave shooter with an animated ship, three
+waves of tinted saucers, WAV shots and hits, a gamepad fallback, and a
+deterministic autopilot clear;
 `examples/text_bench.vnt` is the kit's measured before/after for text
 sprites.
 
@@ -185,7 +186,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `sdl_game.vnt` | The first playable game: paddle, falling coins, input, `ptr_is_null` |
 | `gamekit/` | Ten reusable game modules: SDL2 window lifecycle, event access, controllers, rectangles, textures (SDL2_image), sprite animation, text (SDL_ttf), audio (tones and WAV files), random numbers, and pure collision tests |
 | `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |
-| `breakout.vnt` | The third playable game: tinted sprite wall, animated ball, auto-playing paddle, WAV hits — built on the game kit |
+| `breakout.vnt` | The third playable game: three tinted sprite walls, animated ball, auto-playing paddle, pause, persisted best score, WAV hits — built on the game kit |
 | `strike.vnt` | The fourth playable game: animated ship, three waves of tinted saucers, text HUD, WAV hits, gamepad fallback, collision tests — built on the game kit |
 
 ## Tests

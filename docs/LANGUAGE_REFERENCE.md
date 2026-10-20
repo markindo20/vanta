@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.26.0)
+# Vanta Language Reference (v0.27.0)
 
-This is the reference for the language as implemented at tag `v0.26.0`. Every
+This is the reference for the language as implemented at tag `v0.27.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -1392,7 +1392,7 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else.
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
 | `anim.vnt` | Sprite-sheet animation: `Anim`, `anim_new` / `anim_tick` / `anim_frame` / `anim_draw` |
 | `text.vnt` | SDL_ttf: `Font`, `font_open` / `font_ok` / `font_close`, `text_measure`, `text_draw`; `TextSprite`, `text_sprite` / `text_sprite_ok` / `text_sprite_draw` / `text_sprite_free`; `text_quit` |
-| `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_ok` / `sound_play` / `sound_free` |
+| `audio.vnt` | SDL2 audio: `Audio`, `audio_open` / `audio_ok` / `audio_close`, `audio_play_tone`, `audio_pending`, `audio_wait`; `Sound`, `sound_load` / `sound_load_gain` / `sound_ok` / `sound_play` / `sound_free` |
 | `rng.vnt` | `rand_int`, `rand_range_f32`, `rand_sign` |
 | `collide.vnt` | Pure overlap tests (no SDL): `collide_rects`, `collide_point`, `collide_circles`, `collide_circle_rect` |
 
@@ -1534,7 +1534,7 @@ true
 
 `audio.vnt` next: tones need no file — the caller owns the sample buffer and
 `audio_play_tone` fills it with a square wave and queues it on the device
-(WAV files load through `sound_load`, below). The queue API wants a *null*
+(WAV files load through `sound_load` or `sound_load_gain`, below). The queue API wants a *null*
 callback, built with `ptr_null::<func(...)>()`, and `SDL_AudioSpec` itself is
 a Vanta struct whose callback field keeps its C function-pointer type — the
 same struct drives callback mode when a program puts a real function there
@@ -1564,11 +1564,14 @@ true
 Sound *files* next: `sound_load(a, path)` reads a WAV — 16-bit PCM at the
 device's 44.1 kHz, mono or stereo — into a buffer SDL allocates; the game
 holds the `Sound` and hands the buffer back with `sound_free`, and
-`sound_play` queues it after whatever is already playing. A stereo file is
-folded to mono in place at load, so its byte count halves; any other rate,
-sample format, or channel count loads as a dead `Sound` — `sound_ok` false,
-and every `sound_*` call on it is a no-op, exactly like a dead `Audio`.
-Paths are opened by C, relative to the process working directory:
+`sound_play` queues it after whatever is already playing. `sound_load_gain`
+loads the same way and then scales every sample in place; its `f32` gain is
+clamped to 0..1, so it attenuates without clipping, and `sound_load` is the
+full-volume shortcut. A stereo file is folded to mono in place at load, so its
+byte count halves; any other rate, sample format, or channel count loads as a
+dead `Sound` — `sound_ok` false, and every `sound_*` call on it is a no-op,
+exactly like a dead `Audio`. Paths are opened by C, relative to the process
+working directory:
 
 ```vanta
 import "gamekit/sdl.vnt"
@@ -1669,9 +1672,10 @@ of the modules (all but `image.vnt` and `gamepad.vnt`), serves with `match`,
 draws its score with `text_draw`, beeps with `audio_play_tone`, and stays
 testable headless — a frame-limit argument plus `SDL_VIDEODRIVER=dummy` and
 `SDL_AUDIODRIVER=dummy` is how the test suite runs it in CI.
-`examples/breakout.vnt` adds the satellite modules on top: a tinted sprite
-wall out of one white brick texture, WAV hits, and a deterministic
-full-clear run the suite freezes the same way.
+`examples/breakout.vnt` adds the satellite modules on top: three tinted
+brick walls out of one white texture, WAV hits, P/Space pause, a best score
+persisted in `breakout.score`, and a deterministic full-clear run the suite
+freezes the same way.
 `examples/strike.vnt` is the fourth game and the full-kit example: it uses
 nine of the ten modules (all but `rng.vnt`), draws an animated ship and
 three waves of tinted saucers, keeps the HUD with `text_draw`, fires WAV

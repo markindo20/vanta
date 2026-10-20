@@ -1651,22 +1651,38 @@ class IntegrationTests(unittest.TestCase):
 
     @unittest.skipUnless(SDL2_ALL, "SDL2 + SDL2_ttf + SDL2_image not found")
     def test_breakout_headless(self):
-        # The third game: sprites, tinted brick rows, and WAV sound files.
-        # With no input the paddle auto-pilot plays, and the whole run is
-        # reproducible: the wall is cleared without losing a life, at frame
-        # 2064, well before the frame cap — which is only the backstop.
-        # cwd=HERE so the relative asset and font paths resolve.
+        # The third game: sprites, tinted brick rows, WAV sound files, and
+        # three walls. With no input the paddle auto-pilot plays, and the
+        # whole run is reproducible: all 125 bricks fall without losing a
+        # life, at frame 5969, well before the frame cap — which is only the
+        # backstop. The score path is passed explicitly so the run does not
+        # leave a high-score file in the working tree; the second, one-frame
+        # run loads a higher score and proves it is not overwritten by a
+        # smaller result. cwd=HERE so the relative asset and font paths
+        # resolve.
         tmp = tempfile.mkdtemp(prefix='vanta_breakout_')
         try:
             exe = self._build_sdl(os.path.join(EXAMPLES, 'breakout.vnt'), tmp,
                                   cfg=SDL2_ALL)
             env = dict(os.environ, SDL_VIDEODRIVER='dummy',
                        SDL_AUDIODRIVER='dummy')
-            r = subprocess.run([exe, '5000'], capture_output=True, text=True,
-                               env=env, cwd=HERE)
+            score = os.path.join(tmp, 'breakout.score')
+            r = subprocess.run([exe, '20000', score], capture_output=True,
+                               text=True, env=env, cwd=HERE)
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(),
-                             ['cleared 40 lives 3 frames 2064'])
+                             ['cleared 125 lives 3 level 3 best 125 frames 5969'])
+            with open(score, encoding='utf-8') as f:
+                self.assertEqual(f.read().strip(), '125')
+            with open(score, 'w', encoding='utf-8') as f:
+                f.write('999')
+            r = subprocess.run([exe, '1', score], capture_output=True,
+                               text=True, env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['cleared 0 lives 3 level 1 best 999 frames 1'])
+            with open(score, encoding='utf-8') as f:
+                self.assertEqual(f.read().strip(), '999')
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2025,12 +2041,37 @@ class IntegrationTests(unittest.TestCase):
                         '    let stereo = sound_load(audio, "snd/stereo.wav")\n'
                         '    print_bool(sound_ok(stereo))\n'
                         '    print_i32(stereo.len)\n'
+                        '    let quiet = sound_load_gain(audio, "snd/stereo.wav", 0.5)\n'
+                        '    print_bool(sound_ok(quiet))\n'
+                        '    print_i32(quiet.len)\n'
+                        '    let quiet_samples = ptr_cast::<i16>(quiet.data)\n'
+                        '    mut peak = 0\n'
+                        '    for i in range(0, quiet.len / 2):\n'
+                        '        mut v = quiet_samples[i]\n'
+                        '        if v < 0:\n'
+                        '            v = -v\n'
+                        '        if v > peak:\n'
+                        '            peak = v\n'
+                        '    print_i32(peak)\n'
+                        '    let loud = sound_load_gain(audio, "snd/stereo.wav", 2.0)\n'
+                        '    print_i32(loud.len)\n'
+                        '    let loud_samples = ptr_cast::<i16>(loud.data)\n'
+                        '    mut loud_peak = 0\n'
+                        '    for i in range(0, loud.len / 2):\n'
+                        '        mut v = loud_samples[i]\n'
+                        '        if v < 0:\n'
+                        '            v = -v\n'
+                        '        if v > loud_peak:\n'
+                        '            loud_peak = v\n'
+                        '    print_i32(loud_peak)\n'
                         '    let lowrate = sound_load(audio, "snd/lowrate.wav")\n'
                         '    print_bool(sound_ok(lowrate))\n'
                         '    let missing = sound_load(audio, "snd/nope.wav")\n'
                         '    print_bool(sound_ok(missing))\n'
                         '    sound_free(good)\n'
                         '    sound_free(stereo)\n'
+                        '    sound_free(quiet)\n'
+                        '    sound_free(loud)\n'
                         '    sound_free(lowrate)\n'
                         '    sound_free(missing)\n'
                         '    audio_close(audio)\n')
@@ -2041,7 +2082,8 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['true', 'true', '5292', 'true', 'true', 'true',
-                              'true', '2000', 'false', 'false'])
+                              'true', '2000', 'true', '2000', '3000',
+                              '2000', '6000', 'false', 'false'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

@@ -2,6 +2,34 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.27.0 — 2026-10-20
+
+- Breakout polish. `examples/breakout.vnt` now has three walls of 4, 5, and 6
+  rows (125 bricks total), with diagonal gaps in the later walls. Clearing a
+  wall serves the next one; clearing the third wins. The score carries across
+  walls, and the HUD shows the current level and best score.
+- Pause. P or Space freezes the paddle, ball, collisions, and ball animation
+  while events and drawing keep running; a centered `PAUSED` label shows the
+  state. Esc and the close button still quit. `gamekit/sdl.vnt` gains the
+  `KEY_SPACE` and `KEY_P` symbols.
+- Score persistence. The best score is read from `breakout.score` at startup
+  and only rewritten when the run beats it. The optional second program
+  argument changes the score path, so tests and headless runs stay out of the
+  working tree; `breakout.score` is git-ignored.
+- Per-sound gain. `gamekit/audio.vnt` gains
+  `sound_load_gain(audio, path, gain)`: it loads a WAV like `sound_load` and
+  scales every mono S16 sample in place. Gain is clamped to 0..1, so it
+  attenuates without clipping; `sound_load` remains the full-volume shortcut.
+- The breakout headless probe now freezes the three-wall clear
+  (`cleared 125 lives 3 level 3 best 125 frames 5969`) and then loads a higher
+  score in a one-frame run to prove it is not overwritten. The sound probe
+  loads a stereo file at half gain and checks the folded samples scale from
+  6000 to 3000, then loads it at gain 2.0 and checks the clamp keeps the
+  original 6000 peak. 586 tests total.
+- Docs: README, tutorial, reference, roadmap, and the kit comments describe
+  levels, pause, persistence, and gain. The frozen pong and strike runs are
+  unchanged; breakout's frozen run deliberately records the new mode.
+
 ## v0.26.0 — 2026-10-20
 
 - `str` now owns its storage automatically. It is an immutable,

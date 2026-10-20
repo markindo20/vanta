@@ -5,21 +5,16 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.26.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.27.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: breakout polish (candidate v0.27.0)
+## Next: language (candidate v0.28.0)
 
-The fourth game, `strike.vnt`, landed in v0.24.0 with `gamekit/collide.vnt`,
-so the kit now covers the core loop, animation, text, audio, controllers, and
-collision. The next kit step is the breakout polish pass: levels, pause,
-score persistence, and per-sound gain by scaling PCM at load. Checked pointer
-access landed in v0.25.0 and string ownership in v0.26.0, so enum extensions
-are the next language item if a language milestone is preferred.
-
-## Language
+The breakout polish pass landed in v0.27.0 with three walls, pause, high-score
+persistence, and per-sound gain. The next language item is enum extensions;
+checked pointer access and automatic string ownership are already in.
 
 1. **Enums with explicit values and associated data — large.** Enums are
    named constants with `==` and `match`; explicit member values are the
@@ -28,11 +23,10 @@ are the next language item if a language milestone is preferred.
 
 ## Kit and examples
 
-- Breakout polish: levels, pause, score persistence, and per-sound gain by
-  scaling PCM at load. The fourth game, `strike.vnt`, landed in v0.24.0
-  with `gamekit/collide.vnt`; keep the pong and strike frozen runs untouched,
-  and revise breakout's frozen run only when a polish item deliberately
-  changes that game.
+- Breakout polish landed in v0.27.0: three walls, P/Space pause, a best score
+  persisted in `breakout.score`, and `sound_load_gain` for per-sound volume.
+  The pong and strike frozen runs stay untouched; breakout's frozen run now
+  records the three-wall clear.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.

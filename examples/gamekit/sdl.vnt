@@ -59,6 +59,8 @@ const EV_KEYUP: i32 = 769
 
 # Key symbols (SDLK_*), as stored in a key event's keysym.sym.
 const KEY_ESCAPE: i32 = 27
+const KEY_SPACE: i32 = 32
+const KEY_P: i32 = 112
 const KEY_W: i32 = 119
 const KEY_A: i32 = 97
 const KEY_S: i32 = 115

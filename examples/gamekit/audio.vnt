@@ -13,9 +13,9 @@
 # queues it on the device, then returns at once: SDL plays it in the
 # background, and audio_wait blocks until it has been played. The caller
 # supplies the tone buffer and its capacity, so the kit never allocates per
-# tone. sound_load reads a WAV into a buffer SDL allocates; sound_play
-# queues it, and sound_free hands the buffer back. Close with audio_close,
-# before screen_close's SDL_Quit.
+# tone. sound_load reads a WAV into a buffer SDL allocates; sound_load_gain
+# scales that buffer at load, sound_play queues it, and sound_free hands the
+# buffer back. Close with audio_close, before screen_close's SDL_Quit.
 
 import "sdl.vnt"
 
@@ -159,6 +159,30 @@ func sound_load(a: Audio, path: str) -> Sound:
         SDL_FreeWAV(data[0])
         return Sound(data: ptr_null::<u8>(), len: 0)
     return Sound(data: data[0], len: n)
+
+func sound_load_gain(a: Audio, path: str, gain: f32) -> Sound:
+    # Load at full level, then scale every mono S16 sample in place. The
+    # gain is clamped to 0..1: this is an attenuation knob, not an
+    # amplifier, so a sound can never clip. sound_load is the usual
+    # full-volume shortcut.
+    let s = sound_load(a, path)
+    if not sound_ok(s):
+        return s
+    mut g = f32_to_i32(gain * 1000.0)
+    if g < 0:
+        g = 0
+    elif g > 1000:
+        g = 1000
+    let samples = ptr_cast::<i16>(s.data)
+    let n = s.len / 2
+    for i in range(0, n):
+        mut v = samples[i] * g / 1000
+        if v < -32768:
+            v = -32768
+        elif v > 32767:
+            v = 32767
+        samples[i] = v
+    return s
 
 func sound_ok(s: Sound) -> bool:
     return not ptr_is_null(s.data)
