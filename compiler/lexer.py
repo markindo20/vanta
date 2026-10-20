@@ -9,6 +9,11 @@ class LexError(Exception):
 
 class Lexer:
     def __init__(self, source: str, filename: str = "<input>"):
+        # A UTF-8 BOM is common in files written by Windows editors and
+        # PowerShell. It is metadata, not source text, so drop one at the
+        # very start; a BOM anywhere else is still an invalid character.
+        if source.startswith('\ufeff'):
+            source = source[1:]
         self.source = source
         self.filename = filename
         self.pos = 0

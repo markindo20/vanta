@@ -25,6 +25,12 @@ class LoaderTests(unittest.TestCase):
         prog = load_program(p)
         self.assertEqual([d.name for d in prog.decls], ['main'])
 
+    def test_utf8_bom_file_loads(self):
+        p = self.write('main.vnt',
+                       '\ufefffunc main() -> void:\n    print_i32(1)\n')
+        prog = load_program(p)
+        self.assertEqual([d.name for d in prog.decls], ['main'])
+
     def test_import_merges_dependencies_first(self):
         self.write('lib.vnt', 'func helper() -> i32:\n    return 7\n')
         p = self.write('main.vnt', 'import "lib.vnt"\n'

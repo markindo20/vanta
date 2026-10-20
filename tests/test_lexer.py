@@ -67,6 +67,16 @@ class LexerTests(unittest.TestCase):
         self.assertEqual(sum(1 for t in toks if t.type == TT.NEWLINE), 2)
         self.assertFalse(any(t.type in (TT.INDENT, TT.DEDENT) for t in toks))
 
+    def test_utf8_bom_is_ignored_at_start(self):
+        toks = lex("\ufefffunc f() -> i32:\n    return 1\n")
+        self.assertEqual(toks[0].type, TT.FUNC)
+        self.assertEqual(toks[0].line, 1)
+        self.assertEqual(toks[0].col, 1)
+
+    def test_utf8_bom_inside_source_is_rejected(self):
+        with self.assertRaises(LexError):
+            lex("x = 1\n\ufeffy = 2\n")
+
     def test_invalid_char(self):
         with self.assertRaises(LexError):
             lex("x = @\n")

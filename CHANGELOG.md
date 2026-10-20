@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## Unreleased
+
+- Accept a UTF-8 byte-order mark at the start of source files. Windows
+  editors and PowerShell may write one; it is now ignored instead of producing
+  `unexpected character '\ufeff'` at `1:1`. 616 tests total.
+
 ## v0.29.0 — 2026-10-20
 
 - Explicit enum values. `Member = n` sets an `i32` value and following
