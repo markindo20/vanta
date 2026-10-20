@@ -2,6 +2,40 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.23.0 — 2026-10-20
+
+- `extern` functions can return function values. A signature like `func
+  signal(sig: i32, handler: func(i32) -> void) -> func(i32) -> void` now
+  compiles: the generated `extern "C"` declaration folds the declarator into
+  the name (`void(*signal(int32_t, void(*)(int32_t)))(int32_t)`) instead of
+  emitting a bare function type where C needs a name. Returned values are
+  ordinary function values — call them, store them, or hand them back to C.
+  Pointer-to-function returns (`ptr<func(...)>`) and nested function-typed
+  returns (`func() -> func() -> i32`) spell correctly too; an array or list
+  of function values is still rejected as an extern return, since C cannot
+  return those by value. `examples/extern_return.vnt` with
+  `examples/extern_return_lib.c` is the buildable demo: C picks a function,
+  returns null for an unknown id, and the program calls, compares, and
+  null-tests the result.
+- Function-value equality. `==` and `!=` compare function values by address;
+  values of the same type are accepted, different signatures are a compile
+  error, and ordering is rejected with a message pointing at `==`/`!=`. A
+  null built with `ptr_null::<func(...)>()` compares equal to any null of its
+  type, and `ptr_is_null` now accepts function values as well as pointers, so
+  the explicit null test needs no cast or sentinel. Struct equality follows:
+  a function-valued field no longer blocks comparing the whole struct, because
+  the field compares by address like any function value. Still no closures:
+  equality compares plain function pointers.
+- Tests: 11 new cases cover the checker, generated declarations (including
+  nested and pointer-to-function returns), equality emission, struct equality
+  with a function field, and a real C fixture that hands function pointers
+  back across the boundary. 554 total.
+- Docs: the reference's Function values section gains the equality rules and
+  a frozen snippet, its Extern section gains a runnable `signal` example, and
+  the tutorial, README, and version banners follow. Every new snippet is
+  executed with its output frozen; the frozen pong and breakout runs are
+  unchanged.
+
 ## v0.22.0 — 2026-10-19
 
 - Sprite animation. `gamekit/anim.vnt` (a ninth module) is a frame clock over

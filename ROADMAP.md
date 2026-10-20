@@ -5,20 +5,19 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.22.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.23.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: the small language loose ends (candidate v0.23.0)
+## Next: a fourth worked game (candidate v0.24.0)
 
-1. **`extern` functions returning function types — small.** Callbacks already
-   pass as `extern` *parameters*; returning one is the last missing shape in
-   an extern signature, and `ptr_null::<func(...)>()` already models the empty
-   slot.
-2. **Function-value equality — small.** Function values are plain pointers
-   today, with no `==` and no explicit null test. Add equality (
-   `ptr_is_null`-style) without pretending to support closures.
+The three games cover the kit's core loop, and the recent milestones closed
+the kit's animation/text gaps and the small language loose ends. The next kit
+milestone is either a fourth small game (a shooter or a platformer built on
+`anim.vnt`, `collide.vnt`, and `text.vnt`) or the breakout polish pass
+(levels, pause, score persistence). The remaining language items below are
+larger designs, so the kit is the natural next step.
 
 ## Language
 
