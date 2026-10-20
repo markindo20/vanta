@@ -1315,7 +1315,8 @@ class IntegrationTests(unittest.TestCase):
         # also type-checks most of the kit's extern declarations.
         for fn in ('sdl_window.vnt', 'sdl_game.vnt', 'sdl_text.vnt', 'sdl_audio.vnt',
                    'sdl_audio_cb.vnt', 'sdl_texture.vnt', 'sdl_sound.vnt',
-                   'sdl_gamepad.vnt', 'text_bench.vnt', 'pong.vnt', 'breakout.vnt'):
+                   'sdl_gamepad.vnt', 'text_bench.vnt', 'pong.vnt',
+                   'breakout.vnt', 'strike.vnt'):
             _frontend_only(os.path.join(EXAMPLES, fn))
 
     @unittest.skipUnless(SDL2, "SDL2 not found")
@@ -1384,6 +1385,26 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, msg=r.stderr)
             self.assertEqual(r.stdout.strip().splitlines(),
                              ['cleared 40 lives 3 frames 2064'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2_ALL, "SDL2 + SDL2_ttf + SDL2_image not found")
+    def test_strike_headless(self):
+        # The fourth game: animated ship, tinted saucers, text HUD, and
+        # WAV sounds. With no input the autopilot clears all three waves
+        # without losing a life at frame 1020, well before the frame cap.
+        # cwd=HERE so the relative asset and font paths resolve.
+        tmp = tempfile.mkdtemp(prefix='vanta_strike_')
+        try:
+            exe = self._build_sdl(os.path.join(EXAMPLES, 'strike.vnt'), tmp,
+                                  cfg=SDL2_ALL)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy',
+                       SDL_AUDIODRIVER='dummy')
+            r = subprocess.run([exe, '5000'], capture_output=True, text=True,
+                               env=env, cwd=HERE)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(),
+                             ['cleared 18 lives 3 wave 3 frames 1020'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1799,6 +1820,38 @@ class IntegrationTests(unittest.TestCase):
                         '    print_i32(rand_sign())\n'
                         '    print_i32(rand_sign())\n')
             self._build_and_run(path, ['4', '3', '1', '0.701852', '-1', '1'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_gamekit_collide(self):
+        # gamekit/collide.vnt is pure Vanta (no SDL, no externs), so its
+        # overlap semantics run on every machine that has a C++ compiler.
+        # Edges that only touch are not overlaps, and point-in-rect is
+        # half-open; the frozen booleans pin those rules down.
+        tmp = tempfile.mkdtemp(prefix='vanta_kitcollide_')
+        try:
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(tmp, 'gamekit'))
+            path = os.path.join(tmp, 'prog.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('import "gamekit/collide.vnt"\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 5.0, 5.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_rects(0.0, 0.0, 10.0, 10.0, 20.0, 20.0, 5.0, 5.0))\n'
+                        '    print_bool(collide_point(0.0, 0.0, 0.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_point(10.0, 5.0, 0.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_point(9.999, 9.999, 0.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_circles(0.0, 0.0, 5.0, 7.0, 0.0, 3.0))\n'
+                        '    print_bool(collide_circles(0.0, 0.0, 5.0, 8.0, 0.0, 3.0))\n'
+                        '    print_bool(collide_circle_rect(5.0, 5.0, 1.0, 0.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_circle_rect(12.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0))\n'
+                        '    print_bool(collide_circle_rect(14.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0))\n')
+            self._build_and_run(path, ['true', 'false', 'false',
+                                       'true', 'false', 'true',
+                                       'true', 'false', 'true', 'true',
+                                       'false'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

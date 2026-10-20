@@ -1,0 +1,308 @@
+# strike.vnt — the fourth game on the Vanta game kit: a one-screen wave
+# shooter.
+#
+# Left/right arrows (or A/D, or a gamepad stick/D-pad) move the ship. The
+# cannon fires by itself on a fixed cadence, so the game is about aiming
+# and dodging rather than mashing a fire key. Esc or the close button
+# quits. With no input the ship flies itself toward the lowest enemy,
+# which makes a headless run one exact, reproducible trajectory — the test
+# suite freezes the final counts.
+#
+# Three waves of six saucers descend, drift sideways, and bounce off the
+# walls. A bolt kills one saucer; a saucer that reaches the ship or the
+# bottom costs one of three lives. Clear all eighteen saucers to win.
+#
+# This game uses nine of the ten kit modules: textures and sprite-sheet
+# animation for the ship, text for the HUD, WAV files for the shot/hit/boom
+# sounds, the gamepad fallback, and the pure collide.vnt helpers for every
+# overlap test. It links SDL2,
+# SDL2_ttf, and SDL2_image (the gamepad API is in SDL2 itself):
+#   python main.py run examples/strike.vnt --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+#   python main.py run examples/strike.vnt 5000 --lib-dir C:/msys64/mingw64/lib --link SDL2_image --link SDL2_ttf --link SDL2
+#
+# The optional argument is a frame limit, the backstop for the headless
+# run; the game normally ends the moment the last saucer is destroyed or
+# the last life is lost.
+
+import "gamekit/sdl.vnt"
+import "gamekit/input.vnt"
+import "gamekit/gfx.vnt"
+import "gamekit/image.vnt"
+import "gamekit/anim.vnt"
+import "gamekit/text.vnt"
+import "gamekit/audio.vnt"
+import "gamekit/gamepad.vnt"
+import "gamekit/collide.vnt"
+
+const WIN_W: i32 = 480
+const WIN_H: i32 = 360
+const PLAYER_W: i32 = 24
+const PLAYER_H: i32 = 24
+const PLAYER_Y: i32 = 320
+const PLAYER_SPEED: f32 = 5.0
+const ENEMY_W: i32 = 20
+const ENEMY_H: i32 = 20
+const PER_WAVE: i32 = 6
+const WAVES: i32 = 3
+const BULLET_W: i32 = 4
+const BULLET_H: i32 = 12
+const BULLET_SPEED: f32 = 9.0
+const BULLET_MAX: i32 = 8
+const FIRE_INTERVAL: i32 = 10
+const LIVES: i32 = 3
+const ENEMY_BASE_SPEED: f32 = 0.45
+const ENEMY_WAVE_SPEED: f32 = 0.12
+const ENEMY_VX: f32 = 0.7
+
+struct Enemy:
+    active: bool
+    x: f32
+    y: f32
+    vx: f32
+    vy: f32
+
+struct Bullet:
+    active: bool
+    x: f32
+    y: f32
+
+func spawn_wave(enemies: ptr<Enemy>, wave: i32) -> void:
+    # Six saucers across the screen, alternating rows so they do not all
+    # arrive at the same pixel. Later waves fall a little faster.
+    let speed = ENEMY_BASE_SPEED + i32_to_f32(wave - 1) * ENEMY_WAVE_SPEED
+    for i in range(0, PER_WAVE):
+        enemies[i] = Enemy(
+            active: true,
+            x: 30.0 + i32_to_f32(i) * 72.0,
+            y: 0.0 - 24.0 - i32_to_f32(i % 2) * 30.0,
+            vx: ENEMY_VX * i32_to_f32(1 - 2 * (i % 2)),
+            vy: speed)
+
+func autopilot_target(enemies: ptr<Enemy>) -> f32:
+    # The lowest saucer is the one about to reach the ship, so that is the
+    # one the autopilot lines up under. With no saucers left it waits in
+    # the middle for the next wave.
+    mut best = 0.0 - 100000.0
+    mut tx = i32_to_f32(WIN_W / 2 - PLAYER_W / 2)
+    for i in range(0, PER_WAVE):
+        if enemies[i].active and enemies[i].y > best:
+            best = enemies[i].y
+            tx = enemies[i].x + i32_to_f32(ENEMY_W / 2 - PLAYER_W / 2)
+    return tx
+
+func main() -> void:
+    let screen = screen_open("Vanta strike", WIN_W, WIN_H)
+    if not screen_ok(screen):
+        print_str("vanta: could not open a window and renderer")
+        screen_close(screen)
+        return
+    let arena = Arena(65536)
+    let ev = arena.alloc::<i32>(16)          # room for one SDL_Event
+    let rect = arena.alloc::<i32>(4)         # an SDL_Rect: x, y, w, h
+    let scratch = arena.alloc::<i32>(10)     # text_measure/text_draw scratch
+    let enemies = arena.alloc::<Enemy>(PER_WAVE)
+    let bullets = arena.alloc::<Bullet>(BULLET_MAX)
+
+    let tex_ship = tex_load(screen, "examples/assets/ship_anim.png")
+    let tex_enemy = tex_load(screen, "examples/assets/enemy.png")
+    let tex_laser = tex_load(screen, "examples/assets/laser.png")
+    let font = font_open("examples/gamekit/fonts/tom-thumb.ttf", 24)
+    let audio = audio_open()
+    let snd_laser = sound_load(audio, "examples/assets/laser.wav")
+    let snd_hit = sound_load(audio, "examples/assets/hit.wav")
+    let snd_boom = sound_load(audio, "examples/assets/boom.wav")
+    let pad = pad_open(0)
+
+    mut frames = 0
+    mut max_frames = 0
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+
+    mut px = i32_to_f32(WIN_W / 2 - PLAYER_W / 2)
+    mut ship_anim = anim_new(4, PLAYER_W, PLAYER_H, 10.0)
+    mut lives = LIVES
+    mut cleared = 0
+    mut wave = 1
+    mut fire_timer = 0
+    mut left_down = false
+    mut right_down = false
+    mut running = true
+    spawn_wave(enemies, wave)
+    for i in range(0, BULLET_MAX):
+        bullets[i] = Bullet(active: false, x: 0.0, y: 0.0)
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            if ev_is_quit(ev):
+                running = false
+            elif ev_is_keydown(ev):
+                let k = ev_key(ev)
+                if k == KEY_ESCAPE:
+                    running = false
+                elif k == KEY_LEFT or k == KEY_A:
+                    left_down = true
+                elif k == KEY_RIGHT or k == KEY_D:
+                    right_down = true
+            elif ev_is_keyup(ev):
+                let k = ev_key(ev)
+                if k == KEY_LEFT or k == KEY_A:
+                    left_down = false
+                elif k == KEY_RIGHT or k == KEY_D:
+                    right_down = false
+
+        mut pad_left = false
+        mut pad_right = false
+        if pad_attached(pad):
+            if pad_axis(pad, PAD_AXIS_LEFT_X) < -8000 or pad_button(pad, PAD_BUTTON_DPAD_LEFT):
+                pad_left = true
+            if pad_axis(pad, PAD_AXIS_LEFT_X) > 8000 or pad_button(pad, PAD_BUTTON_DPAD_RIGHT):
+                pad_right = true
+
+        # The ship: keys or pad move it; with neither held the autopilot
+        # lines up under the lowest saucer, which is also how the headless
+        # test plays the game.
+        if left_down or pad_left:
+            px -= PLAYER_SPEED
+        if right_down or pad_right:
+            px += PLAYER_SPEED
+        if not left_down and not right_down and not pad_left and not pad_right:
+            let target = autopilot_target(enemies)
+            if target > px + 1.5:
+                px += PLAYER_SPEED
+            elif target < px - 1.5:
+                px -= PLAYER_SPEED
+        px = max_f32(0.0, min_f32(px, i32_to_f32(WIN_W - PLAYER_W)))
+
+        # The saucers: drift, bounce, and cost a life if they touch the
+        # ship or slip past the bottom.
+        for i in range(0, PER_WAVE):
+            if not enemies[i].active:
+                continue
+            enemies[i].x += enemies[i].vx
+            enemies[i].y += enemies[i].vy
+            if enemies[i].x < 0.0:
+                enemies[i].x = 0.0
+                enemies[i].vx = -enemies[i].vx
+            if enemies[i].x > i32_to_f32(WIN_W - ENEMY_W):
+                enemies[i].x = i32_to_f32(WIN_W - ENEMY_W)
+                enemies[i].vx = -enemies[i].vx
+            if collide_rects(px, i32_to_f32(PLAYER_Y),
+                             i32_to_f32(PLAYER_W), i32_to_f32(PLAYER_H),
+                             enemies[i].x, enemies[i].y,
+                             i32_to_f32(ENEMY_W), i32_to_f32(ENEMY_H)):
+                enemies[i].active = false
+                lives -= 1
+                sound_play(audio, snd_boom)
+                continue
+            if enemies[i].y > i32_to_f32(WIN_H):
+                enemies[i].active = false
+                lives -= 1
+                sound_play(audio, snd_boom)
+
+        if lives < 0:
+            lives = 0
+        if lives <= 0:
+            running = false
+
+        # The cannon fires on a fixed cadence into the first free slot.
+        fire_timer += 1
+        if fire_timer >= FIRE_INTERVAL:
+            fire_timer = 0
+            for i in range(0, BULLET_MAX):
+                if not bullets[i].active:
+                    bullets[i] = Bullet(
+                        active: true,
+                        x: px + i32_to_f32(PLAYER_W / 2 - BULLET_W / 2),
+                        y: i32_to_f32(PLAYER_Y - BULLET_H))
+                    sound_play(audio, snd_laser)
+                    break
+
+        # Bolts travel up; a hit destroys the saucer and scores one.
+        for i in range(0, BULLET_MAX):
+            if not bullets[i].active:
+                continue
+            bullets[i].y -= BULLET_SPEED
+            if bullets[i].y + i32_to_f32(BULLET_H) < 0.0:
+                bullets[i].active = false
+                continue
+            for j in range(0, PER_WAVE):
+                if not enemies[j].active:
+                    continue
+                if collide_rects(bullets[i].x, bullets[i].y,
+                                 i32_to_f32(BULLET_W), i32_to_f32(BULLET_H),
+                                 enemies[j].x, enemies[j].y,
+                                 i32_to_f32(ENEMY_W), i32_to_f32(ENEMY_H)):
+                    bullets[i].active = false
+                    enemies[j].active = false
+                    cleared += 1
+                    sound_play(audio, snd_hit)
+                    break
+
+        # When the wave is empty, either spawn the next one or stop: the
+        # third wave's last saucer is the winning condition.
+        if running:
+            mut active_enemies = 0
+            for i in range(0, PER_WAVE):
+                if enemies[i].active:
+                    active_enemies += 1
+            if active_enemies == 0:
+                if wave >= WAVES:
+                    running = false
+                else:
+                    wave += 1
+                    spawn_wave(enemies, wave)
+
+        # Draw: a fixed starfield, the saucers (tinted per wave), bolts,
+        # the animated ship, and the HUD.
+        gfx_clear(screen, 10, 12, 24)
+        for i in range(0, 14):
+            gfx_fill_rect(screen, rect, (i * 83 + 17) % WIN_W,
+                          (i * 47 + 13) % (WIN_H - 40), 2, 2, 38, 48, 78)
+        if wave == 1:
+            tex_tint(tex_enemy, 240, 96, 96)
+        elif wave == 2:
+            tex_tint(tex_enemy, 240, 176, 80)
+        else:
+            tex_tint(tex_enemy, 180, 112, 240)
+        for i in range(0, PER_WAVE):
+            if enemies[i].active:
+                tex_draw(screen, tex_enemy, f32_to_i32(enemies[i].x),
+                         f32_to_i32(enemies[i].y))
+        for i in range(0, BULLET_MAX):
+            if bullets[i].active:
+                tex_draw(screen, tex_laser, f32_to_i32(bullets[i].x),
+                         f32_to_i32(bullets[i].y))
+        anim_draw(screen, tex_ship, ship_anim, f32_to_i32(px), PLAYER_Y)
+
+        text_draw(screen, font, 8, 6, str_concat("WAVE ", to_str_i32(wave)),
+                  scratch, 140, 170, 210)
+        text_draw(screen, font, 8, 28, str_concat("LIVES ", to_str_i32(lives)),
+                  scratch, 140, 170, 210)
+        let score = to_str_i32(cleared)
+        text_measure(font, score, scratch)
+        text_draw(screen, font, WIN_W - 8 - scratch[0], 6, score, scratch,
+                  230, 240, 255)
+        gfx_present(screen)
+
+        # The HUD's strings are rebuilt each frame and are dead the moment
+        # the frame is presented, so reclaim the pool rather than let a
+        # long session exhaust its 64 KiB.
+        str_pool_reset()
+
+        ship_anim = anim_tick(ship_anim, 1.0 / 60.0)
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+
+    tex_free(tex_ship)
+    tex_free(tex_enemy)
+    tex_free(tex_laser)
+    sound_free(snd_laser)
+    sound_free(snd_hit)
+    sound_free(snd_boom)
+    font_close(font)
+    text_quit()
+    pad_close(pad)
+    audio_close(audio)
+    screen_close(screen)
+    print_fmt("cleared {} lives {} wave {} frames {}", cleared, lives, wave, frames)

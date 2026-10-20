@@ -13,9 +13,15 @@ are reproducible and reviewable — no opaque binaries, nothing licensed):
     paddle.bmp 44x10 pale blue paddle                  (BMP, no alpha)
     brick.png  32x14 white brick, gray edge            (PNG, tinted per row by the game)
     tiles.png  32x16 sheet: two 16x16 tiles            (PNG, sprite-sheet demo)
+    ship_anim.png 96x24 sheet: four 24x24 ships        (strike: player + flame)
+    enemy.png  20x20 white saucer, tinted per wave     (strike: enemy)
+    laser.png  4x12 cyan bolt                          (strike: bullet)
     blip.wav   60 ms 880 Hz sine                       (breakout: paddle hit)
     brick.wav  50 ms 660 Hz sine                       (breakout: brick break)
     lose.wav   200 ms 220 Hz sine, decaying            (breakout: ball lost)
+    laser.wav  40 ms 1200 Hz sine                      (strike: shot)
+    hit.wav    35 ms 520 Hz sine                       (strike: enemy destroyed)
+    boom.wav   220 ms 140 Hz sine, decaying            (strike: player hit)
 
 The PNGs are written by hand (zlib over filtered scanlines), the BMP by
 hand, and the WAVs by hand — no Pillow, no numpy, only the standard
@@ -131,6 +137,54 @@ def tile_pixel(tile, body):
     return pixel
 
 
+def ship_pixel(x, y):
+    # ship_anim.png: four 24x24 frames; the hull is fixed and the exhaust
+    # flame changes length, so animating the strip reads as a live engine.
+    frame = x // 24
+    fx = x % 24
+    flame = (3, 1, 4, 2)[frame]
+    if 9 <= fx <= 14 and 19 <= y <= 18 + flame:
+        if 10 <= fx <= 13 and y < 18 + flame:
+            return (255, 242, 150, 255)
+        return (255, 170, 60, 255)
+
+    half = (y - 2) * 0.55
+    if 2 <= y <= 19 and abs(fx - 12) <= half:
+        # Cockpit first: it sits on top of the hull.
+        dx, dy = fx - 12, y - 10
+        if dx * dx / 9.0 + dy * dy / 16.0 <= 1.0:
+            return (90, 210, 255, 255)
+        if y >= 15 and 4 <= fx <= 20:
+            return (190, 212, 240, 255)
+        if abs(fx - 12) >= half - 1.0:
+            return (135, 165, 215, 255)
+        return (235, 244, 255, 255)
+    return (0, 0, 0, 0)
+
+
+def enemy_pixel(x, y):
+    # enemy.png: one white saucer, tinted per wave by the game. The dark
+    # cockpit takes the same tint, so it stays readable in every colour.
+    dx, dy = x - 10, y - 10
+    if dx * dx / 81.0 + dy * dy / 36.0 <= 1.0:
+        cx, cy = x - 10, y - 7
+        if cx * cx + cy * cy <= 16.0:
+            return (205, 214, 235, 255)
+        if x - 10 >= -3 and x - 10 <= 3 and y >= 7 and y <= 13:
+            return (65, 68, 88, 255)
+        if y >= 14 and (x <= 4 or x >= 15) and y <= 18:
+            return (180, 190, 215, 255)
+        return (238, 240, 248, 255)
+    return (0, 0, 0, 0)
+
+
+def laser_pixel(x, y):
+    # laser.png: a four-pixel-wide bolt, brighter down the middle.
+    if x == 1 or x == 2:
+        return (225, 250, 255, 255)
+    return (70, 180, 255, 255)
+
+
 def main():
     write_png("ball.png", 10, 10, ball_pixel)
     write_png("ball_spin.png", 40, 10, ball_spin_pixel)
@@ -145,15 +199,23 @@ def main():
         return (tile_a if x < 16 else tile_b)(x % 16, y)
 
     write_png("tiles.png", 32, 16, sheet_pixel)
+    write_png("ship_anim.png", 96, 24, ship_pixel)
+    write_png("enemy.png", 20, 20, enemy_pixel)
+    write_png("laser.png", 4, 12, laser_pixel)
 
     write_wav("blip.wav", tone(880, 60))
     write_wav("brick.wav", tone(660, 50))
     write_wav("lose.wav", tone(220, 200, decay=True))
+    write_wav("laser.wav", tone(1200, 40, vol=0.35))
+    write_wav("hit.wav", tone(520, 35, vol=0.45))
+    write_wav("boom.wav", tone(140, 220, vol=0.6, decay=True))
 
 
 if __name__ == "__main__":
     main()
     for name in ("ball.png", "ball_spin.png", "paddle.bmp", "brick.png",
-                 "tiles.png", "blip.wav", "brick.wav", "lose.wav"):
+                 "tiles.png", "ship_anim.png", "enemy.png", "laser.png",
+                 "blip.wav", "brick.wav", "lose.wav", "laser.wav",
+                 "hit.wav", "boom.wav"):
         path = os.path.join(HERE, name)
         print(f"{name}: {os.path.getsize(path)} bytes")

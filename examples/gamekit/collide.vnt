@@ -1,0 +1,46 @@
+# gamekit/collide.vnt — overlap tests for gamekit programs.
+#
+#   import "gamekit/collide.vnt"
+#
+# Plain Vanta: no externs, no SDL, no imports, so the helpers work in a
+# headless test on every machine and add no library to the link line.
+#
+# Rectangles are (x, y, w, h): the top-left corner and a positive size.
+# Edges that only touch do not overlap — a bullet whose bottom edge sits
+# exactly on an enemy's top edge has not hit it yet. Positions are f32
+# because that is what the games already use for moving bodies; round to
+# i32 only when drawing.
+#
+#   if collide_rects(px, py, pw, ph, ex, ey, ew, eh):
+#       hit = true
+#
+# `collide_point` is half-open: the left and top edges are inside, the
+# right and bottom edges are outside. `collide_circles` takes centre
+# coordinates and radii; `collide_circle_rect` takes a circle followed by
+# the same rectangle arguments as `collide_rects`.
+
+func collide_rects(ax: f32, ay: f32, aw: f32, ah: f32,
+                   bx: f32, by: f32, bw: f32, bh: f32) -> bool:
+    # Axis-aligned overlap: each axis must overlap strictly.
+    return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+func collide_point(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32) -> bool:
+    # Half-open point-in-rectangle: [x, x + w) by [y, y + h).
+    return px >= x and px < x + w and py >= y and py < y + h
+
+func collide_circles(ax: f32, ay: f32, ar: f32, bx: f32, by: f32, br: f32) -> bool:
+    # Centre distance squared against the summed radii squared: no sqrt,
+    # and touching circles are not an overlap.
+    let dx = ax - bx
+    let dy = ay - by
+    let rr = ar + br
+    return dx * dx + dy * dy < rr * rr
+
+func collide_circle_rect(cx: f32, cy: f32, cr: f32, x: f32, y: f32, w: f32, h: f32) -> bool:
+    # The closest point on the rectangle to the circle's centre; a centre
+    # inside the rectangle gives distance zero and always overlaps.
+    let near_x = max_f32(x, min_f32(cx, x + w))
+    let near_y = max_f32(y, min_f32(cy, y + h))
+    let dx = cx - near_x
+    let dy = cy - near_y
+    return dx * dx + dy * dy < cr * cr
