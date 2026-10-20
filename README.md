@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.22.0)
+# Vanta - a game-oriented systems language (v0.23.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -104,7 +104,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (543 tests) |
+| `tests/` | `unittest` suite (554 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -192,9 +192,9 @@ are real:
 - strings come from a fixed 64 KiB pool that is never freed; there is no
   per-value ownership, and `str_pool_reset()` invalidates everything built from
   it (`StrBuilder` builds without the pool, but a `str` is still a bare pointer)
-- function values are plain pointers: no closures and no function-value
-  equality; C callbacks work as `extern` parameters, but an `extern` cannot
-  return a function type yet
+- function values are plain pointers: no closures; they compare by address
+  with `==`/`!=` (ordering is rejected), `ptr_is_null` tests them, and C
+  callbacks work in both directions — `extern` parameters and return types
 - array indexing is unchecked unless you opt in with `xs.at(i)`; pointers have
   no checked access, and there is no borrow checker for `ptr<T>` (only the
   `Arena` non-copyable rule is enforced)

@@ -581,8 +581,11 @@ through parameters, like the `ptr<i32>` user-data pointer in
 `examples/callbacks.vnt`: a buildable example (with
 `examples/callbacks_lib.c`) where C calls a Vanta function twice and walks a
 visitor over a count. The C side must declare the matching
-function-pointer type, and an `extern` cannot return a function type yet.
-The Sound section's `examples/sdl_audio_cb.vnt` is the same idea against a
+function-pointer type. An `extern` can return a function pointer too
+(`examples/extern_return.vnt` with `examples/extern_return_lib.c`): the
+result is an ordinary function value — call it, compare it with `==`/`!=`,
+or test it with `ptr_is_null`. The Sound section's `examples/sdl_audio_cb.vnt`
+is the same idea against a
 real library — SDL calls the function on its audio thread, and the user-data
 pointer carries the state. The full rules are under [Extern
 declarations](#extern-declarations-v030) in the reference.
@@ -1069,4 +1072,4 @@ python main.py run examples/sdl_gamepad.vnt --lib-dir C:/msys64/mingw64/lib --li
   alongside.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the compiler is put together,
   if you want to contribute.
-- `python -m unittest discover -s tests` — run the test suite (543 tests).
+- `python -m unittest discover -s tests` — run the test suite (554 tests).

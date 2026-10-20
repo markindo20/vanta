@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.22.0)
+# Vanta Language Reference (v0.23.0)
 
-This is the reference for the language as implemented at tag `v0.16.0`. Every
+This is the reference for the language as implemented at tag `v0.23.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -257,8 +257,8 @@ func main() -> void:
 true
 ```
 
-A field whose type has no equality — `ptr<T>`, a function value, `List<T>`,
-or `Quat`/`Matrix4` — makes comparing the whole struct a compile error that
+A field whose type has no equality — `ptr<T>`, `List<T>`, or
+`Quat`/`Matrix4` — makes comparing the whole struct a compile error that
 names the field path:
 
 ```
@@ -266,7 +266,8 @@ error: cannot compare struct 'Sprite' with '==': field 'pos.p' (ptr<i32>) has no
 ```
 
 The check is recursive, so array fields (`cells[N]`) and nested structs are
-inspected down to the leaf.
+inspected down to the leaf. A function-valued field compares by address, like
+any function value.
 
 ## Enums (v0.11.0)
 
@@ -618,8 +619,8 @@ function type, which makes the value a null callback: the empty slot a
 queue-mode `SDL_AudioSpec` carries. The result is typed `ptr<T>` (or that
 function type), so it passes to any `extern` that declares the same thing.
 There is still no `nil` literal — this is the one explicit way to build a
-null, and `ptr_is_null` stays the test. Like the other pointer builtins it
-takes no arguments:
+null, and `ptr_is_null` stays the test; it accepts function values as well
+as pointers. Like the other pointer builtins it takes no arguments:
 
 ```
 error: ptr_null takes no arguments, got 1
@@ -797,6 +798,36 @@ func main() -> void:
   against the type of the value, so a wrong count or type is a compile error.
 - A function-typed binding obeys the normal mutability rules: `let f = square`
   cannot be reassigned; `mut f: func(i32) -> i32 = square` can.
+- Function values compare by address with `==` and `!=`; ordering is
+  rejected. `ptr_is_null(f)` is the explicit null test, and a null built with
+  `ptr_null::<func(...)>()` compares equal to any null of the same type:
+
+```vanta
+func square(x: i32) -> i32:
+    return x * x
+
+func cube(x: i32) -> i32:
+    return x * x * x
+
+func main() -> void:
+    let f = square
+    let same = square
+    let other = cube
+    print_bool(f == same)                  # true: the same function
+    print_bool(f == other)                 # false
+    print_bool(ptr_is_null(f))             # false
+    let missing = ptr_null::<func(i32) -> i32>()
+    print_bool(ptr_is_null(missing))       # true
+    print_bool(f != missing)               # true
+```
+
+```
+true
+false
+false
+true
+true
+```
 
 ```vanta
 struct Op:
@@ -814,16 +845,18 @@ Rejected on purpose, with a compile-time error:
 
 - `len`, `print_fmt`, `write_fmt`, and `assert` are call syntax, not values:
   `cannot use builtin 'len' as a value`. Type names are not values either.
-- `==` and `!=` on function values: `function values cannot be compared`.
+- `==` and `!=` between function values of different types:
+  `cannot compare func(i32) -> i32 and func(i32) -> bool with '=='`.
+  Ordering (`<`, `<=`, `>`, `>=`) is rejected for every function value.
 - Function values in `const` initializers.
-- Function types in `extern` signatures — C callbacks are not supported yet.
 - Using a function whose return type is still being inferred (no `-> T`) as a
   value **before** its declaration is checked; add `-> T` or move the
   declaration earlier.
 
 Under the hood each distinct function type becomes a `using FnPtrN = R(*)(...)`
 alias in the generated C++, so the C++ spelling of a function type never
-appears in Vanta code.
+appears in Vanta code. Equality compares those pointers, so two values are
+equal only when they name the same function (or are both null).
 
 ## Strings
 
@@ -1085,8 +1118,37 @@ goodbye from the callback
 ```
 
 `atexit` runs its callbacks as the program exits, most recently registered
-first. An `extern` cannot *return* a function type yet; wrap such a C
-function in a shim that calls the callback instead.
+first. An `extern` can also *return* a function value (v0.23.0): declare the
+return type as `func(...)`, and the generated C++ folds the declarator into
+the signature (`void(*signal(int32_t, void(*)(int32_t)))(int32_t)`). The
+result is an ordinary function value — call it, store it, compare it by
+address, or test it with `ptr_is_null`. Taking `signal` from the C runtime:
+
+```vanta
+extern "C" {
+    func signal(sig: i32, handler: func(i32) -> void) -> func(i32) -> void
+}
+
+func on_term(sig: i32) -> void:
+    print_str("caught")
+
+func main() -> void:
+    let old = signal(15, on_term)
+    print_bool(ptr_is_null(old))       # true: SIG_DFL is the null handler
+    let back = signal(15, old)         # restore the old handler
+    print_bool(back == on_term)        # true
+```
+
+```
+true
+true
+```
+
+The handler is never called here — installing and restoring it just proves
+the return value round-trips. A `ptr<func(...)>` return works too and spells
+as a double pointer (`int32_t(**get())(int32_t)`); an array or list of
+function values is still rejected as an `extern` return, since C cannot
+return those by value.
 
 ```powershell
 python main.py run examples/extern_demo.vnt --lib-dir build --link demo
@@ -1095,11 +1157,13 @@ python main.py run examples/extern_demo.vnt --lib-dir build --link demo
 `examples/extern_demo.vnt` and `examples/extern_demo_lib.c` are a complete,
 buildable example. `examples/callbacks.vnt` and `examples/callbacks_lib.c`
 are a second one: a callback that C calls twice, and a visitor receiving a
-`ptr<i32>` user-data pointer. `examples/enums_extern.vnt` with
-`examples/enums_extern_lib.c` is a third: an enum crossing into C and back,
-and `examples/narrow_ints.vnt` with `examples/narrow_ints_lib.c` shows
-exact-width parameters plus a C mirror struct reading a Vanta struct's
-bytes.
+`ptr<i32>` user-data pointer. `examples/extern_return.vnt` with
+`examples/extern_return_lib.c` is the reverse direction: C returns a chosen
+callback, and Vanta calls it, compares it, and tests it for null.
+`examples/enums_extern.vnt` with `examples/enums_extern_lib.c` is an enum
+crossing into C and back, and `examples/narrow_ints.vnt` with
+`examples/narrow_ints_lib.c` shows exact-width parameters plus a C mirror
+struct reading a Vanta struct's bytes.
 
 ## SDL2 and a window (v0.12.0)
 
