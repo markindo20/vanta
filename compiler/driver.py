@@ -388,7 +388,9 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
     lib_dirs = lib_dirs or []
     libs = libs or []
     if _is_msvc(name):
-        flags = ['/nologo', '/std:c++17', '/EHsc',
+        # /fp:strict keeps f32 arithmetic from contracting into FMA, so the
+        # deterministic game runs produce the same counts across targets.
+        flags = ['/nologo', '/std:c++17', '/EHsc', '/fp:strict',
                  '/O2' if release else '/Od']
         for d in include_dirs:
             flags.extend(['/I', d])
@@ -398,7 +400,9 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
         for lib in libs:
             flags.append(lib + '.lib')
         return [path] + flags
-    flags = ['-std=c++17', '-Wall', '-Wextra',
+    # -ffp-contract=off keeps f32 arithmetic from contracting into FMA, so
+    # the deterministic game runs produce the same counts on x86-64 and arm64.
+    flags = ['-std=c++17', '-Wall', '-Wextra', '-ffp-contract=off',
              '-O3' if release else '-O0', '-g' if not release else '-g0']
     for d in include_dirs:
         flags.extend(['-I', d])

@@ -79,8 +79,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    `new` writes a playable starter, and `build --bundle` walks the Windows
    executable's PE imports with `objdump` to copy non-system DLLs beside it.
    `--include-dir`/`--lib-dir`/`--link` (repeatable, on `build` and `run`) pass
-   `-I`/`-L`/`-l` — or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents —
-   through to the C++ compiler.
+   `-I`/`-L`/`-l` - or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents -
+   through to the C++ compiler. Generated code is built with FP contraction
+   off (`-ffp-contract=off`, or `/fp:strict` for MSVC), so deterministic
+   float-based runs do not diverge between x86-64 and arm64.
 
 Note that `component` and `system` are parsed as flags on the struct and
 function declarations respectively (`parse_struct(is_component)`,

@@ -1655,7 +1655,9 @@ class IntegrationTests(unittest.TestCase):
         # three walls. With no input the paddle auto-pilot plays, and the
         # whole run is reproducible: all 125 bricks fall without losing a
         # life, at frame 5969, well before the frame cap — which is only the
-        # backstop. The score path is passed explicitly so the run does not
+        # backstop. The build disables FMA contraction, so the count is the
+        # same on x86-64 and Apple arm64. The score path is passed explicitly
+        # so the run does not
         # leave a high-score file in the working tree; the second, one-frame
         # run loads a higher score and proves it is not overwritten by a
         # smaller result. cwd=HERE so the relative asset and font paths

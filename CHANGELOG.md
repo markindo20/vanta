@@ -20,6 +20,11 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
   `sound_load_gain(audio, path, gain)`: it loads a WAV like `sound_load` and
   scales every mono S16 sample in place. Gain is clamped to 0..1, so it
   attenuates without clipping; `sound_load` remains the full-volume shortcut.
+- Floating-point determinism. The driver now passes `-ffp-contract=off` to
+  GCC/Clang (and `/fp:strict` to MSVC), so `f32` expressions are not
+  contracted into fused multiply-adds. The breakout autopilot therefore
+  reaches the same frame 5969 on x86-64 and Apple arm64; without the flag the
+  FMA-capable Mac took 7070 frames.
 - The breakout headless probe now freezes the three-wall clear
   (`cleared 125 lives 3 level 3 best 125 frames 5969`) and then loads a higher
   score in a one-frame run to prove it is not overwritten. The sound probe
