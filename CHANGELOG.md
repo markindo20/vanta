@@ -2,6 +2,42 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.32.0 - 2026-10-21
+
+- Language server. `vanta lsp` speaks the Language Server Protocol over
+  stdin/stdout with full-document text sync. Diagnostics reuse the real lexer,
+  parser, loader, and type checker, so editor errors match `vanta check`. The
+  server also supports `python -m compiler lsp` for environments where only
+  the Python interpreter is easy to locate.
+- Editor features. Completion covers keywords, builtins, declarations,
+  parameters, local variables, module aliases, enum members, struct fields,
+  and common builtin methods on `List`, `Arena`, `StrBuilder`, `Vec2`, `Vec3`,
+  and `Quat`. Hover reports signatures and types; go-to-definition resolves
+  declarations, locals, imports, enum members, and struct fields; document
+  symbols include struct fields and enum members nested under their type.
+- Unsaved buffers. The loader accepts in-memory source overlays, so
+  diagnostics, completion, and navigation use the editor's current buffer
+  rather than the last saved file. This includes unsaved imported files and
+  files that exist only as overlays.
+- Tolerant editing. Completion and navigation build a source index directly
+  from the AST, with a line-based fallback while a declaration is incomplete.
+  Positions are converted between LSP's UTF-16 offsets and Vanta's 1-based
+  Unicode positions.
+- VS Code client. `editors/vscode/` is now a compiled language client. It
+  discovers `vanta` from `vanta.server.path`, a workspace virtualenv, `PATH`,
+  or a Python interpreter that can import the compiler; logs the resolved
+  command to the **Vanta** output channel; and exposes **Vanta: Restart
+  Language Server**. The extension version is 0.3.0.
+- Packaging and CI. CI compiles the TypeScript client and packages the VSIX;
+  the release workflow builds the extension and attaches the VSIX to the
+  GitHub release with the wheel and sdist. `MANIFEST.in` includes the
+  extension source in the sdist.
+- Docs and tests. `docs/EDITOR.md` documents installation, discovery,
+  settings, features, limitations, and troubleshooting. README, roadmap, and
+  architecture notes are updated. 692 tests total, including protocol-level
+  LSP tests, loader-overlay tests, unsaved-buffer diagnostics, and UTF-16
+  position conversion. Debugger support remains a later milestone.
+
 ## v0.31.0 - 2026-10-21
 
 - Generic enum declarations. `enum Option<T>:` and `enum Result<T, E>:`

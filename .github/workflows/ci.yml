@@ -56,6 +56,33 @@ jobs:
       - name: Tests
         run: python -m unittest discover -s tests
 
+  # The VS Code client is a separate artifact from the Python package. Build
+  # its TypeScript source and package the VSIX so editor regressions fail CI.
+  vscode:
+    name: vscode extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+      - name: Compile
+        working-directory: editors/vscode
+        run: npm run compile
+      - name: Package VSIX
+        working-directory: editors/vscode
+        run: npm run package
+      - name: Keep the VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: editors/vscode/vanta-language-*.vsix
+
   # Build the wheel and sdist, then install the wheel into a fresh venv and
   # use only the installed `vanta` command. This is the check that a user's
   # `pip install vanta-lang` works without a checkout: the runtime header and

@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.31.0)
+# Vanta - a game-oriented systems language (v0.32.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -113,6 +113,26 @@ writes to `build/<name>` (or `-o <path>`), and `--emit-cpp <path>` also writes
 the generated C++. On C++ compilation failure the generated source is saved to
 `build/vanta_failed.cpp` for inspection.
 
+### Editor support
+
+v0.32.0 ships a language server:
+
+```powershell
+vanta lsp
+```
+
+It speaks LSP over stdin/stdout and provides diagnostics, completion, hover,
+go-to-definition, and document symbols. The VS Code client in
+[`editors/vscode/`](editors/vscode/) adds those features on top of the existing
+syntax highlighting; install the VSIX from the latest GitHub release or build
+it from source. The server reads unsaved buffers, so diagnostics also work
+before a file is saved.
+
+The client finds `vanta` on `PATH`, in a workspace virtualenv, or through a
+Python environment that can import the compiler. Set `vanta.server.path` to
+override discovery. See [`docs/EDITOR.md`](docs/EDITOR.md) for setup,
+settings, and troubleshooting. Debugging is not part of this milestone.
+
 ## Linking C libraries
 
 `extern` blocks declare functions implemented in C; the driver links the
@@ -186,12 +206,13 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `main.py` | CLI entry point for a checkout |
 | `pyproject.toml` | Package metadata; installing creates the `vanta` command |
 | `setup.py` | Build hook that puts the runtime, game kit, assets, and standard library in the wheel |
-| `compiler/` | Python frontend: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver |
+| `compiler/` | Python frontend and language server: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver, `lsp.py` |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (674 tests) |
-| `docs/` | Language reference and architecture notes |
+| `tests/` | `unittest` suite (692 tests) |
+| `editors/vscode/` | VS Code language client, syntax grammar, and VSIX build |
+| `docs/` | Language reference, editor guide, and architecture notes |
 
 ## Examples
 
@@ -255,6 +276,7 @@ compiler, set the `CXX` environment variable.
 
 - [`docs/TUTORIAL.md`](docs/TUTORIAL.md) — hands-on introduction, ends with a small project
 - [`docs/LANGUAGE_REFERENCE.md`](docs/LANGUAGE_REFERENCE.md) — syntax and semantics
+- [`docs/EDITOR.md`](docs/EDITOR.md) — language server and VS Code setup
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the compiler is put together
 - [`ROADMAP.md`](ROADMAP.md) — candidate next milestones and known gaps
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
@@ -323,5 +345,10 @@ are real:
   shipped standard library); `pub` controls top-level declarations, not
   individual struct fields, and a public declaration cannot expose a private
   type, including through an inferred function or constant type
+
+Editor support covers diagnostics, completion, hover, definition, and
+document symbols through `vanta lsp` and the VS Code client. There is no
+debugger or DAP adapter yet, and generated C++ is not source-mapped back to
+Vanta lines, so stepping through Vanta source is future work.
 
 These are tracked, prioritised, and sized in [ROADMAP.md](ROADMAP.md).

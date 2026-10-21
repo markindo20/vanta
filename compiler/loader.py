@@ -38,6 +38,16 @@ def _first_existing_dir(*candidates):
     return None
 
 
+def _source_key(path):
+    """Stable key for in-memory source overlays.
+
+    The editor can hold unsaved text for any file in a project, so the loader
+    accepts a path -> source map. Keys are normalized the same way as import
+    deduplication uses: real paths, case-folded on Windows.
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+
 # A wheel ships the standard library beside the compiler modules; a checkout
 # keeps it at the repository root.
 STDLIB_DIR = _first_existing_dir(
@@ -114,15 +124,29 @@ class _Module:
 
 
 class _Loader:
-    def __init__(self):
+    def __init__(self, sources=None):
         self._modules = {}      # real path -> _Module
         self._active = []       # [(real path, display path)] in progress
         self._order = []        # modules in dependency-first order
         self._module_names = {} # declared name -> (real, path, pos)
+        self._sources = {
+            _source_key(path): text
+            for path, text in (sources or {}).items()
+        }
 
     def load(self, entry_path):
         self._load(entry_path, None, None)
         return self._order
+
+    def _exists(self, path):
+        return _source_key(path) in self._sources or os.path.exists(path)
+
+    def _read(self, path):
+        key = _source_key(path)
+        if key in self._sources:
+            return self._sources[key]
+        with open(path, 'r', encoding='utf-8-sig') as f:
+            return f.read()
 
     def _load(self, path, importer, pos):
         real = os.path.realpath(path)
@@ -135,8 +159,7 @@ class _Loader:
             return self._modules[real]
 
         try:
-            with open(path, 'r', encoding='utf-8-sig') as f:
-                src = f.read()
+            src = self._read(path)
         except (OSError, UnicodeError):
             if importer is None:
                 raise LoadError(f"cannot open '{path}'")
@@ -189,22 +212,23 @@ class _Loader:
         self._order.append(mod)
         return mod
 
-    @staticmethod
-    def _import_target(path, imp):
+    def _import_target(self, path, imp):
         """Resolve an import relative to the importer, then the stdlib.
 
         `std/...` is the only special prefix. An actual sibling file with the
-        same path wins, so projects can vendor their own copy.
+        same path wins, so projects can vendor their own copy. In-memory
+        overlays count as existing files, which lets unsaved editor buffers
+        take part in normal import resolution.
         """
         target = os.path.normpath(
             os.path.join(os.path.dirname(path), imp.path))
-        if os.path.exists(target) or STDLIB_DIR is None:
+        if self._exists(target) or STDLIB_DIR is None:
             return target
         rel = imp.path.replace('\\', '/')
         if rel.startswith('std/'):
             candidate = os.path.normpath(
                 os.path.join(STDLIB_DIR, rel[len('std/'):]))
-            if os.path.exists(candidate):
+            if self._exists(candidate):
                 return candidate
         return target
 
@@ -700,7 +724,12 @@ class _Resolver:
                 te.name = self._resolve_type_name(mod, te.name, te.pos)
 
 
-def load_program(entry_path):
-    """Parse entry_path and its imports into one resolved Program."""
-    modules = _Loader().load(entry_path)
+def load_program(entry_path, sources=None):
+    """Parse entry_path and its imports into one resolved Program.
+
+    `sources` optionally maps filesystem paths to unsaved source text. This is
+    used by the language server so diagnostics reflect what is in the editor,
+    not only what has been saved.
+    """
+    modules = _Loader(sources).load(entry_path)
     return _Resolver(modules).resolve()

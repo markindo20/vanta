@@ -704,7 +704,7 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'doctor', 'build', 'run')
+_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'lsp')
 
 
 def _normalize_argv(argv):
@@ -732,6 +732,8 @@ def main(argv):
     p_check.add_argument('source')
 
     sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
+
+    sub.add_parser('lsp', help='run the Vanta language server on stdin/stdout')
 
     p_build = sub.add_parser('build', help='build a native executable')
     p_build.add_argument('source')
@@ -766,6 +768,9 @@ def main(argv):
         return cmd_check(args)
     if args.cmd == 'doctor':
         return cmd_doctor(args)
+    if args.cmd == 'lsp':
+        from .lsp import run_stdio
+        return run_stdio()
     if args.cmd == 'build':
         return cmd_build(args)
     if args.cmd == 'run':

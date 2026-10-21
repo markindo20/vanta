@@ -37,6 +37,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(_normalize_argv(['run', 'game.vnt']),
                          ['run', 'game.vnt'])
         self.assertEqual(_normalize_argv(['doctor']), ['doctor'])
+        self.assertEqual(_normalize_argv(['lsp']), ['lsp'])
         self.assertEqual(_normalize_argv(['--version']), ['--version'])
         self.assertEqual(_normalize_argv([]), [])
 

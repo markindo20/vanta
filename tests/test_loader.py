@@ -123,6 +123,39 @@ class LoaderTests(unittest.TestCase):
         self.assertIn('LocalOption', tc.enums)
         self.assertNotIn('Option', tc.generic_enums)
 
+    def test_source_overlay_replaces_entry_source(self):
+        main = self.write('main.vnt',
+                          'func main() -> void:\n    print_i32(1)\n')
+        overlay = ('func main() -> void:\n'
+                   '    let value: i32 = 7\n'
+                   '    print_i32(value)\n')
+        prog = load_program(main, sources={main: overlay})
+        self.assertEqual([d.name for d in prog.decls], ['main'])
+        self.assertEqual(prog.decls[0].body[0].value.value, 7)
+
+    def test_source_overlay_replaces_imported_source(self):
+        lib = self.write('lib.vnt', 'func helper() -> i32:\n    return 1\n')
+        main = self.write('main.vnt', 'import "lib.vnt"\n'
+                                      'func main() -> void:\n'
+                                      '    print_i32(helper())\n')
+        overlay = 'func changed() -> i32:\n    return 2\n'
+        prog = load_program(main, sources={lib: overlay})
+        self.assertEqual([d.name for d in prog.decls], ['changed', 'main'])
+        tc = TypeChecker(prog, main)
+        tc.register()
+        with self.assertRaises(CheckError):
+            tc.check()
+
+    def test_source_overlay_satisfies_missing_import(self):
+        main = self.write('main.vnt', 'import "new.vnt"\n'
+                                      'func main() -> void:\n'
+                                      '    print_i32(from_overlay())\n')
+        overlay_path = os.path.join(self.tmp, 'new.vnt')
+        overlay = 'func from_overlay() -> i32:\n    return 3\n'
+        prog = load_program(main, sources={overlay_path: overlay})
+        self.assertEqual([d.name for d in prog.decls],
+                         ['from_overlay', 'main'])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,16 +1,29 @@
 {
   "name": "vanta-language",
   "displayName": "Vanta",
-  "description": "Syntax highlighting for the Vanta language (.vnt).",
-  "version": "0.2.0",
+  "description": "Vanta language support: diagnostics, completion, hover, definitions, and document symbols.",
+  "version": "0.3.0",
   "publisher": "vanta",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/markindo20/vanta"
+  },
   "engines": {
-    "vscode": "^1.60.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "keywords": [
+    "vanta",
+    "language server",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:vanta"
+  ],
+  "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
@@ -35,6 +48,37 @@
         "scopeName": "source.vanta",
         "path": "./syntaxes/vanta.tmLanguage.json"
       }
+    ],
+    "configuration": {
+      "title": "Vanta",
+      "properties": {
+        "vanta.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `vanta` executable or a Python interpreter. Leave empty to detect `vanta` on PATH, a workspace virtualenv, or a Python environment with the `compiler` package installed."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "vanta.restartServer",
+        "title": "Vanta: Restart Language Server"
+      }
     ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.82.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.6.0"
   }
 }

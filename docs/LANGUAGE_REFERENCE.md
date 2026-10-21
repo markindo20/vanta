@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.31.0)
+# Vanta Language Reference (v0.32.0)
 
-This is the reference for the language as implemented at tag `v0.31.0`. Every
+This is the reference for the language as implemented at tag `v0.32.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 

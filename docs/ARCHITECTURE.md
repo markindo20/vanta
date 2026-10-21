@@ -15,7 +15,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 4. `loader.py` — builds the file graph and resolves module boundaries. It
    reads each file once, resolves imports relative to the importing file,
    detects cycles, and stamps every AST position with its source file so
-   diagnostics name the right file. A file may start with `module name`;
+   diagnostics name the right file. `load_program(path, sources=...)` accepts
+   an in-memory overlay map; the loader's read and existence checks consult it
+   before the filesystem, which is how the language server validates unsaved
+   editor buffers and unsaved imports. A file may start with `module name`;
    module-scoped declarations are private unless marked `pub`. An unqualified
    import brings public names into the importing file, an aliased import
    creates qualified names, and module-less files keep the original flat,
@@ -115,11 +118,44 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    through to the C++ compiler. Generated code is built with FP contraction
    off (`-ffp-contract=off`, or `/fp:strict` for MSVC), so deterministic
    float-based runs do not diverge between x86-64 and arm64.
+10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
+   framing over stdin/stdout, full-document sync, UTF-16 position conversion,
+   diagnostics, completion, hover, definition, and document symbols. The
+   `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
+   provides the `python -m compiler lsp` fallback.
 
 Note that `component` and `system` are parsed as flags on the struct and
 function declarations respectively (`parse_struct(is_component)`,
 `parse_func(is_system)`). They are aliases that express ECS intent and have no
 distinct semantics.
+
+## Editor support (v0.32.0)
+
+`vanta lsp` runs `lsp.py` as a stdio language server. Each open document is
+stored by URI; a didChange notification replaces the whole buffer, matching
+the full-sync capability the server advertises. Requests are handled
+sequentially, and publishDiagnostics runs the frontend with every open buffer
+in the loader overlay map before sending the first error to the file named by
+its stamped `Pos.file`.
+
+Completion and navigation do not use the loader's rewritten module names.
+`_ProjectIndex` parses the current file and its imports directly, resolves
+relative imports with the same `std/` fallback, and records declarations and
+their source positions by their written names. It keeps a tolerant line
+scanner for buffers that do not parse yet, so a cursor after `Color.` or
+`value.` can still offer enum members and struct fields while the line is
+incomplete. Locals come from the function body AST when possible and from a
+line scan otherwise; the scan also infers common constructor and
+`arena.list::<T>()` types. Builtin completions are generated from the type
+checker's registered function and builtin-struct tables, with a small explicit
+method table for runtime-backed types.
+
+The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
+uses `vscode-languageclient` over stdio and resolves the server command from
+`vanta.server.path`, a workspace virtualenv, `PATH`, or a Python interpreter
+that can import `compiler`. It passes the workspace as the server's working
+directory so relative imports and Python module discovery behave like the
+editor's project.
 
 ## Backend (C++17)
 
@@ -157,7 +193,7 @@ distinct semantics.
 - `g_argc` / `g_argv`, populated by the generated `main`, exposed as
   `arg_count` / `arg_str`
 
-## Packaging (v0.28.0)
+## Packaging (v0.28.0, VSIX in v0.32.0)
 
 A checkout keeps the runtime at `runtime/`, the kit at `examples/gamekit/`,
 the assets at `examples/assets/`, and the standard library at `stdlib/`, so
@@ -173,10 +209,14 @@ beside `compiler/` first (the installed layout) and falls back to the repo root
 (the checkout layout). `vanta doctor` reports which paths won, compiles a
 one-line probe against the runtime header, and makes a best-effort SDL2 check.
 The CI `package` job builds the wheel, installs it into a fresh venv, and runs
-only the installed `vanta` command; `.github/workflows/release.yml` repeats the
-smoke test on tags, attaches the wheel and sdist to the GitHub release, and can
-publish to PyPI through Trusted Publishing (enabled with the
-`PUBLISH_PYPI=true` repository variable).
+only the installed `vanta` command; a separate `vscode` job runs `npm ci`,
+compiles the TypeScript client, and packages the VSIX.
+`.github/workflows/release.yml` repeats the smoke test on tags, builds the
+VSIX, attaches the wheel, sdist, and VSIX to the GitHub release, and can
+publish the Python distributions to PyPI through Trusted Publishing (enabled
+with the `PUBLISH_PYPI=true` repository variable). The VSIX includes its
+production `vscode-languageclient` dependencies, so it installs without a
+separate `npm install`.
 
 ## Versioning
 
@@ -207,8 +247,9 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 674 `unittest` cases across the lexer, parser, type checker,
-code generator, and end-to-end integration. Integration tests compile and run
+`tests/` holds 692 `unittest` cases across the lexer, parser, loader, type
+checker, code generator, language server, and end-to-end integration.
+Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless
 (`SDL_VIDEODRIVER=dummy` plus a frame-limit argument; the audio tests use

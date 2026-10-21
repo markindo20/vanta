@@ -11,3 +11,8 @@ recursive-include examples/assets *
 recursive-include examples/modules_demo *
 recursive-include stdlib *.vnt
 recursive-include docs *.md
+recursive-include editors/vscode *.json *.md *.ts *.png LICENSE
+include editors/vscode/.gitignore
+include editors/vscode/.vscodeignore
+prune editors/vscode/node_modules
+prune editors/vscode/out

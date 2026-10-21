@@ -1,0 +1,6 @@
+# Source files, dependency manifests, and generated output. The VSIX is built
+# from the compiled `out/` directory by `npm run package`.
+node_modules/
+out/
+*.vsix
+npm-debug.log*

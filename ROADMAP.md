@@ -5,10 +5,29 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.31.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.32.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.32.0
+
+Editor support landed. `vanta lsp` is a stdio language server with diagnostics,
+completion, hover, go-to-definition, and document symbols. Diagnostics run the
+real lexer, parser, loader, and type checker; source overlays let the loader
+read unsaved editor buffers, including unsaved imported files. Completion and
+navigation build a tolerant source index from the AST and fall back to line
+scanning while a declaration is half typed.
+
+The VS Code client in `editors/vscode/` is now a compiled language client
+rather than a grammar-only extension. It discovers `vanta` through a setting,
+`PATH`, a workspace virtualenv, or a Python environment that can import the
+compiler. CI compiles and packages the VSIX, and the release workflow attaches
+it to the GitHub release alongside the wheel and sdist. `docs/EDITOR.md`
+documents setup, discovery, features, limitations, and troubleshooting.
+
+Editor support is intentionally scoped: there is no debugger, DAP adapter,
+semantic rename, formatting, or code-action support yet. 692 tests total.
 
 ## Landed in v0.31.0
 
@@ -40,7 +59,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.32.0)
+## Next: language (candidate v0.33.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -75,12 +94,14 @@ public declarations. `examples/modules_demo/` is the worked example.
 ## Tooling and documentation
 
 - Distribution is live: `vanta-lang` is on PyPI and the release workflow
-  publishes each version tag through Trusted Publishing, attaching the wheel
-  and sdist to the GitHub release too. Homebrew, Scoop, and winget formulas
-  are follow-ups.
-- The VS Code extension (`editors/vscode/`) provides syntax highlighting
-  only. A language server (diagnostics, hover, go-to-definition) is a
-  substantial separate project and is not scheduled.
+  publishes each version tag through Trusted Publishing, attaching the wheel,
+  sdist, and VS Code VSIX to the GitHub release. Homebrew, Scoop, and winget
+  formulas are follow-ups.
+- Editor support is shipped in v0.32.0: `vanta lsp` plus the VS Code client
+  provide diagnostics, completion, hover, definition, and document symbols.
+  The next tooling milestone is a debugger, which needs source mapping from
+  generated C++ back to Vanta lines and a DAP adapter. It is deliberately not
+  part of the editor milestone.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,
