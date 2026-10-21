@@ -12,11 +12,20 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    argument lists can span lines. Tabs are rejected.
 3. `parser.py` — recursive descent for declarations, Pratt for expressions.
    Produces `ast_nodes.py` nodes.
-4. `loader.py` — expands `import` declarations into one merged `Program`: the
-   entry file plus everything it imports, recursively, with dependencies
-   first. Paths resolve relative to the importing file, each file is loaded
-   once (cycles and missing files are errors), and every AST position is
-   stamped with its source file so diagnostics name the right file.
+4. `loader.py` — builds the file graph and resolves module boundaries. It
+   reads each file once, resolves imports relative to the importing file,
+   detects cycles, and stamps every AST position with its source file so
+   diagnostics name the right file. A file may start with `module name`;
+   module-scoped declarations are private unless marked `pub`. An unqualified
+   import brings public names into the importing file, an aliased import
+   creates qualified names, and module-less files keep the original flat,
+   all-public behaviour. The resolver rewrites declarations and references to
+   unique internal names (`vanta_m_<module>__<name>`) and validates
+   visibility, ambiguous imports, duplicate module names, and private-type
+   leaks in public signatures. The resulting `Program` is still flat for the
+   type checker and backend; a `display_names` map turns internal names back
+   into source names in diagnostics. Entry `main` and extern C names stay
+   unchanged.
 5. `typesys.py` — the type model (`PrimType`, `PtrType`, `ArrayType`,
    `StructType`, `EnumType`, `FuncType`, ...).
 6. `type_checker.py` — two passes: register structs, enums, builtins, and
@@ -43,8 +52,11 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    compared with `==`.
 7. `codegen_cpp.py` — emits C++17 inside `namespace vanta_user` and wraps
    `main` in `int main(int argc, char** argv)`, passing the arguments to the
-   runtime. Builtin calls are mapped through lookup tables (`BUILTIN_FN`,
-   `BUILTIN_MATH_CTOR`) to `vanta::` runtime functions. `extern` declarations
+   runtime. Module-scoped declarations have already been given unique
+   internal identifiers by the loader, so the backend can stay flat and two
+   modules may use the same source name. Builtin calls are mapped through
+   lookup tables (`BUILTIN_FN`, `BUILTIN_MATH_CTOR`) to `vanta::` runtime
+   functions. `extern` declarations
    are emitted as an `extern "C" {}` block before the namespace, and calls to
    them skip the `fn_` prefix user functions get. Extern signatures predate
    the namespace, so they are spelled in plain C: callback parameters expand

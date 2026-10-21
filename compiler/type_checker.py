@@ -88,6 +88,8 @@ class TypeChecker:
     def __init__(self, program: A.Program, filename="<input>"):
         self.program = program
         self.filename = filename
+        self.display_names = getattr(program, 'display_names', {}) or {}
+        self.private_types = getattr(program, 'private_types', set()) or set()
         self.structs: dict[str, StructType] = {}
         self.enums: dict[str, EnumType] = {}
         self.functions: dict[str, FuncSig] = {}
@@ -203,18 +205,55 @@ class TypeChecker:
             self.func_types[ft] = f'FnPtr{len(self.func_types)}'
         return ft
 
+    def _display(self, msg):
+        for internal, source in sorted(
+                self.display_names.items(), key=lambda kv: len(kv[0]),
+                reverse=True):
+            msg = msg.replace(internal, source)
+        return msg
+
+    def _reraise_pretty(self, exc):
+        raise CheckError(self._display(exc.msg), exc.filename, exc.pos) from None
+
+    def _find_private_type(self, t):
+        if isinstance(t, (StructType, EnumType)):
+            return t.name if t.name in self.private_types else None
+        if isinstance(t, (PtrType, ArrayType, ListType)):
+            return self._find_private_type(t.inner)
+        if isinstance(t, FuncType):
+            for p in t.params:
+                found = self._find_private_type(p)
+                if found is not None:
+                    return found
+            return self._find_private_type(t.ret)
+        return None
+
+    def _check_inferred_public(self, d, t):
+        bad = self._find_private_type(t)
+        if bad is None:
+            return
+        raise CheckError(
+            f"public declaration '{d.name}' exposes private type "
+            f"'{self._display(bad)}' in its inferred type",
+            self.filename, d.pos)
+
     def register(self):
-        for d in self.program.decls:
-            if isinstance(d, A.StructDecl):
-                self._register_struct(d)
-            elif isinstance(d, A.EnumDecl):
-                self._register_enum(d)
-            elif isinstance(d, A.FuncDecl):
-                self._register_func(d)
-            elif isinstance(d, A.ConstDecl):
-                self._register_const(d)
-            elif isinstance(d, A.ExternDecl):
-                self._register_extern(d)
+        try:
+            for d in self.program.decls:
+                if isinstance(d, A.StructDecl):
+                    self._register_struct(d)
+                elif isinstance(d, A.EnumDecl):
+                    self._register_enum(d)
+                elif isinstance(d, A.FuncDecl):
+                    self._register_func(d)
+                elif isinstance(d, A.ConstDecl):
+                    self._register_const(d)
+                    if d.is_public and d.type_ann is None:
+                        self._check_inferred_public(d, self.constants.get(d.name))
+                elif isinstance(d, A.ExternDecl):
+                    self._register_extern(d)
+        except CheckError as exc:
+            self._reraise_pretty(exc)
 
     def _register_struct(self, d):
         if d.name in self.structs or d.name in self.enums:
@@ -384,9 +423,15 @@ class TypeChecker:
         return None
 
     def check(self):
-        for d in self.program.decls:
-            if isinstance(d, A.FuncDecl):
-                self._check_func(d)
+        try:
+            for d in self.program.decls:
+                if isinstance(d, A.FuncDecl):
+                    self._check_func(d)
+                    if d.is_public and d.ret is None:
+                        self._check_inferred_public(
+                            d, self.functions[d.name].ret)
+        except CheckError as exc:
+            self._reraise_pretty(exc)
 
     def _check_func(self, fn: A.FuncDecl):
         sig = self.functions[fn.name]

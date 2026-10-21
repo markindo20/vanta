@@ -1,0 +1,4 @@
+module units
+
+pub func meters_to_centimeters(m: i32) -> i32:
+    return m * 100

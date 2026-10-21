@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List, Any
 
 
@@ -12,6 +12,19 @@ class Pos:
 @dataclass
 class Program:
     decls: List[Any]
+    # Internal C++ name -> source name, used to keep diagnostics readable
+    # after module-scoped declarations are given unique names.
+    display_names: dict = field(default_factory=dict)
+    # Internal names of types that are private to their module. The type
+    # checker uses this for inferred public signatures, where the loader has
+    # no explicit TypeExpr to inspect.
+    private_types: set = field(default_factory=set)
+
+
+@dataclass
+class ModuleDecl:
+    name: str
+    pos: Pos
 
 
 @dataclass
@@ -41,6 +54,7 @@ class FuncDecl:
     body: List[Any]
     is_system: bool
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass
@@ -49,6 +63,7 @@ class StructDecl:
     fields: List[Any]
     is_component: bool
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass
@@ -65,6 +80,7 @@ class EnumDecl:
     name: str
     members: List[EnumMember]
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass
@@ -72,12 +88,14 @@ class ExternDecl:
     lib_name: str
     funcs: List['FuncDecl']
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass
 class ImportDecl:
     path: str
     pos: Pos
+    alias: Optional[str] = None
 
 
 @dataclass
@@ -86,6 +104,7 @@ class ConstDecl:
     type_ann: Optional[TypeExpr]
     value: Any
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass

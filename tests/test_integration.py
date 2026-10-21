@@ -449,6 +449,12 @@ class IntegrationTests(unittest.TestCase):
         self._build_and_run(os.path.join(EXAMPLES, 'imports_demo.vnt'),
                             ['sprite pixel 35 tile_id 35', '16'])
 
+    def test_modules_example(self):
+        # Qualified and unqualified imports, a private helper behind a public
+        # function, a module constant, and a payload enum across files.
+        self._build_and_run(os.path.join(EXAMPLES, 'modules_demo', 'main.vnt'),
+                            ['25', '25', '3', '200', '6'])
+
     def test_grid_example(self):
         # 2D arrays: stack grid, struct-held grid, and an arena-backed grid.
         self._build_and_run(os.path.join(EXAMPLES, 'grid.vnt'),

@@ -65,6 +65,21 @@ class Parser:
 
     def parse_top_level(self):
         t = self.peek()
+        if t.type == TT.PUB:
+            pub = self.advance()
+            if self.peek().type in (TT.IMPORT, TT.MODULE, TT.PUB):
+                self.error("'pub' must precede a declaration", pub)
+            decl = self._parse_decl()
+            if not hasattr(decl, 'is_public'):
+                self.error("'pub' cannot be applied to this declaration", pub)
+            decl.is_public = True
+            return decl
+        return self._parse_decl()
+
+    def _parse_decl(self):
+        t = self.peek()
+        if t.type == TT.MODULE:
+            return self.parse_module()
         if t.type == TT.FUNC:
             return self.parse_func(False)
         if t.type == TT.SYSTEM:
@@ -82,6 +97,12 @@ class Parser:
         if t.type == TT.IMPORT:
             return self.parse_import()
         self.error(f"expected top-level declaration, got {t.type.name}")
+
+    def parse_module(self):
+        tok = self.advance()
+        name = self.expect(TT.IDENT, "expected a module name").value
+        self.expect(TT.NEWLINE)
+        return A.ModuleDecl(name, A.Pos(tok.line, tok.col))
 
     def parse_const(self):
         tok = self.advance()
@@ -112,8 +133,11 @@ class Parser:
     def parse_import(self):
         tok = self.advance()
         path = self.expect(TT.STRING, "expected a path string after 'import'").value
+        alias = None
+        if self.match(TT.AS):
+            alias = self.expect(TT.IDENT, "expected an import alias").value
         self.expect(TT.NEWLINE)
-        return A.ImportDecl(path, A.Pos(tok.line, tok.col))
+        return A.ImportDecl(path, A.Pos(tok.line, tok.col), alias)
 
     def parse_func_decl(self):
         tok = self.advance()  # consume FUNC
@@ -243,7 +267,10 @@ class Parser:
             inner = self.parse_type()
             self.expect(TT.GT)
             return A.TypeExpr('list', inner=inner, pos=A.Pos(t.line, t.col))
-        return A.TypeExpr('named', name=t.value, pos=A.Pos(t.line, t.col))
+        name = t.value
+        while self.match(TT.DOT):
+            name += '.' + self.expect(TT.IDENT, "expected a type name after '.'").value
+        return A.TypeExpr('named', name=name, pos=A.Pos(t.line, t.col))
 
     def parse_block(self):
         self.expect(TT.NEWLINE)
@@ -370,9 +397,13 @@ class Parser:
             return A.MatchArm([], True, self.parse_block(), A.Pos(t.line, t.col))
         patterns = []
         while True:
-            tn = self.expect(TT.IDENT)
-            self.expect(TT.DOT, "match patterns are written Enum.Member")
-            mn = self.expect(TT.IDENT)
+            parts = [self.expect(TT.IDENT)]
+            while self.match(TT.DOT):
+                parts.append(self.expect(TT.IDENT))
+            if len(parts) < 2:
+                self.error("match patterns are written Enum.Member", parts[0])
+            tn = parts[0]
+            mn = parts[-1]
             bindings = None
             if self.match(TT.LPAREN):
                 bindings = []
@@ -385,7 +416,8 @@ class Parser:
                         break
                 self.expect(TT.RPAREN)
             patterns.append(A.MatchPattern(
-                tn.value, mn.value, bindings, A.Pos(tn.line, tn.col)))
+                '.'.join(p.value for p in parts[:-1]), mn.value, bindings,
+                A.Pos(tn.line, tn.col)))
             if not self.match(TT.COMMA):
                 break
         self.expect(TT.COLON)

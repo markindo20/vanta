@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.29.1)
+# Vanta - a game-oriented systems language (v0.30.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -68,6 +68,16 @@ the program. In a checkout, the same commands work on the examples:
 vanta examples/vector_math.vnt
 vanta examples/strike.vnt
 ```
+
+### Modules
+
+A file can begin with `module name` and export declarations with `pub`.
+`import "lib.vnt"` brings a module's public names into the importing file;
+`import "lib.vnt" as lib` uses qualified names such as `lib.func(...)` and
+`lib.Type(...)`. Files without a `module` declaration keep the original flat,
+all-public import behaviour. See the
+[module example](examples/modules_demo/main.vnt) and the
+[language reference](docs/LANGUAGE_REFERENCE.md#modules-and-imports-v040-modules-v0300).
 
 Start a new game with a playable paddle-and-ball starter:
 
@@ -164,10 +174,10 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `main.py` | CLI entry point for a checkout |
 | `pyproject.toml` | Package metadata; installing creates the `vanta` command |
 | `setup.py` | Build hook that puts the runtime, game kit, and assets in the wheel |
-| `compiler/` | Python frontend: lexer, parser, import loader, type checker, C++ code generator, driver |
+| `compiler/` | Python frontend: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (613 tests) |
+| `tests/` | `unittest` suite (641 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -186,6 +196,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `extern_demo.vnt` | `extern` declarations linking a C library (C side: `extern_demo_lib.c`) |
 | `file_io.vnt` | `file_exists` / `file_read` / `file_write`, with a path from the command line |
 | `imports_demo.vnt` | A multi-file program: `import "imports_demo_lib.vnt"` |
+| `modules_demo/main.vnt` | Declared modules: qualified and unqualified imports, `pub`, private helpers, module constants/enums |
 | `grid.vnt` | 2D arrays: stack, struct-held, and `arena.alloc::<[T, W]>` grids |
 | `dispatch.vnt` | First-class functions: function values, dispatch tables, callbacks |
 | `bounds.vnt` | Bounds-checked access: `xs.at(i)` reads and writes |
@@ -239,7 +250,8 @@ New to Vanta? Start with the [tutorial](docs/TUTORIAL.md).
 ## Status
 
 Vanta is a prototype, not a finished language. Programs can span multiple
-files, link against C libraries (callbacks and enum types included), read
+files with optional module scopes, qualified imports, and `pub` visibility,
+link against C libraries (callbacks and enum types included), read
 command-line arguments, produce formatted output, read and write files, build
 2D grids, pass functions around,
 bounds-check array access with `xs.at(i)` and pointer access with
@@ -288,5 +300,9 @@ are real:
   `ptr<void>` widening
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
+- modules are one file each: imports are paths, with no nested modules,
+  package manager, or search path; `pub` controls top-level declarations, not
+  individual struct fields, and a public declaration cannot expose a private
+  type, including through an inferred function or constant type
 
 These are tracked, prioritised, and sized in [ROADMAP.md](ROADMAP.md).

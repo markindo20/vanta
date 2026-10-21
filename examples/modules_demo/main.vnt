@@ -1,0 +1,15 @@
+module demo
+
+import "geometry.vnt" as geo
+import "units.vnt"
+
+func local_double(n: i32) -> i32:
+    return n * 2
+
+func main() -> void:
+    let p = geo.Point(x: 3, y: 4)
+    print_i32(geo.length_squared(p))
+    print_i32(geo.area(geo.Shape.Square(5)))
+    print_i32(geo.ORIGIN_X)
+    print_i32(meters_to_centimeters(2))
+    print_i32(local_double(geo.ORIGIN_X))

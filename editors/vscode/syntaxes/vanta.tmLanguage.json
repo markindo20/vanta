@@ -51,7 +51,7 @@
       "patterns": [
         {
           "name": "keyword.control.vanta",
-          "match": "\\b(func|let|mut|const|struct|component|system|enum|extern|import|if|elif|else|match|while|for|in|break|continue|return|and|or|not)\\b"
+          "match": "\\b(func|let|mut|const|struct|component|system|enum|extern|import|module|pub|as|if|elif|else|match|while|for|in|break|continue|return|and|or|not)\\b"
         }
       ]
     },

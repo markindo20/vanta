@@ -8,4 +8,5 @@ recursive-include compiler *.py
 recursive-include runtime *.hpp
 recursive-include examples/gamekit *
 recursive-include examples/assets *
+recursive-include examples/modules_demo *
 recursive-include docs *.md

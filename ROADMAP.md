@@ -5,26 +5,32 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.29.1** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.30.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Next: language (candidate v0.30.0)
+## Landed in v0.30.0
 
-Enum extensions landed in v0.29.0: members can name explicit `i32` values and
-carry payloads, and `match` destructures them exhaustively. The next structural
-gap is module boundaries. Imports currently merge every file into one flat
-namespace, which is workable for examples but blocks a real standard library
-and third-party packages.
+Module boundaries landed. A file can start with `module name`; its
+declarations are private unless marked `pub`. `import "file.vnt"` brings a
+module's public names into the importing file, while
+`import "file.vnt" as alias` uses qualified names such as `alias.func(...)`,
+`alias.Type(...)`, and `alias.Enum.Member`. Module-less files keep the
+original flat, all-public import behaviour, so the game kit and every existing
+program compile unchanged. The resolver rejects private access, ambiguous
+unqualified imports, duplicate module names, and private types exposed by
+public declarations. `examples/modules_demo/` is the worked example.
 
-1. **Modules, namespaces, and privacy — large.** Give files or declared
-   modules their own scope, add qualified names, and let `pub` control what
-   crosses a boundary. Resolve cycles and keep the flat-import form working
-   for existing programs.
-2. **Error handling with `Option`/`Result` — medium.** A library-shaped
-   alternative to sentinel values, built on payload enums once module
+## Next: language (candidate v0.31.0)
+
+1. **Error handling with `Option`/`Result` — medium.** A library-shaped
+   alternative to sentinel values, built on payload enums now that module
    boundaries make a standard library practical.
+2. **Module follow-ups — medium.** Per-field visibility, nested modules, and
+   a package/search-path story are deliberately out of v0.30.0. They become
+   worth doing when a library wants to hide struct representation or when
+   path-only imports become painful.
 
 ## Kit and examples
 
@@ -35,6 +41,10 @@ and third-party packages.
 - `examples/enums_advanced.vnt` exercises explicit member values, payload
   enums, struct/str payloads, wildcard bindings, equality, and `enum_to_i32`;
   its output is frozen in the integration suite.
+- `examples/modules_demo/` exercises declared modules, `pub`, a private
+  helper, qualified and unqualified imports, module constants, and a payload
+  enum crossing a module boundary; its output is frozen in the integration
+  suite.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.

@@ -701,6 +701,64 @@ falling coins. The event numbers (type at `ev[0]`, key symbol at `ev[5]`)
 and the rest of the API are documented in the reference's
 [SDL2 walkthrough](LANGUAGE_REFERENCE.md#sdl2-and-a-window-v0120).
 
+## Modules and imports
+
+A file can start with `module <name>` to get its own scope. Declarations are
+private until marked `pub`. Save this as `math.vnt`:
+
+```vanta
+module math
+
+pub func add(a: i32, b: i32) -> i32:
+    return a + b
+
+pub func double(n: i32) -> i32:
+    return n * 2
+
+# No `pub`: this name stays inside math.vnt.
+func hidden() -> i32:
+    return 99
+```
+
+A second file can import it two ways. `as math` gives qualified access;
+without an alias, the target's public names join the importing file's bare
+namespace. Save this as `units.vnt`:
+
+```vanta
+module units
+
+pub func meters_to_centimeters(m: i32) -> i32:
+    return m * 100
+```
+
+and this as `main.vnt`:
+
+```vanta
+import "math.vnt" as math
+import "units.vnt"
+
+func main() -> void:
+    print_i32(math.add(2, 3))
+    print_i32(math.double(4))
+    print_i32(meters_to_centimeters(2))
+```
+
+Running `main.vnt` prints:
+
+```text
+5
+8
+200
+```
+
+`math.hidden()` would be rejected: `hidden` is private to `math.vnt`. If two
+modules both export `add`, import both with aliases and qualify the call.
+Files without a `module` declaration are the original flat, all-public
+imports; that is why the game kit below still works unchanged. A module
+declaration must be the first declaration in the file (comments and blank
+lines before it are fine), and imports are still paths relative to the
+importing file.
+
 ## The game kit
 
 The SDL2 program above talks to C directly, and that never stops working —

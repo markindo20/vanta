@@ -1,0 +1,26 @@
+module geometry
+
+# This constant and the public functions below cross the module boundary.
+pub const ORIGIN_X: i32 = 3
+
+# Private helpers stay inside the module; `square` is not importable.
+func square(n: i32) -> i32:
+    return n * n
+
+pub struct Point:
+    x: i32
+    y: i32
+
+pub enum Shape:
+    Dot
+    Square(i32)
+
+pub func length_squared(p: Point) -> i32:
+    return square(p.x) + square(p.y)
+
+pub func area(shape: Shape) -> i32:
+    match shape:
+        Shape.Dot:
+            return 0
+        Shape.Square(side):
+            return square(side)

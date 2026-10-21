@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.29.1)
+# Vanta Language Reference (v0.30.0)
 
-This is the reference for the language as implemented at tag `v0.29.1`. Every
+This is the reference for the language as implemented at tag `v0.30.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -1479,10 +1479,12 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else.
 
 Three idioms fall out of the language rules:
 
-- **Prefixes, not namespaces.** Vanta has one flat namespace, so every kit
-  name is prefixed by its module (`screen_*`, `ev_*`, `pad_*`, `gfx_*`,
-  `tex_*`, `anim_*`, `font_*`, `text_*`, `audio_*`, `sound_*`, `rand_*`,
-  `collide_*`); several modules — and the game's own names — coexist.
+- **Prefixes for clarity, not because Vanta requires them.** The kit is a set
+  of legacy `module`-less files, so every kit name is prefixed by its module
+  (`screen_*`, `ev_*`, `pad_*`, `gfx_*`, `tex_*`, `anim_*`, `font_*`,
+  `text_*`, `audio_*`, `sound_*`, `rand_*`, `collide_*`) and several modules —
+  and the game's own names — coexist. Declared modules (v0.30.0) get real
+  scopes; the kit keeps its prefixes for readable call sites.
 - **Failures come back the way C reports them.** There is still no nil
   literal — `ptr_null::<T>()` (v0.19.0) is the explicit way to build one —
   so `screen_open` returns a `Screen` carrying whatever the C calls
@@ -1795,41 +1797,132 @@ to a C function or `print_str` still stops at the first NUL because those use a
 `examples/file_io.vnt` reads a file named on the command line and writes a copy
 to `<path>.copy`.
 
-## Imports (v0.4.0)
+## Modules and imports (v0.4.0; modules v0.30.0)
 
-`import` merges another file's declarations into the program:
+`import` still loads another file by path. A file may begin with
+`module <name>` to give its declarations a scope. Save this as
+`geometry.vnt`:
 
 ```vanta
-import "imports_demo_lib.vnt"
+module geometry
 
-func main() -> void:
-    let sp = sprite_at(3, 2)
-    print_i32(sprite_pixel(sp))
+pub const ORIGIN_X: i32 = 3
+
+# Private: only code inside geometry.vnt can call square.
+func square(n: i32) -> i32:
+    return n * n
+
+pub struct Point:
+    x: i32
+    y: i32
+
+pub enum Shape:
+    Dot
+    Square(i32)
+
+pub func length_squared(p: Point) -> i32:
+    return square(p.x) + square(p.y)
+
+pub func area(shape: Shape) -> i32:
+    match shape:
+        Shape.Dot:
+            return 0
+        Shape.Square(side):
+            return square(side)
 ```
 
+A second file imports it with an alias and uses qualified names. Save this as
+`main.vnt`:
+
+```vanta
+module demo
+
+import "geometry.vnt" as geo
+import "units.vnt"
+
+func local_double(n: i32) -> i32:
+    return n * 2
+
+func main() -> void:
+    let p = geo.Point(x: 3, y: 4)
+    print_i32(geo.length_squared(p))
+    print_i32(geo.area(geo.Shape.Square(5)))
+    print_i32(geo.ORIGIN_X)
+    print_i32(meters_to_centimeters(2))
+    print_i32(local_double(geo.ORIGIN_X))
+```
+
+The second import is unqualified, so `units.vnt` contributes its public names
+to the bare namespace:
+
+```vanta
+module units
+
+pub func meters_to_centimeters(m: i32) -> i32:
+    return m * 100
+```
+
+Run `main.vnt` and it prints:
+
+```text
+25
+25
+3
+200
+6
+```
+
+- A `module` declaration must be the first declaration in its file. Module
+  names are identifiers and must be unique across the program.
+- A module's declarations are private by default. `pub` exports functions
+  (including `system`/`component`), structs, enums, constants, and `extern`
+  blocks. A private name cannot be imported or reached through an alias.
+- A public declaration cannot expose a private type in an explicit parameter,
+  return, field, payload, or constant type, or through an inferred function or
+  constant type. Give the type `pub` as well, or keep the public surface in
+  terms of public types.
+- An unqualified import brings the target's public names into the importing
+  file, used by their bare names. A local top-level declaration with the same
+  name is an error; use an alias to keep both. If two unqualified imports
+  provide the same name, using it is an error — import one or both with an
+  alias and qualify the call.
+- `import "geometry.vnt" as geo` gives qualified access: `geo.Point`,
+  `geo.length_squared(...)`, `geo.Shape.Square(5)`, and `geo.ORIGIN_X` all
+  work. An alias must not collide with a top-level declaration in the
+  importing file.
 - The path is a string literal resolved **relative to the file containing the
-  import**. There is no search path, and no implicit extension — write
-  `import "lib/math.vnt"` in full.
-- Vanta has a single flat namespace. An import makes the other file's
-  functions, structs, constants, and `extern` declarations available as if
-  they were written in the importing file; they are used by their bare names.
-  A name declared twice across any files is a compile error.
-- Imports are transitive, and each file is loaded once no matter how many
-  times it is imported — importing a file twice, or from two files, still
-  adds its declarations exactly once.
+  import**. There is no search path, no implicit extension, and no package
+  manager — write `import "lib/math.vnt"` in full. Imports are loaded
+  transitively, and each file is loaded once no matter how many times it is
+  imported. A declared module does not re-export its imports: importing `a.vnt`
+  gives `a.vnt`'s public declarations, not the public names `a.vnt` imported.
+  Legacy module-less files keep the old flat, transitive visibility.
 - Import cycles are a compile error, reported with the chain:
-  `a.vnt: import cycle: a.vnt -> b.vnt -> a.vnt`.
-- A missing import is a compile error at the import statement:
+  `a.vnt: import cycle: a.vnt -> b.vnt -> a.vnt`. A missing import is a
+  compile error at the import statement:
   `main.vnt:1:1: cannot open import 'lib/nope.vnt'`.
+- Files without a `module` declaration keep the original flat, all-public
+  behaviour. Their declarations are imported by bare name exactly as before,
+  and an alias can still be used to qualify them. This is why the game kit
+  and all existing examples continue to work unchanged.
+- `main` in the entry file is still the program entry point when that file
+  declares a module; its other declarations are module-scoped. A `main` in an
+  imported declared module is an ordinary scoped function; an unqualified
+  import does not add it to the bare namespace, so use the alias.
+- `extern` functions keep their C names. They live in the global C ABI even
+  when declared inside a module; `pub extern` allows other modules to call
+  them.
 - Errors inside an imported file name that file, not the entry file.
-- Imports may appear anywhere among top-level declarations; the convention is
-  at the top of the file.
+  Diagnostics show source names, not the compiler's internal unique names.
+- Imports may appear anywhere among top-level declarations after the optional
+  `module` line; the convention is at the top of the file.
 
-`examples/imports_demo.vnt` and `examples/imports_demo_lib.vnt` are a complete
-example.
+`examples/imports_demo.vnt` and `examples/imports_demo_lib.vnt` are the
+original flat-import example. `examples/modules_demo/` is the complete
+module example above, including the legacy flat compatibility path.
 
-There is no per-module namespacing, no visibility control (`pub`), and no
-package manager: an import is a path on disk.
+There are no nested modules and no package manager: a module is one file on
+disk, imported by path.
 
 ## Operators
 

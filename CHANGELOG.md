@@ -2,6 +2,38 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.30.0 - 2026-10-21
+
+- Modules, namespaces, and privacy. A file may start with `module name`;
+  its declarations are private unless marked `pub`. `pub` works on functions
+  (including `system`/`component`), structs, enums, constants, and `extern`
+  blocks. Module names are unique, and the declaration must be the first
+  declaration in its file. `module`, `pub`, and `as` are now reserved words.
+- Qualified imports. `import "math.vnt" as math` exposes public names through
+  the alias: `math.add(...)`, `math.Point(...)`, `math.Shape.Square(5)`, and
+  `math.CONST`. A plain `import "math.vnt"` brings public names into the
+  importing file's bare namespace. Aliases may not collide with a top-level
+  declaration; a local declaration may not silently shadow an unqualified
+  import; two unqualified imports with the same name are an error when used,
+  and the fix is to qualify with an alias.
+- Backward compatibility. Files without a `module` declaration keep the
+  original flat, all-public import behaviour, including transitive visibility
+  and the old duplicate-name errors. The game kit and every existing example
+  compile unchanged.
+- Privacy checks. Private symbols cannot be imported or reached through an
+  alias. Public declarations cannot expose private types in explicit
+  parameter, return, field, payload, or constant types, or through an inferred
+  function or constant type. Extern C names and the entry `main` keep their
+  ABI names; other module declarations are rewritten to unique internal names
+  and diagnostics map them back to source names. Module-scoped declarations
+  with the same source name in two modules coexist.
+- Examples and docs. `examples/modules_demo/` covers qualified and unqualified
+  imports, a private helper behind a public function, a module constant, and a
+  payload enum crossing a boundary; its output is frozen in the integration
+  suite. The reference, tutorial, README, roadmap, and architecture notes are
+  updated, and the VS Code grammar highlights the new keywords. 641 tests
+  total; the frozen pong, strike, and breakout runs are unchanged.
+
 ## v0.29.1 - 2026-10-20
 
 - Accept a UTF-8 byte-order mark at the start of source files. Windows

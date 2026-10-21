@@ -6,7 +6,7 @@ class TT(Enum):
     INT = auto(); FLOAT = auto(); STRING = auto(); IDENT = auto()
     FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto(); CONST = auto()
     STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto(); ENUM = auto()
-    IMPORT = auto()
+    IMPORT = auto(); MODULE = auto(); PUB = auto(); AS = auto()
     IF = auto(); ELIF = auto(); ELSE = auto(); MATCH = auto()
     WHILE = auto(); FOR = auto(); IN = auto()
     BREAK = auto(); CONTINUE = auto()
@@ -28,6 +28,7 @@ KEYWORDS = {
     'struct': TT.STRUCT, 'component': TT.COMPONENT, 'system': TT.SYSTEM,
     'enum': TT.ENUM,
     'extern': TT.EXTERN, 'import': TT.IMPORT,
+    'module': TT.MODULE, 'pub': TT.PUB, 'as': TT.AS,
     'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE, 'match': TT.MATCH,
     'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,
     'break': TT.BREAK, 'continue': TT.CONTINUE,
