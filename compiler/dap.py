@@ -535,6 +535,16 @@ def _gdb_candidates(explicit=None):
                       '/opt/homebrew/bin/gdb'):
         if os.path.exists(candidate):
             yield from add(candidate)
+    # macOS ships LLDB, whose machine-interface front end speaks enough of
+    # the GDB dialect for the adapter to drive it.
+    for name in ('lldb-mi', 'lldb-mi-19'):
+        found = shutil.which(name)
+        if found:
+            yield from add(found)
+    for candidate in ('/usr/bin/lldb-mi', '/usr/local/bin/lldb-mi',
+                      '/opt/homebrew/bin/lldb-mi'):
+        if os.path.exists(candidate):
+            yield from add(candidate)
 
 
 def _probe_gdb(path: str) -> bool:
@@ -544,7 +554,10 @@ def _probe_gdb(path: str) -> bool:
                               stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return False
-    return proc.returncode == 0 and 'GDB' in (proc.stdout + proc.stderr)
+    output = proc.stdout + proc.stderr
+    if proc.returncode != 0:
+        return False
+    return 'GDB' in output or 'LLDB' in output
 
 
 def find_gdb(explicit=None) -> str:
@@ -1732,7 +1745,7 @@ class DapAdapter:
             elif not matched:
                 return True
         condition = meta.get('condition')
-        if condition:
+        if condition and not meta.get('native'):
             value, ok = self._evaluate_expression(condition)
             if not ok:
                 self.output('console',
@@ -1748,6 +1761,37 @@ class DapAdapter:
             self.output('console', text.rstrip('\n') + '\n')
             return True
         return False
+
+    def _try_native_conditions(self):
+        """Let GDB evaluate the conditions itself, when it can.
+
+        The adapter evaluates a condition in the frame that was hit, which
+        means the program stops at every hit.  When GDB accepts the same
+        expression it evaluates it without stopping the program, which is
+        much faster in a hot loop.  A breakpoint with a hit count keeps the
+        adapter-side path, because the count depends on seeing every hit.
+        """
+        if self._gdb is None:
+            return
+        for number, meta in list(self._bp_meta.items()):
+            condition = meta.get('condition')
+            if not condition or meta.get('native') or meta.get('hitCondition'):
+                continue
+            attempts = int(meta.get('attempts', 0))
+            if attempts >= 20:
+                continue
+            meta['attempts'] = attempts + 1
+            translated = _translate_vanta_expression(condition)
+            for candidate in (translated, condition):
+                if not candidate:
+                    continue
+                try:
+                    self._gdb.command(f'-break-condition {number} ' +
+                                      _mi_quote(candidate))
+                except Exception:
+                    continue
+                meta['native'] = True
+                break
 
     def _auto_continue(self):
         """Resume the program after a skipped breakpoint hit."""
@@ -1979,6 +2023,9 @@ class DapAdapter:
             elif field_type == 'str' or field_type.startswith('List<'):
                 entry['value'] = self._display_value(path, field_type,
                                                      entry['value'])
+            reference = self._memory_reference(path, display=field)
+            if reference:
+                entry['memoryReference'] = reference
             out.append(entry)
         return out
 
@@ -2055,13 +2102,13 @@ class DapAdapter:
             elif type_name in ('str',) or type_name.startswith('List<'):
                 entry['value'] = self._display_value(f'v_{display}', type_name,
                                                      str(value))
-            reference = self._memory_reference(thread_id, level, display)
+            reference = self._memory_reference(f'v_{display}', display)
             if reference:
                 entry['memoryReference'] = reference
             out.append(entry)
         return out
 
-    def _memory_reference(self, thread_id, level, name) -> str:
+    def _memory_reference(self, expression: str, display: str = '') -> str:
         """The address a client uses to inspect or watch a variable.
 
         Only clients that asked for data breakpoints get one, because the
@@ -2073,7 +2120,7 @@ class DapAdapter:
             return ''
         try:
             record = self._gdb.command('-data-evaluate-expression ' +
-                                       _mi_quote(f'&v_{name}'))
+                                       _mi_quote(f'&{expression}'))
         except Exception:
             return ''
         address = str(record.results.get('value', '')).strip()
@@ -2166,6 +2213,10 @@ class DapAdapter:
         if meta and self._should_skip_breakpoint(meta):
             self._auto_continue()
             return
+        # The program is stopped, so there is a frame to resolve symbols in.
+        # GDB can then evaluate some conditions itself, which keeps a hot
+        # loop from stopping at every hit.
+        self._try_native_conditions()
 
         dap_reason = 'breakpoint'
         if reason in ('end-stepping-range', 'function-finished'):

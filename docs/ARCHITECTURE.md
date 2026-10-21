@@ -168,7 +168,8 @@ directory so relative imports and Python module discovery behave like the
 editor's project.
 
 ## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0,
-navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0)
+navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0,
+speed in v0.39.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -350,15 +351,15 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 754 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 756 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
 through launch, stop, locals, continue, and disconnect, and two more groups
 cover the breakpoint kinds, watch expressions, restart, editing, data
 breakpoints, registers, memory reads, breakpoint locations, jump targets,
-exception breakpoints, attaching to a running program, and expanding a
-struct.
+exception breakpoints, attaching to a running program, expanding a struct,
+watching a struct field, and a condition that only becomes true later.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

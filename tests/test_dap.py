@@ -1115,6 +1115,63 @@ class DapDataIntegrationTests(_DapSessionTestCase):
         self.assertEqual(variables['s']['value'], 'State::Playing')
         self.assertEqual(variables['s']['type'], 'State')
 
+    def test_a_struct_field_can_be_watched(self):
+        self.initialize({'supportsDataBreakpoints': True})
+        self.launch()
+        self.set_breakpoints([{'line': 12}])
+        self.configuration_done()
+        self.stopped_event()
+        variables = self.locals()
+        player = variables['p']
+        self.send('variables',
+                  {'variablesReference': player['variablesReference']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        fields = {v['name']: v for v in response['body']['variables']}
+        self.assertTrue(fields['hp'].get('memoryReference'), fields['hp'])
+        self.send('setDataBreakpoints', {'breakpoints': [
+            {'dataId': fields['hp']['memoryReference'], 'access': 'write'}]})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setDataBreakpoints')
+        self.assertTrue(response['body']['breakpoints'][0]['verified'],
+                        response)
+
+
+class DapConditionIntegrationTests(_DapSessionTestCase):
+    """A condition that only becomes true later still stops the program."""
+
+    PROGRAM = ('func main() -> void:\n'
+               '    let fixed = 41\n'
+               '    mut counter = 0\n'
+               '    mut total = 0\n'
+               '    while counter < 5:\n'
+               '        total = total + counter\n'
+               '        counter = counter + 1\n'
+               '    print_i32(total)\n')
+
+    def test_a_condition_stops_when_it_becomes_true(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6, 'condition': 'counter == 2'}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        reference = next(scope['variablesReference']
+                         for scope in response['body']['scopes']
+                         if scope['name'] == 'Locals')
+        self.send('variables', {'variablesReference': reference})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        values = {v['name']: v['value']
+                  for v in response['body']['variables']}
+        self.assertEqual(values.get('counter'), '2')
+
 
 class DapEditingIntegrationTests(_DapSessionTestCase):
     """Editing variables, watching memory, and reading machine state."""

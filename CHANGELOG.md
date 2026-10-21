@@ -2,6 +2,26 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.39.0 - 2026-10-21
+
+- Faster conditions. A breakpoint condition is evaluated in the frame that
+  was hit, which stopped the program briefly at every hit. As soon as the
+  variables are in scope, the debugger hands the same expression to GDB, and
+  GDB then evaluates it without stopping the program at all when the
+  condition is false. A breakpoint that also carries a hit count keeps the
+  adapter-side path, because the count needs to see every hit.
+- Watching a struct field. A field of a struct can be watched the same way a
+  local can, so a program can stop when a health value changes.
+- An LLDB fallback. On macOS, where GDB is rarely installed, the debugger
+  accepts `lldb-mi`, the machine-interface front end that ships with LLDB.
+  It covers the core of the protocol; a few inspection requests are not part
+  of it.
+- Docs and tests. `docs/DEBUGGER.md` documents the faster conditions, the
+  field watches, and the LLDB fallback. 756 tests total, including stdio
+  sessions that watch a struct field and that stop on a condition which only
+  becomes true later. Remote debugging, reverse debugging, and MSVC/PDB
+  support remain future work.
+
 ## v0.38.0 - 2026-10-21
 
 - The Variables view speaks Vanta. A struct is a node that expands into its

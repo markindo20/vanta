@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.38.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.39.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -32,7 +32,7 @@ it:
 
 ## Requirements
 
-- Vanta 0.38.0 or newer (`vanta --version`)
+- Vanta 0.39.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -45,7 +45,10 @@ is configured to emit DWARF.
 
 Install GDB and put it on `PATH`, or point Vanta at it with the
 `vanta.debug.gdbPath` setting (VS Code) or the `VANTA_GDB` environment variable
-(any editor).
+(any editor). On macOS, where GDB is rarely installed, the debugger also
+accepts `lldb-mi`, the machine-interface front end that ships with LLDB. It
+covers the core of the protocol; a few inspection requests are not part of
+it.
 
 ## VS Code
 
@@ -53,7 +56,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.9.0.vsix
+code --install-extension vanta-language-0.10.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -91,7 +94,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.9.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.10.0.vsix`.
 
 ## Breakpoints
 
@@ -121,6 +124,13 @@ unless the breakpoint actually stops.
 A log point with a condition only logs when the condition is true. A
 breakpoint with both a condition and a hit count stops only when both are
 satisfied.
+
+A condition is evaluated in the frame that was hit, which means the program
+stops briefly at every hit of the line. As soon as the debugger can hand
+the condition to GDB - which needs the variables to be in scope where the
+program is stopped - GDB evaluates it itself and the program no longer
+stops at all when the condition is false. The effect is the same; the loop
+just runs at full speed.
 
 ## Watch expressions
 
@@ -208,9 +218,10 @@ refused too, so a string is never written into an `i32` by accident.
 
 Right-click a local and choose **Break on Value Change** to stop the program
 when that value is written. The watch is a GDB watchpoint on the variable's
-address, and the session reports it as a data breakpoint. The address belongs
-to the stack frame it was taken in, so a watch is dropped when the frame is
-gone; re-create it after a restart.
+address, and the session reports it as a data breakpoint. A field of a
+struct can be watched the same way, so a program can stop when a health
+value changes. The address belongs to the stack frame it was taken in, so a
+watch is dropped when the frame is gone; re-create it after a restart.
 
 ## Looking at data
 

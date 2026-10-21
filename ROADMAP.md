@@ -5,10 +5,23 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.38.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.39.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.39.0
+
+Debugger speed landed. A breakpoint condition is now handed to GDB as soon
+as the variables are in scope, so a hot loop no longer stops at every hit. A
+field of a struct can be watched the same way a local can, and on macOS the
+debugger accepts `lldb-mi` when GDB is not installed. 756 tests total,
+including stdio sessions that watch a struct field and that stop on a
+condition which only becomes true later.
+
+The next debugger milestone is deliberately separate again: remote debugging,
+reverse debugging, and MSVC/PDB support. A debug session always uses an
+unoptimized build.
 
 ## Landed in v0.38.0
 
@@ -154,7 +167,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.39.0)
+## Next: language (candidate v0.40.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -202,9 +215,10 @@ public declarations. `examples/modules_demo/` is the worked example.
   v0.36.0: valid breakpoint lines, run to cursor, and exception breakpoints.
   Debugger sessions shipped in v0.37.0: attaching to a running program,
   per-thread stepping, and the disassembly view. Debugger data shipped in
-  v0.38.0: structs expand into their fields, enums show their member. The
-  next debugger work is remote debugging, reverse debugging, LLDB, and
-  MSVC/PDB support.
+  v0.38.0: structs expand into their fields, enums show their member.
+  Debugger speed shipped in v0.39.0: faster conditions, field watches, and
+  an LLDB fallback. The next debugger work is remote debugging, reverse
+  debugging, and MSVC/PDB support.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,
