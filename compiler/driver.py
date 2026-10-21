@@ -156,6 +156,32 @@ def _is_msvc(name):
     return base in ('cl', 'clang-cl')
 
 
+def find_debug_compiler():
+    """Prefer a DWARF-producing compiler for debug builds.
+
+    The normal driver prefers MSVC on Windows.  GDB cannot read PDB files, so
+    debug discovery looks for GCC/Clang first and only falls back to the
+    normal choice (which then produces a clear error if it is MSVC).
+    """
+    env = os.environ.get('CXX')
+    candidates = []
+    if env:
+        candidates.append(env)
+    if os.name == 'nt':
+        # MinGW GCC reliably emits DWARF.  clang++ on Windows defaults to
+        # CodeView, which GDB does not understand, so try g++ first.
+        candidates.extend(['g++', 'clang++'])
+    else:
+        candidates.extend(['clang++', 'g++', 'c++'])
+    for candidate in candidates:
+        if _is_msvc(candidate):
+            continue
+        path = shutil.which(candidate)
+        if path:
+            return candidate, path
+    return find_cxx_compiler()
+
+
 def _auto_link_libs(program):
     """Libraries implied by known extern block names, in link order."""
     found = set()
@@ -401,7 +427,8 @@ def _report_compile_failure(proc, libs, compiler_name, compiler_path):
         sys.stderr.write(hint + '\n')
 
 
-def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=None, libs=None):
+def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=None,
+                  libs=None, debug=False):
     include_dirs = include_dirs or []
     lib_dirs = lib_dirs or []
     libs = libs or []
@@ -409,7 +436,9 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
         # /fp:strict keeps f32 arithmetic from contracting into FMA, so the
         # deterministic game runs produce the same counts across targets.
         flags = ['/nologo', '/std:c++17', '/EHsc', '/fp:strict',
-                 '/O2' if release else '/Od']
+                 '/O2' if release and not debug else '/Od']
+        if debug:
+            flags.extend(['/Zi', '/DEBUG'])
         for d in include_dirs:
             flags.extend(['/I', d])
         flags.extend(['/I', RUNTIME_DIR, src, f'/Fe:{out}'])
@@ -420,8 +449,13 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
         return [path] + flags
     # -ffp-contract=off keeps f32 arithmetic from contracting into FMA, so
     # the deterministic game runs produce the same counts on x86-64 and arm64.
-    flags = ['-std=c++17', '-Wall', '-Wextra', '-ffp-contract=off',
-             '-O3' if release else '-O0', '-g' if not release else '-g0']
+    flags = ['-std=c++17', '-Wall', '-Wextra', '-ffp-contract=off']
+    if debug:
+        # A debugger needs full DWARF and an unoptimized, frame-pointer-based
+        # stack even if the caller also asked for a release build.
+        flags.extend(['-O0', '-g3', '-fno-omit-frame-pointer'])
+    else:
+        flags.extend(['-O3' if release else '-O0', '-g' if not release else '-g0'])
     for d in include_dirs:
         flags.extend(['-I', d])
     flags.extend(['-I', RUNTIME_DIR, src, '-o', out])
@@ -432,8 +466,9 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
     return [path] + flags
 
 
-def _emit_source(program, tc, path):
-    cpp = CodeGen(program, tc).generate()
+def _emit_source(program, tc, path, debug=False):
+    cpp = CodeGen(program, tc, debug=debug,
+                  debug_filename=path if debug else None).generate()
     with open(path, 'w', encoding='utf-8') as f:
         f.write(cpp)
     return cpp
@@ -445,6 +480,87 @@ def _frontend_only(source_path):
     tc.register()
     tc.check()
     return program, tc
+
+
+class DebugBuildError(Exception):
+    """A debug build failed with a message suitable for a DAP client."""
+
+    def __init__(self, message, output='', tempdir=None):
+        super().__init__(message)
+        self.message = message
+        self.output = output
+        self.tempdir = tempdir
+
+
+def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
+                link=None):
+    """Build an unoptimized executable with Vanta source locations.
+
+    Returns a dictionary with the executable, generated C++, temporary
+    directory, and runtime environment.  The caller owns the temporary
+    directory and should remove it when the debug session ends.
+    """
+    try:
+        program, tc = _frontend_only(source)
+    except (LexError, ParseError, CheckError, LoadError) as e:
+        raise DebugBuildError(str(e)) from e
+
+    if not any(isinstance(d, FuncDecl) and d.name == 'main' for d in program.decls):
+        raise DebugBuildError("program has no 'func main() -> void' entry point")
+
+    name, path = find_debug_compiler()
+    if path is None:
+        raise DebugBuildError(
+            'no C++17 compiler found; install g++, clang++, or cl and retry')
+    if _is_msvc(name):
+        raise DebugBuildError(
+            'the Vanta debugger currently needs a GCC or Clang toolchain '
+            '(MSVC emits PDB files, not the DWARF data GDB reads)')
+
+    libs = _merge_link_libs(program, list(link or []))
+    all_lib_dirs = _dedupe_paths(list(lib_dirs or []) + _auto_lib_dirs(libs))
+    tmpdir = tempfile.mkdtemp(prefix='vanta_debug_')
+    cpp_path = os.path.join(tmpdir, 'main.cpp')
+    try:
+        _emit_source(program, tc, cpp_path, debug=True)
+        if output:
+            exe = os.path.abspath(output)
+            os.makedirs(os.path.dirname(exe) or '.', exist_ok=True)
+        else:
+            exe = os.path.join(tmpdir, 'prog.exe' if os.name == 'nt' else 'prog')
+        cmd = _compiler_cmd(name, path, cpp_path, exe, release=False,
+                            include_dirs=list(include_dirs or []),
+                            lib_dirs=all_lib_dirs, libs=libs, debug=True)
+        env = _runtime_env(path, all_lib_dirs) or dict(os.environ)
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if proc.returncode != 0:
+            detail = (proc.stdout + '\n' + proc.stderr).strip()
+            raise DebugBuildError('C++ compilation failed', detail, tmpdir)
+        # MinGW adds .exe when -o has no suffix.  Report the file that was
+        # actually produced so callers do not have to guess.
+        if not os.path.exists(exe) and os.name == 'nt' and \
+                not exe.lower().endswith('.exe') and os.path.exists(exe + '.exe'):
+            exe += '.exe'
+        if not os.path.isfile(exe):
+            raise DebugBuildError(
+                f'C++ compiler reported success but did not create {exe}',
+                '', tmpdir)
+    except DebugBuildError:
+        # Keep the generated source and compiler output for the caller to
+        # inspect.  The DAP adapter removes the directory after reporting it.
+        raise
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+    return {
+        'exe': exe,
+        'cpp': cpp_path,
+        'tempdir': tmpdir,
+        'env': env,
+        'compiler': path,
+        'libs': libs,
+        'lib_dirs': all_lib_dirs,
+    }
 
 
 def _error_location(exc):
@@ -635,7 +751,7 @@ def cmd_build(args):
 
     tmpdir = tempfile.mkdtemp(prefix='vanta_build_')
     cpp_path = os.path.join(tmpdir, 'main.cpp')
-    _emit_source(program, tc, cpp_path)
+    _emit_source(program, tc, cpp_path, debug=args.debug)
 
     if args.emit_cpp:
         os.makedirs(os.path.dirname(args.emit_cpp) or '.', exist_ok=True)
@@ -643,7 +759,7 @@ def cmd_build(args):
         print(f"wrote {args.emit_cpp}")
 
     cmd = _compiler_cmd(name, path, cpp_path, os.path.abspath(out_path), args.release,
-                        args.include_dir, lib_dirs, libs)
+                        args.include_dir, lib_dirs, libs, debug=args.debug)
     proc = subprocess.run(cmd, capture_output=True, text=True,
                           env=_runtime_env(path, lib_dirs))
     if proc.returncode != 0:
@@ -704,7 +820,7 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'lsp')
+_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'lsp', 'dap')
 
 
 def _normalize_argv(argv):
@@ -734,11 +850,14 @@ def main(argv):
     sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
 
     sub.add_parser('lsp', help='run the Vanta language server on stdin/stdout')
+    sub.add_parser('dap', help='run the Vanta debug adapter on stdin/stdout')
 
     p_build = sub.add_parser('build', help='build a native executable')
     p_build.add_argument('source')
     p_build.add_argument('-o', '--output')
     p_build.add_argument('--release', action='store_true')
+    p_build.add_argument('--debug', action='store_true',
+                         help='emit Vanta source locations for native debugging')
     p_build.add_argument('--bundle', action='store_true',
                          help='copy runtime DLLs and example assets beside the executable (Windows)')
     p_build.add_argument('--emit-cpp')
@@ -770,6 +889,9 @@ def main(argv):
         return cmd_doctor(args)
     if args.cmd == 'lsp':
         from .lsp import run_stdio
+        return run_stdio()
+    if args.cmd == 'dap':
+        from .dap import run_stdio
         return run_stdio()
     if args.cmd == 'build':
         return cmd_build(args)

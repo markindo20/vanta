@@ -5,10 +5,30 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.32.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.33.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.33.0
+
+Native debugging landed. `vanta dap` is a DAP server backed by GDB/MI2.
+Debug builds emit absolute `#line` directives and compile with
+`-O0 -g3 -fno-omit-frame-pointer`, so GDB reports Vanta files and lines
+directly. The adapter supports line breakpoints in the entry file and imports,
+stack traces, **Locals** and **Arguments**, continue/pause/step over/step
+into/step out, `stopOnEntry`, program output, and clean termination. The VS
+Code extension version 0.4.0 contributes the `vanta` debugger type and reuses
+the language client's executable/Python discovery. `docs/DEBUGGER.md`
+documents setup, source mapping, GDB discovery, and troubleshooting. 710 tests
+total, including DAP/MI unit tests, a real GDB breakpoint/source-mapping test,
+and a stdio DAP session that launches, stops, inspects locals, continues, and
+disconnects.
+
+Debugger follow-ups are intentionally separate from the first milestone:
+conditional and function breakpoints, watch expressions, editable variables,
+attach/remote debugging, LLDB, and MSVC/PDB support. A debug session always
+uses an unoptimized build.
 
 ## Landed in v0.32.0
 
@@ -26,8 +46,9 @@ compiler. CI compiles and packages the VSIX, and the release workflow attaches
 it to the GitHub release alongside the wheel and sdist. `docs/EDITOR.md`
 documents setup, discovery, features, limitations, and troubleshooting.
 
-Editor support is intentionally scoped: there is no debugger, DAP adapter,
-semantic rename, formatting, or code-action support yet. 692 tests total.
+Editor support in v0.32.0 was intentionally scoped: no debugger, semantic
+rename, formatting, or code actions. The debugger followed in v0.33.0; rename,
+formatting, and code actions remain candidates. 692 tests at that release.
 
 ## Landed in v0.31.0
 
@@ -59,7 +80,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.33.0)
+## Next: language (candidate v0.34.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -99,9 +120,10 @@ public declarations. `examples/modules_demo/` is the worked example.
   formulas are follow-ups.
 - Editor support is shipped in v0.32.0: `vanta lsp` plus the VS Code client
   provide diagnostics, completion, hover, definition, and document symbols.
-  The next tooling milestone is a debugger, which needs source mapping from
-  generated C++ back to Vanta lines and a DAP adapter. It is deliberately not
-  part of the editor milestone.
+  Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
+  adapter over GDB/MI2. The next debugger work is conditional/function
+  breakpoints, watch expressions, editable variables, attach/remote debugging,
+  LLDB, and MSVC/PDB support; these are separate from the first milestone.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,

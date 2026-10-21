@@ -1,8 +1,8 @@
 # Editor support
 
-Vanta v0.32.0 ships a language server and a VS Code client. The server is part
-of the compiler package, so an installed `vanta` command and a source checkout
-provide the same editor features.
+Vanta v0.33.0 ships a language server, a native debugger, and a VS Code client.
+The server and debug adapter are part of the compiler package, so an installed
+`vanta` command and a source checkout provide the same editor features.
 
 ## What you get
 
@@ -19,6 +19,9 @@ provide the same editor features.
   imported declarations, enum members, and struct fields.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
+- **Native debugging** through a `vanta` debug configuration: line
+  breakpoints, stack traces, locals and arguments, continue/step/pause,
+  `stopOnEntry`, program output, and clean termination.
 - Syntax highlighting and language configuration for `.vnt` files.
 
 The server uses full-document text sync. That keeps the first version small and
@@ -56,11 +59,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.3.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.4.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.3.0.vsix
+code --install-extension vanta-language-0.4.0.vsix
 ```
 
 ### Build from source
@@ -69,7 +72,7 @@ code --install-extension vanta-language-0.3.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.3.0.vsix
+code --install-extension vanta-language-0.4.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -96,9 +99,11 @@ If `vanta.server.path` names a Vanta executable, the client runs it as
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `vanta.server.path` | `""` | Path to the `vanta` executable or a Python interpreter. Empty means automatic discovery. |
+| `vanta.server.path` | `""` | Path to the `vanta` executable or a Python interpreter. Empty means automatic discovery. Used for both the language server and the debug adapter. |
+| `vanta.debug.gdbPath` | `""` | Path to a GDB executable. Empty means `VANTA_GDB`, a GDB beside the C++ compiler, a WinLibs/MSYS2 installation, or `gdb` on `PATH`. |
 
-Run **Vanta: Restart Language Server** after changing the setting.
+Run **Vanta: Restart Language Server** after changing `vanta.server.path`. The
+GDB setting is read when a new debug session starts.
 
 Example for a Windows virtualenv:
 
@@ -116,6 +121,39 @@ Example using the Python fallback:
 }
 ```
 
+## Debugging
+
+The extension registers the `vanta` debugger type. Press **F5** on a Vanta file
+and choose **Vanta** if prompted, or add a configuration:
+
+```json
+{
+  "type": "vanta",
+  "request": "launch",
+  "name": "Debug Vanta Program",
+  "program": "${workspaceFolder}/game.vnt",
+  "cwd": "${workspaceFolder}",
+  "args": [],
+  "stopOnEntry": false
+}
+```
+
+The adapter builds an unoptimized native executable with Vanta source
+locations, starts GDB in MI2 mode, and translates breakpoints, stack frames,
+scopes, stepping, and output into DAP. The **Locals** and **Arguments** scopes
+show Vanta names without the generated `v_` prefix. Breakpoints in imported
+Vanta files work because every statement carries its original file and line.
+
+A debug session needs GDB plus a GCC or Clang toolchain. MSVC builds normal
+programs but emits PDB files, which this debugger does not read. Set
+`vanta.debug.gdbPath` when GDB is not on `PATH`. The debug adapter is launched
+through the same discovery as the language server: a configured
+`vanta.server.path` may be a `vanta` executable or a Python interpreter, and
+the client runs `vanta dap` or `python -m compiler dap`.
+
+See [`docs/DEBUGGER.md`](DEBUGGER.md) for the full guide, editor-agnostic DAP
+setup, source-mapping details, and troubleshooting.
+
 ## Other editors
 
 Any LSP client can launch the server as a stdio process:
@@ -128,6 +166,16 @@ The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, hover, definition, and document symbols. It does
 not require a workspace root to start.
 
+For debugging, any DAP client can launch:
+
+```powershell
+vanta dap
+```
+
+The adapter uses `Content-Length`-framed DAP on stdin/stdout and accepts the
+standard launch fields `program`, `cwd`, `args`, and `stopOnEntry`, plus an
+optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
+
 ## Limitations
 
 - The frontend stops at the first lex, parse, load, or type error, so the
@@ -138,9 +186,10 @@ not require a workspace root to start.
   declaration and local-variable information.
 - There is no rename, code action, formatting, workspace symbol, or semantic
   tokens support yet.
-- There is no debugger or DAP adapter. Vanta compiles to C++ without mapping
-  generated lines back to Vanta source, so stepping through Vanta code is a
-  later milestone.
+- The debugger is intentionally a first milestone: no conditional, function,
+  logpoint, or data breakpoints; no watch expressions or editable variables;
+  no attach, remote, restart, LLDB, or MSVC/PDB support. Debug sessions always
+  use an unoptimized build.
 
 ## Troubleshooting
 
@@ -163,3 +212,7 @@ line, then a UTF-8 JSON body. Send `shutdown` and then `exit` to stop the
 process. `tests/test_lsp.py` exercises the transport through both
 `vanta lsp` and `python -m compiler lsp`, along with every editor request,
 unsaved buffers, imported-file diagnostics, and UTF-16 position conversion.
+`tests/test_dap.py` covers DAP framing, GDB/MI parsing, debug source markers,
+and optional GDB tests that verify a breakpoint lands on the original Vanta
+file and line and that a real stdio adapter session can inspect locals and
+finish cleanly.

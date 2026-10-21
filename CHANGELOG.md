@@ -2,6 +2,44 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.33.0 - 2026-10-21
+
+- Native debugger. `vanta dap` is a Debug Adapter Protocol server backed by
+  GDB/MI2. It builds the requested Vanta program as an unoptimized native
+  executable, sets breakpoints by Vanta source path and line, and translates
+  GDB stacks, scopes, variables, stepping, pauses, and process exit into DAP.
+  `python -m compiler dap` provides the Python-only fallback.
+- Source mapping. Debug builds emit absolute `#line` directives around
+  functions, statements, and match arms, so GDB reports Vanta files and lines
+  directly. The generated wrapper and entry point stay attributed to the
+  generated `main.cpp`. Debug compiles use
+  `-O0 -g3 -fno-omit-frame-pointer`; release builds are unchanged.
+  `vanta build --debug` exposes the same source-mapped build.
+- Debugger features. Line breakpoints work in the entry file and imported Vanta
+  files. The adapter provides stack traces, **Locals** and **Arguments**
+  scopes (using Vanta names without the generated `v_` prefix), continue,
+  pause, step over, step into, step out, `stopOnEntry`, program stdout/stderr
+  in the debug console, and clean terminate/disconnect. User output is
+  forwarded from both GDB output channels; the `(gdb)` prompt is filtered.
+- Toolchain handling. GDB discovery accepts `vanta.debug.gdbPath`,
+  `VANTA_GDB`, a GDB beside the C++ compiler, WinLibs/MSYS2 installations, or
+  `gdb` on `PATH`, and skips candidates that fail a startup probe. The
+  debugger requires a GCC or Clang toolchain because MSVC emits PDB files,
+  which GDB does not read. `vanta doctor` and normal builds are unchanged.
+- VS Code client. The extension version is 0.4.0. It registers the `vanta`
+  debugger type, a launch-configuration provider, and a debug-adapter factory
+  that reuses the language server's executable/Python discovery. A new
+  `vanta.debug.gdbPath` setting selects GDB; `vanta.server.path` works for both
+  LSP and DAP.
+- Docs and tests. New `docs/DEBUGGER.md` covers VS Code, editor-agnostic DAP,
+  source mapping, GDB discovery, and troubleshooting. `docs/EDITOR.md`,
+  `docs/ARCHITECTURE.md`, README, and roadmap are updated. 710 tests total,
+  including DAP framing, GDB/MI parsing, debug source markers, a real GDB
+  breakpoint/source-mapping test, and a stdio DAP session that launches,
+  stops, inspects locals, continues, and disconnects. Conditional breakpoints,
+  watch expressions, editable variables, attach/remote debugging, LLDB, and
+  MSVC/PDB remain future work.
+
 ## v0.32.0 - 2026-10-21
 
 - Language server. `vanta lsp` speaks the Language Server Protocol over
@@ -36,7 +74,7 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
   settings, features, limitations, and troubleshooting. README, roadmap, and
   architecture notes are updated. 692 tests total, including protocol-level
   LSP tests, loader-overlay tests, unsaved-buffer diagnostics, and UTF-16
-  position conversion. Debugger support remains a later milestone.
+  position conversion. Debugger support was the next milestone.
 
 ## v0.31.0 - 2026-10-21
 

@@ -1,3 +1,5 @@
+import os
+
 from . import ast_nodes as A
 from . import VERSION
 from .formats import parse_format
@@ -162,9 +164,11 @@ def _escape_cpp_string(s: str) -> str:
 
 
 class CodeGen:
-    def __init__(self, program: A.Program, tc):
+    def __init__(self, program: A.Program, tc, debug=False, debug_filename=None):
         self.program = program
         self.tc = tc
+        self.debug = debug
+        self.debug_filename = debug_filename
         self.lines = []
         self.indent = 0
         self.temp_counter = 0
@@ -177,6 +181,36 @@ class CodeGen:
 
     def emit(self, s=''):
         self.lines.append('    ' * self.indent + s)
+
+    def _mark(self, pos):
+        """Emit a #line marker so native debuggers see Vanta locations.
+
+        This is only enabled for debug builds.  The marker deliberately lives
+        at column zero: a preprocessor directive is not valid after the code
+        generator's normal indentation.
+        """
+        if not self.debug or pos is None:
+            return
+        filename = getattr(pos, 'file', None)
+        line = getattr(pos, 'line', None)
+        if not filename or not line:
+            return
+        # Forward slashes keep the directive portable and are understood by
+        # both GDB and the C++ preprocessor on Windows.
+        path = os.path.abspath(filename).replace('\\', '/')
+        self.lines.append(f'#line {line} {_escape_cpp_string(path)}')
+
+    def _generated_line(self, line=1):
+        """Return debug locations to the generated C++ file.
+
+        Wrapper helpers and the native entry point are compiler-generated
+        plumbing; a stack trace should identify them as generated code rather
+        than leave them attributed to the last Vanta statement.
+        """
+        if self.debug:
+            name = self.debug_filename or 'vanta_generated.cpp'
+            name = os.path.abspath(name).replace('\\', '/')
+            self.lines.append(f'#line {line} {_escape_cpp_string(name)}')
 
     def _ctype(self, t) -> str:
         """C++ spelling of a Vanta type, resolving function-type aliases."""
@@ -476,6 +510,7 @@ class CodeGen:
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
             self._gen_func(fd)
+        self._generated_line()
         self._emit_wrapper_defs()
         self._emit_wrapper_decls()
         self.indent -= 1
@@ -483,6 +518,7 @@ class CodeGen:
         self.emit('')
         main = next((f for f in funcs if f.name == 'main'), None)
         if main is not None:
+            self._generated_line()
             self.emit('int main(int argc, char** argv) {')
             self.indent += 1
             self.emit('vanta::set_args(argc, argv);')
@@ -676,6 +712,7 @@ class CodeGen:
         return self._expr(e)
 
     def _gen_func(self, fn: A.FuncDecl):
+        self._mark(fn.pos)
         sig = self._func_sig(fn)
         self.emit(sig + ' {')
         self.indent += 1
@@ -711,6 +748,7 @@ class CodeGen:
         self.emit('')
 
     def _gen_stmt(self, stmt):
+        self._mark(getattr(stmt, 'pos', None))
         if isinstance(stmt, A.VarDecl):
             tt = getattr(stmt, 'var_type', None)
             self.emit(f'{self._ctype(tt)} v_{stmt.name} = {self._expr(stmt.value)};')
@@ -731,6 +769,7 @@ class CodeGen:
             for s in stmt.then_body: self._gen_stmt(s)
             self.indent -= 1
             for (c, body) in stmt.elif_branches:
+                self._mark(getattr(c, 'pos', None))
                 self.emit(f'}} else if ({self._expr(c)}) {{')
                 self.indent += 1
                 for s in body: self._gen_stmt(s)
@@ -825,6 +864,7 @@ class CodeGen:
         self.indent += 1
         self.emit(f'const auto __match_{n} = {self._expr(stmt.value)};')
         for i, arm in enumerate(stmt.arms):
+            self._mark(getattr(arm, 'pos', None))
             if arm.is_else:
                 if i == 0:
                     self.emit('{')

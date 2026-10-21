@@ -1,7 +1,7 @@
 # Vanta for VS Code
 
-Full language support for Vanta `.vnt` files, powered by the `vanta lsp`
-language server.
+Language support and native debugging for Vanta `.vnt` files, powered by the
+`vanta lsp` language server and the `vanta dap` debug adapter.
 
 ## Features
 
@@ -16,6 +16,9 @@ language server.
   imported declarations, enum members, and struct fields.
 - **Document symbols** / outline view for functions, structs, enums, fields,
   and enum members.
+- **Debugging** with the `vanta` debugger type: line breakpoints, stack
+  traces, locals and arguments, continue/pause/step, `stopOnEntry`, program
+  output, and clean termination. Requires GDB and a GCC/Clang toolchain.
 - Syntax highlighting and language configuration, including `#` comments.
 
 ## Requirements
@@ -27,7 +30,9 @@ language server.
   2. `vanta` or `vanta.exe` inside a workspace `.venv`, `venv`, or `env`,
   3. `vanta` on `PATH`,
   4. a Python interpreter that can `import compiler` (the extension then runs
-     `python -m compiler lsp`).
+     `python -m compiler lsp` or `python -m compiler dap`).
+- For debugging: GDB 10+ and a GCC/Clang C++17 toolchain. MSVC/PDB is not
+  supported by the debugger.
 
 Install the compiler with:
 
@@ -42,10 +47,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.3.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.4.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.3.0.vsix
+code --install-extension vanta-language-0.4.0.vsix
 ```
 
 ### Build it yourself
@@ -56,7 +61,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.3.0.vsix
+code --install-extension vanta-language-0.4.0.vsix
 ```
 
 ### Run from source
@@ -68,10 +73,11 @@ development window, open any `.vnt` file.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `vanta.server.path` | `""` | Path to the `vanta` executable or a Python interpreter. Empty means automatic discovery. |
+| `vanta.server.path` | `""` | Path to the `vanta` executable or a Python interpreter. Empty means automatic discovery. Used for both LSP and DAP. |
+| `vanta.debug.gdbPath` | `""` | Path to GDB. Empty means `VANTA_GDB`, a GDB beside the compiler, WinLibs/MSYS2, or `gdb` on `PATH`. |
 
 Use **Vanta: Restart Language Server** from the command palette after changing
-the setting.
+`vanta.server.path`. `vanta.debug.gdbPath` is read when a debug session starts.
 
 ### Explicit executable on Windows
 
@@ -93,9 +99,33 @@ interpreter that can import the compiler:
 ```
 
 When `vanta.server.path` names a Vanta executable, the extension runs
-`<path> lsp`. When it names a Python interpreter, it runs
-`<path> -m compiler lsp`. When it names a command (for example `vanta`), it
+`<path> lsp` for the language server and `<path> dap` for the debugger. When it
+names a Python interpreter, it runs `<path> -m compiler lsp` or
+`<path> -m compiler dap`. When it names a command (for example `vanta`), it
 relies on `PATH`.
+
+## Debugging
+
+Open a `.vnt` file and press **F5**, or add a launch configuration:
+
+```json
+{
+  "type": "vanta",
+  "request": "launch",
+  "name": "Debug Vanta Program",
+  "program": "${workspaceFolder}/game.vnt",
+  "cwd": "${workspaceFolder}",
+  "args": [],
+  "stopOnEntry": false
+}
+```
+
+The extension builds an unoptimized executable with Vanta source locations and
+starts the debug adapter. Breakpoints, stack frames, locals, arguments,
+stepping, and program output work in the Debug view. Set
+`vanta.debug.gdbPath` when GDB is not on `PATH`. See
+[`docs/DEBUGGER.md`](https://github.com/markindo20/vanta/blob/master/docs/DEBUGGER.md)
+for the full guide and troubleshooting.
 
 ## Troubleshooting
 
@@ -124,3 +154,5 @@ The TypeScript source lives in `src/extension.ts`; compiled output goes to
 
 The language server is implemented in `compiler/lsp.py` at the repository
 root. It speaks JSON-RPC over stdin/stdout and uses full-document text sync.
+The debug adapter is `compiler/dap.py`; it speaks DAP over stdin/stdout and
+drives GDB/MI2 using source-mapped debug builds from `compiler/driver.py`.

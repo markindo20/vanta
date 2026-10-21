@@ -20,10 +20,11 @@ jobs:
 
       # SDL2 (with SDL_ttf and SDL2_image for the text and image examples)
       # makes the sdl_* examples and the games (and their headless smoke
-      # tests) runnable; without them those tests skip.
-      - name: Set up SDL2, SDL_ttf, and SDL2_image (Linux)
+      # tests) runnable; without them those tests skip. GDB lets the debugger
+      # integration test run instead of skipping.
+      - name: Set up SDL2, SDL_ttf, SDL2_image, and GDB (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev gdb
       - name: Set up SDL2, SDL_ttf, and SDL2_image (macOS)
         if: runner.os == 'macOS'
         run: brew install sdl2 sdl2_ttf sdl2_image
@@ -34,6 +35,7 @@ jobs:
       # the DLLs the compiled test binaries need, SDL2 included), and pin CXX
       # to g++ so Windows matches the toolchain used in development. UCRT64 is
       # MSYS2's current default; the older mingw64 environment is deprecated.
+      # UCRT64 GDB lets the debugger integration test run instead of skipping.
       - name: Set up UCRT64 (Windows)
         id: msys2
         if: runner.os == 'Windows'
@@ -41,7 +43,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_ttf mingw-w64-ucrt-x86_64-SDL2_image
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gdb mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_ttf mingw-w64-ucrt-x86_64-SDL2_image
       - name: Expose UCRT64 on PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

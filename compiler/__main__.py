@@ -1,4 +1,4 @@
-"""Support ``python -m compiler lsp`` as a fallback launch path."""
+"""Support ``python -m compiler <command>``, including lsp and dap fallbacks."""
 import sys
 
 from .driver import main

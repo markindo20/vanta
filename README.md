@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.32.0)
+# Vanta - a game-oriented systems language (v0.33.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -10,6 +10,7 @@ Vanta is a Python package with a native compile step, so it needs:
 
 - Python 3.10+ (tested on 3.10.11 and 3.14)
 - A C++17 compiler: `clang++`, `g++`, or MSVC's `cl`
+- Optional: GDB 10+ and a GCC/Clang toolchain for native debugging
 
 Install the `vanta` command with pipx (recommended) or pip:
 
@@ -56,7 +57,11 @@ Run it:
 vanta check hello.vnt          # type-check only (fast, no C++)
 vanta hello.vnt                # shorthand for `vanta run hello.vnt`
 vanta build hello.vnt --release
+vanta build hello.vnt --debug  # source-mapped build for GDB
 ```
+
+Press **F5** in VS Code with a `.vnt` file open to debug it, or launch the
+editor-agnostic debug adapter with `vanta dap`.
 
 Diagnostics print the offending source line and a caret under the reported
 column. Source files may start with a UTF-8 BOM.
@@ -115,23 +120,29 @@ the generated C++. On C++ compilation failure the generated source is saved to
 
 ### Editor support
 
-v0.32.0 ships a language server:
+v0.33.0 ships a language server and a native debugger:
 
 ```powershell
 vanta lsp
+vanta dap
 ```
 
-It speaks LSP over stdin/stdout and provides diagnostics, completion, hover,
-go-to-definition, and document symbols. The VS Code client in
-[`editors/vscode/`](editors/vscode/) adds those features on top of the existing
-syntax highlighting; install the VSIX from the latest GitHub release or build
-it from source. The server reads unsaved buffers, so diagnostics also work
-before a file is saved.
+`vanta lsp` speaks LSP over stdin/stdout and provides diagnostics, completion,
+hover, go-to-definition, and document symbols. `vanta dap` speaks the Debug
+Adapter Protocol and drives GDB/MI2: line breakpoints, stack traces, locals
+and arguments, continue/step/pause, `stopOnEntry`, program output, and clean
+termination. A debug build uses `#line` markers so GDB reports Vanta files and
+lines directly. The VS Code client in [`editors/vscode/`](editors/vscode/)
+adds both features on top of the existing syntax highlighting; install the
+VSIX from the latest GitHub release or build it from source. The server reads
+unsaved buffers, so diagnostics also work before a file is saved.
 
 The client finds `vanta` on `PATH`, in a workspace virtualenv, or through a
 Python environment that can import the compiler. Set `vanta.server.path` to
-override discovery. See [`docs/EDITOR.md`](docs/EDITOR.md) for setup,
-settings, and troubleshooting. Debugging is not part of this milestone.
+override discovery and `vanta.debug.gdbPath` to choose GDB. See
+[`docs/EDITOR.md`](docs/EDITOR.md) for setup and
+[`docs/DEBUGGER.md`](docs/DEBUGGER.md) for debugging, settings, and
+troubleshooting.
 
 ## Linking C libraries
 
@@ -206,13 +217,13 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `main.py` | CLI entry point for a checkout |
 | `pyproject.toml` | Package metadata; installing creates the `vanta` command |
 | `setup.py` | Build hook that puts the runtime, game kit, assets, and standard library in the wheel |
-| `compiler/` | Python frontend and language server: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver, `lsp.py` |
+| `compiler/` | Python frontend, language server, and debug adapter: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver, `lsp.py`, `dap.py` |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (692 tests) |
-| `editors/vscode/` | VS Code language client, syntax grammar, and VSIX build |
-| `docs/` | Language reference, editor guide, and architecture notes |
+| `tests/` | `unittest` suite (710 tests) |
+| `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
+| `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
 ## Examples
 
@@ -270,13 +281,15 @@ python -m unittest discover -s tests
 
 Integration tests compile and run real binaries, so they need a C++17 compiler
 on `PATH`; they skip automatically if none is found. To force a specific
-compiler, set the `CXX` environment variable.
+compiler, set the `CXX` environment variable. The GDB debugger integration test
+also skips when no working GDB is available.
 
 ## Documentation
 
 - [`docs/TUTORIAL.md`](docs/TUTORIAL.md) — hands-on introduction, ends with a small project
 - [`docs/LANGUAGE_REFERENCE.md`](docs/LANGUAGE_REFERENCE.md) — syntax and semantics
-- [`docs/EDITOR.md`](docs/EDITOR.md) — language server and VS Code setup
+- [`docs/EDITOR.md`](docs/EDITOR.md) — language server, debugger, and VS Code setup
+- [`docs/DEBUGGER.md`](docs/DEBUGGER.md) — debugger guide, DAP setup, and troubleshooting
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the compiler is put together
 - [`ROADMAP.md`](ROADMAP.md) — candidate next milestones and known gaps
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
@@ -347,8 +360,12 @@ are real:
   type, including through an inferred function or constant type
 
 Editor support covers diagnostics, completion, hover, definition, and
-document symbols through `vanta lsp` and the VS Code client. There is no
-debugger or DAP adapter yet, and generated C++ is not source-mapped back to
-Vanta lines, so stepping through Vanta source is future work.
+document symbols through `vanta lsp` and the VS Code client. `vanta dap` adds
+native debugging: line breakpoints, stack traces, locals and arguments,
+continue/step/pause, `stopOnEntry`, program output, and clean termination.
+Debug builds are unoptimized and source-mapped back to Vanta lines; they need
+GDB plus a GCC or Clang toolchain. Conditional breakpoints, watch expressions,
+editable variables, attach/remote debugging, LLDB, and MSVC/PDB are still
+future work.
 
 These are tracked, prioritised, and sized in [ROADMAP.md](ROADMAP.md).

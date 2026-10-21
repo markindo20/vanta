@@ -75,7 +75,10 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    the namespace, so they are spelled in plain C: callback parameters expand
    inline as declarators (`int32_t(*v_f)(int32_t)` — the name folds inside
    the stars), and user structs are namespace-qualified with their tags
-   forward-declared ahead of the block. Each distinct function type is
+   forward-declared ahead of the block. In debug builds, `CodeGen` also emits
+   absolute `#line` directives around functions, statements, and match arms,
+   so native debug information points at the Vanta source instead of the
+   generated `main.cpp`. Each distinct function type is
    emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
    namespace, innermost first, and drives the in-namespace spellings.
    Struct and enum definitions are emitted in dependency order; forward tags
@@ -117,19 +120,26 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    `-I`/`-L`/`-l` - or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents -
    through to the C++ compiler. Generated code is built with FP contraction
    off (`-ffp-contract=off`, or `/fp:strict` for MSVC), so deterministic
-   float-based runs do not diverge between x86-64 and arm64.
+   float-based runs do not diverge between x86-64 and arm64. `build --debug`
+   and the debug adapter's `build_debug()` path enable source markers; with
+   GCC/Clang they force `-O0 -g3 -fno-omit-frame-pointer`. The debug adapter
+   rejects MSVC because GDB cannot read PDB debug information.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, hover, definition, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
+11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
+   `dap` subcommand runs it on stdin/stdout; it builds the program with Vanta
+   source markers, drives GDB, translates breakpoints/frames/scopes/step
+   requests, and forwards target output as DAP output events.
 
 Note that `component` and `system` are parsed as flags on the struct and
 function declarations respectively (`parse_struct(is_component)`,
 `parse_func(is_system)`). They are aliases that express ECS intent and have no
 distinct semantics.
 
-## Editor support (v0.32.0)
+## Editor support (v0.33.0)
 
 `vanta lsp` runs `lsp.py` as a stdio language server. Each open document is
 stored by URI; a didChange notification replaces the whole buffer, matching
@@ -156,6 +166,39 @@ uses `vscode-languageclient` over stdio and resolves the server command from
 that can import `compiler`. It passes the workspace as the server's working
 directory so relative imports and Python module discovery behave like the
 editor's project.
+
+## Debugger (v0.33.0)
+
+`vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
+request names a Vanta source file; the adapter calls `build_debug()` in
+`driver.py`, which runs the normal frontend, emits C++ with debug source
+markers, and compiles it with an unoptimized GCC/Clang command. The build lives
+in a temporary directory owned by the session.
+
+The bridge is a small synchronous GDB/MI2 client. `GdbMi` starts GDB with
+`--interpreter=mi2 --quiet --nx`, multiplexes result records (`^done`,
+`^running`, `^error`, `^exit`), async records (`*stopped`, `*running`), and
+notifications (`=thread-created`, `=library-loaded`), and exposes a command
+method that waits for the matching token. GDB writes the inferior's stdout and
+stderr to two different pipes in practice: target stdout may arrive as plain
+lines on GDB's stdout, while target stderr arrives on GDB's stderr. `dap.py`
+forwards target stdout as DAP `stdout`, target stderr as DAP `stderr`, and
+GDB's own notices as `console`, filtering the `(gdb)` prompt. This detail is
+why the adapter does not merge GDB's stderr into the MI stream.
+
+Breakpoints are sent to GDB as `path:line`, using the same absolute,
+forward-slash path that `CodeGen` writes into `#line`. GDB therefore resolves
+breakpoints and reports frames in Vanta terms without a post-processing source
+map. User variables are emitted with a `v_` prefix; the adapter strips it for
+the **Locals** and **Arguments** scopes and hides compiler temporaries.
+Generated wrapper frames are attributed to the temporary generated `main.cpp`
+so they are visibly distinct from Vanta frames.
+
+DAP stdio lifecycle is intentionally blunt: after `serve()` cleans up GDB and
+the temporary build, `run_stdio()` flushes and exits with `os._exit(0)`. A
+daemon stdin-reader thread can otherwise fight interpreter shutdown over the
+buffered stdin lock and produce a fatal Python error when the client closes the
+pipe.
 
 ## Backend (C++17)
 
@@ -193,7 +236,7 @@ editor's project.
 - `g_argc` / `g_argv`, populated by the generated `main`, exposed as
   `arg_count` / `arg_str`
 
-## Packaging (v0.28.0, VSIX in v0.32.0)
+## Packaging (v0.28.0, VSIX in v0.32.0, debugger in v0.33.0)
 
 A checkout keeps the runtime at `runtime/`, the kit at `examples/gamekit/`,
 the assets at `examples/assets/`, and the standard library at `stdlib/`, so
@@ -216,7 +259,9 @@ VSIX, attaches the wheel, sdist, and VSIX to the GitHub release, and can
 publish the Python distributions to PyPI through Trusted Publishing (enabled
 with the `PUBLISH_PYPI=true` repository variable). The VSIX includes its
 production `vscode-languageclient` dependencies, so it installs without a
-separate `npm install`.
+separate `npm install`. The same VSIX carries the `vanta` debugger
+contribution; the adapter itself lives in the Python package, so an installed
+wheel and a checkout provide the same debugger.
 
 ## Versioning
 
@@ -247,8 +292,11 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 692 `unittest` cases across the lexer, parser, loader, type
-checker, code generator, language server, and end-to-end integration.
+`tests/` holds 710 `unittest` cases across the lexer, parser, loader, type
+checker, code generator, language server, debug adapter, and end-to-end
+integration. The GDB tests skip when no working GDB is found; one verifies
+source-mapped breakpoints directly, and another runs a complete stdio DAP
+session through launch, stop, locals, continue, and disconnect.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

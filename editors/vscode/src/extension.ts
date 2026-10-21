@@ -11,6 +11,8 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 
+type ServerMode = 'lsp' | 'dap';
+
 interface ServerCommand {
   command: string;
   args: string[];
@@ -35,7 +37,66 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  const debugConfigurationProvider =
+    vscode.debug.registerDebugConfigurationProvider('vanta', {
+      resolveDebugConfiguration(folder, config) {
+        if (!config.program) {
+          const editor = vscode.window.activeTextEditor;
+          if (editor?.document.languageId === 'vanta') {
+            config.program = editor.document.uri.fsPath;
+          }
+        }
+        if (!config.cwd && folder) {
+          config.cwd = folder.uri.fsPath;
+        }
+        return config;
+      },
+    });
+  context.subscriptions.push(debugConfigurationProvider);
+
+  const debugAdapterFactory =
+    vscode.debug.registerDebugAdapterDescriptorFactory('vanta', {
+      createDebugAdapterDescriptor(session) {
+        const workspace = session.workspaceFolder?.uri.fsPath ??
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const server = resolveServer('dap', workspace);
+        if (server === undefined) {
+          throw new Error(
+            'Vanta: could not find the vanta executable or Python package ' +
+            'for the debugger.');
+        }
+        const env = debugAdapterEnv(workspace);
+        output.appendLine(
+          `Starting Vanta debug adapter: ${server.command} ` +
+          server.args.join(' '));
+        return new vscode.DebugAdapterExecutable(
+          server.command, server.args, { cwd: server.cwd, env });
+      },
+    });
+  context.subscriptions.push(debugAdapterFactory);
   await start(context);
+}
+
+function debugAdapterEnv(workspace?: string): { [key: string]: string } {
+  const env: { [key: string]: string } = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  const configured =
+    (vscode.workspace.getConfiguration('vanta').get<string>('debug.gdbPath') ?? '')
+      .trim();
+  if (configured) {
+    let expanded = expandConfiguredPath(configured, workspace);
+    if (workspace !== undefined && !path.isAbsolute(expanded) &&
+        looksLikePath(expanded)) {
+      expanded = path.resolve(workspace, expanded);
+    }
+    env.VANTA_GDB = expanded;
+  }
+  return env;
 }
 
 export async function deactivate(): Promise<void> {
@@ -43,7 +104,7 @@ export async function deactivate(): Promise<void> {
 }
 
 async function start(context: vscode.ExtensionContext): Promise<void> {
-  const server = resolveServer();
+  const server = resolveServer('lsp');
   if (server === undefined) {
     const action = await vscode.window.showErrorMessage(
       'Vanta: could not find the vanta executable or a Python environment ' +
@@ -126,8 +187,12 @@ async function stop(): Promise<void> {
   current.dispose();
 }
 
-function resolveServer(): ServerCommand | undefined {
-  const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+function resolveServer(
+  mode: ServerMode,
+  requestedWorkspace?: string,
+): ServerCommand | undefined {
+  const workspace = requestedWorkspace ??
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const config = vscode.workspace.getConfiguration('vanta');
   const configured = (config.get<string>('server.path') ?? '').trim();
   if (configured) {
@@ -144,20 +209,24 @@ function resolveServer(): ServerCommand | undefined {
     }
     return {
       command: expanded,
-      args: serverArguments(expanded),
+      args: serverArguments(expanded, mode),
       cwd: workspace,
     };
   }
 
   const executable = findVantaExecutable(workspace);
   if (executable !== undefined) {
-    return { command: executable, args: ['lsp'], cwd: workspace };
+    return { command: executable, args: [mode], cwd: workspace };
   }
 
   const python = findPython(workspace);
   if (python !== undefined) {
     output.appendLine(`Using Python module fallback: ${python}`);
-    return { command: python, args: ['-m', 'compiler', 'lsp'], cwd: workspace };
+    return {
+      command: python,
+      args: ['-m', 'compiler', mode],
+      cwd: workspace,
+    };
   }
   return undefined;
 }
@@ -187,12 +256,12 @@ function looksLikePath(value: string): boolean {
   return value.includes('/') || value.includes('\\') || /^[A-Za-z]:/.test(value);
 }
 
-function serverArguments(command: string): string[] {
+function serverArguments(command: string, mode: ServerMode): string[] {
   const base = path.basename(command).toLowerCase().replace(/\.exe$/, '');
   if (/^(?:python(?:3(?:\.\d+)?m?)?|py|pypy3?)$/.test(base)) {
-    return ['-m', 'compiler', 'lsp'];
+    return ['-m', 'compiler', mode];
   }
-  return ['lsp'];
+  return [mode];
 }
 
 function findVantaExecutable(workspace?: string): string | undefined {
