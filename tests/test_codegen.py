@@ -953,6 +953,85 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('for (int32_t __i_1 = 0; __i_1 < 3; __i_1 += 1) {', cpp)
         self.assertIn('int32_t v_x = __it_1[__i_1];', cpp)
 
+    # ---------- generic enums (v0.31.0) ----------
+
+    def test_generic_enum_monomorphized_emit(self):
+        cpp = gen("enum Option<T>:\n"
+                  "    None\n"
+                  "    Some(T)\n"
+                  "func main() -> void:\n"
+                  "    let value: Option<i32> = Option.Some(5)\n"
+                  "    print_i32(1)\n")
+        self.assertIn('struct Option__g0 {', cpp)
+        self.assertIn('inline Option__g0 make_Option__g0_Some(int32_t a0) {', cpp)
+        self.assertIn('Option__g0 v_value = make_Option__g0_Some(5);', cpp)
+        self.assertNotIn('struct Option {', cpp)
+
+    def test_generic_enum_instances_are_distinct(self):
+        cpp = gen("enum Option<T>:\n"
+                  "    None\n"
+                  "    Some(T)\n"
+                  "func main() -> void:\n"
+                  "    let number = Option.Some(5)\n"
+                  "    let text = Option.Some(\"hello\")\n"
+                  "    print_i32(1)\n")
+        self.assertIn('struct Option__g0 {', cpp)
+        self.assertIn('struct Option__g1 {', cpp)
+        self.assertIn('int32_t p_Some_0;', cpp)
+        self.assertIn('vanta::Str p_Some_0;', cpp)
+
+    def test_generic_enum_match_uses_concrete_tag(self):
+        cpp = gen("enum Option<T>:\n"
+                  "    None\n"
+                  "    Some(T)\n"
+                  "func read(value: Option<i32>) -> i32:\n"
+                  "    match value:\n"
+                  "        Option.None:\n"
+                  "            return 0\n"
+                  "        Option.Some(v):\n"
+                  "            return v\n"
+                  "func main() -> void:\n"
+                  "    print_i32(read(Option.Some(2)))\n")
+        self.assertIn('__match_1.v_tag == Option__g0::VantaTag::None', cpp)
+        self.assertIn('__match_1.v_tag == Option__g0::VantaTag::Some', cpp)
+        self.assertIn('const auto& v_v = __match_1.p_Some_0;', cpp)
+
+    def test_generic_enum_type_definition_dependency_order(self):
+        cpp = gen("enum Option<T>:\n"
+                  "    None\n"
+                  "    Some(T)\n"
+                  "struct Holder:\n"
+                  "    value: Option<i32>\n"
+                  "func main() -> void:\n"
+                  "    let h = Holder(value: Option.None)\n"
+                  "    print_i32(1)\n")
+        option_at = cpp.index('struct Option__g0 {')
+        holder_at = cpp.index('struct Holder {')
+        self.assertLess(option_at, holder_at)
+
+    def test_generic_enum_phantom_member_uses_instance_name(self):
+        cpp = gen("enum Marker<T>:\n"
+                  "    A\n"
+                  "    B\n"
+                  "func main() -> void:\n"
+                  "    let marker: Marker<i32> = Marker.A\n"
+                  "    print_i32(enum_to_i32(marker))\n")
+        self.assertIn('enum class Marker__g0 : int32_t { A = 0, B = 1 };', cpp)
+        self.assertIn('Marker__g0 v_marker = Marker__g0::A;', cpp)
+        self.assertNotIn('Marker v_marker', cpp)
+
+    def test_generic_enum_nested_instances_precede_outer(self):
+        cpp = gen("enum Option<T>:\n"
+                  "    None\n"
+                  "    Some(T)\n"
+                  "func main() -> void:\n"
+                  "    let value: Option<Option<i32>> = "
+                  "Option.Some(Option.None)\n"
+                  "    print_i32(1)\n")
+        inner = cpp.index('struct Option__g0 {')
+        outer = cpp.index('struct Option__g1 {')
+        self.assertLess(inner, outer)
+
 
 if __name__ == '__main__':
     unittest.main()

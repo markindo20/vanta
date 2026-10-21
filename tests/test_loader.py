@@ -100,6 +100,29 @@ class LoaderTests(unittest.TestCase):
         self.assertIn(lib, msg)
         self.assertNotIn('main.vnt', msg)
 
+    def test_std_import_falls_back_to_standard_library(self):
+        main = self.write('main.vnt', 'import "std/option.vnt"\n'
+                                      'func main() -> void:\n'
+                                      '    let value: Option<i32> = Option.None\n')
+        prog = load_program(main)
+        tc = TypeChecker(prog, main)
+        tc.register()
+        tc.check()
+        self.assertTrue(any(repr(et) == 'Option<i32>'
+                            for et in tc.enums.values()))
+
+    def test_sibling_std_path_wins_over_standard_library(self):
+        self.write('std/option.vnt', 'enum LocalOption:\n    None\n')
+        main = self.write('main.vnt', 'import "std/option.vnt"\n'
+                                      'func main() -> void:\n'
+                                      '    let value = LocalOption.None\n')
+        prog = load_program(main)
+        tc = TypeChecker(prog, main)
+        tc.register()
+        tc.check()
+        self.assertIn('LocalOption', tc.enums)
+        self.assertNotIn('Option', tc.generic_enums)
+
 
 if __name__ == '__main__':
     unittest.main()

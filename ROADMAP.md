@@ -5,10 +5,28 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.30.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.31.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.31.0
+
+Generic enums and a library-shaped standard library landed. An enum
+declaration may take type parameters (`enum Result<T, E>:`), payloads may use
+them, and each concrete instance (`Result<i32, str>`) is monomorphized with
+its own layout, tags, and constructors. Constructors infer missing parameters
+from a payload or an expected type; explicit forms such as
+`Option.None::<i32>()` cover contexts with no expected type. Matches remain
+exhaustive over the source family, type arguments obey module privacy, and
+non-copyable or recursive-by-value payloads are rejected.
+
+The standard library is real Vanta code: `stdlib/option.vnt` defines
+`Option<T>` and `stdlib/result.vnt` defines `Result<T, E>` as ordinary generic
+enums. `import "std/option.vnt"` resolves from a checkout or an installed wheel,
+with a sibling file taking precedence. `examples/option_result.vnt` is the
+worked example. Generic structs and generic functions are deliberately not
+part of this milestone.
 
 ## Landed in v0.30.0
 
@@ -22,15 +40,16 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.31.0)
+## Next: language (candidate v0.32.0)
 
-1. **Error handling with `Option`/`Result` — medium.** A library-shaped
-   alternative to sentinel values, built on payload enums now that module
-   boundaries make a standard library practical.
-2. **Module follow-ups — medium.** Per-field visibility, nested modules, and
-   a package/search-path story are deliberately out of v0.30.0. They become
+1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
+   a package/search-path story were deliberately out of v0.30.0. They become
    worth doing when a library wants to hide struct representation or when
    path-only imports become painful.
+2. **Generic follow-ups - large.** Generic enum payloads now cover
+   `Option`, `Result`, and reusable error containers. Generic structs,
+   generic functions, and constraints each need their own design and are not
+   assumed by this milestone.
 
 ## Kit and examples
 
@@ -45,6 +64,10 @@ public declarations. `examples/modules_demo/` is the worked example.
   helper, qualified and unqualified imports, module constants, and a payload
   enum crossing a module boundary; its output is frozen in the integration
   suite.
+- `examples/option_result.vnt` exercises the shipped generic `Option<T>` and
+  `Result<T, E>`, constructor inference, explicit type arguments, nested
+  error payloads, and exhaustive matches; its output is frozen in the
+  integration suite.
 - Keep the asset pipeline honest: `examples/assets/gen_assets.py` generates
   every image and sound the examples use; new examples add generators, never
   binaries from elsewhere.
@@ -68,6 +91,6 @@ public declarations. `examples/modules_demo/` is the worked example.
 
 ## Not scheduled
 
-Garbage collection, closures, generics — each is a language-design project,
-not a milestone. If one becomes necessary for a game, it graduates to the
-sections above with a concrete motivating program.
+Garbage collection, closures, and generic structs/functions are each a
+language-design project, not a milestone. If one becomes necessary for a
+game, it graduates to the sections above with a concrete motivating program.

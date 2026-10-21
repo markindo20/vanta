@@ -256,9 +256,101 @@ playing
 paused
 ```
 
-Several patterns can share one arm — `State.Menu, State.Paused:` — and
+Several patterns can share one arm - `State.Menu, State.Paused:` - and
 `break`/`continue` inside an arm still control the enclosing loop, so a
 match inside a `for` never swallows them.
+
+## Option and Result
+
+v0.31.0 adds generic enums and ships two library-shaped ones. Import
+`std/option.vnt` for a value that may be absent and `std/result.vnt` for a
+success value or an error. They are ordinary enums with type parameters, so
+`match` destructures them and the compiler checks exhaustiveness like any
+other enum. The full runnable file is
+[`examples/option_result.vnt`](../examples/option_result.vnt).
+
+```vanta
+# Option and Result are generic enums shipped with the standard library.
+
+import "std/option.vnt"
+import "std/result.vnt"
+
+struct ParseError:
+    code: i32
+
+func find_port(open: bool) -> Option<i32>:
+    if open:
+        return Option.Some(8080)
+    return Option.None
+
+func parse_positive(n: i32) -> Result<i32, ParseError>:
+    if n <= 0:
+        return Result.Err(ParseError(code: 400))
+    return Result.Ok(n)
+
+func describe(result: Result<i32, ParseError>) -> str:
+    match result:
+        Result.Ok(value):
+            return "ok"
+        Result.Err(error):
+            return "err"
+
+func main() -> void:
+    let open_port = find_port(true)
+    match open_port:
+        Option.Some(port):
+            print_i32(port)                    # 8080
+        Option.None:
+            print_i32(-1)
+
+    let closed_port: Option<i32> = Option.None
+    print_bool(closed_port == Option.None)     # true
+
+    let explicit_none = Option.None::<i32>()
+    print_bool(explicit_none == closed_port)   # true
+
+    let good = parse_positive(7)
+    let bad = parse_positive(-1)
+    print_str(describe(good))                  # ok
+    print_str(describe(bad))                   # err
+
+    match good:
+        Result.Ok(value):
+            print_i32(value)                   # 7
+        Result.Err(error):
+            print_i32(error.code)
+
+    match bad:
+        Result.Ok(value):
+            print_i32(value)
+        Result.Err(error):
+            print_i32(error.code)              # 400
+
+    let missing = Result.Err::<i32, str>("missing")
+    match missing:
+        Result.Ok(value):
+            print_i32(value)
+        Result.Err(message):
+            print_str(message)                 # missing
+```
+
+```
+8080
+true
+true
+ok
+err
+7
+400
+missing
+```
+
+`Option.Some(5)` infers `Option<i32>` from its payload, while
+`Option.None` takes its type from the annotation, return type, field, or
+argument around it. When neither can supply the type, write it explicitly:
+`Option.None::<i32>()`, or `Result.Err::<i32, str>("missing")`. See the
+[reference](LANGUAGE_REFERENCE.md#generic-enums-and-the-standard-library-v0310)
+for the full inference, visibility, and monomorphization rules.
 
 ## Arrays and checked access
 

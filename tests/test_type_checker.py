@@ -2315,6 +2315,152 @@ class TypeCheckerTests(unittest.TestCase):
                 "    if a == b:\n"
                 "        print_i32(1)\n")
 
+    # ---------- generic enums (v0.31.0) ----------
+
+    def test_generic_enum_infers_from_payload(self):
+        prog, tc = run("enum Option<T>:\n"
+                       "    None\n"
+                       "    Some(T)\n"
+                       "func main() -> void:\n"
+                       "    let value = Option.Some(5)\n")
+        decl = prog.decls[1].body[0]
+        self.assertEqual(repr(decl.var_type), 'Option<i32>')
+        self.assertEqual(repr(tc.enums[decl.var_type.name]), 'Option<i32>')
+
+    def test_generic_enum_none_uses_annotation(self):
+        run("enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "func main() -> void:\n"
+            "    let value: Option<i32> = Option.None\n"
+            "    match value:\n"
+            "        Option.None:\n"
+            "            print_i32(0)\n"
+            "        Option.Some(v):\n"
+            "            print_i32(v)\n")
+
+    def test_generic_result_constructors_use_return_type(self):
+        run("enum Result<T, E>:\n"
+            "    Ok(T)\n"
+            "    Err(E)\n"
+            "func parse(n: i32) -> Result<i32, str>:\n"
+            "    if n < 0:\n"
+            "        return Result.Err(\"negative\")\n"
+            "    return Result.Ok(n)\n")
+
+    def test_generic_enum_explicit_type_arguments(self):
+        prog, tc = run("enum Result<T, E>:\n"
+                       "    Ok(T)\n"
+                       "    Err(E)\n"
+                       "func main() -> void:\n"
+                       "    let ok = Result.Ok::<i32, str>(5)\n"
+                       "    let err = Result.Err::<i32, str>(\"bad\")\n")
+        self.assertEqual(repr(prog.decls[1].body[0].var_type), 'Result<i32, str>')
+        self.assertEqual(repr(prog.decls[1].body[1].var_type), 'Result<i32, str>')
+
+    def test_generic_enum_missing_inference_reports_parameter(self):
+        with self.assertRaisesRegex(
+                CheckError, "cannot infer type parameter 'E' for 'Result.Ok'"):
+            run("enum Result<T, E>:\n"
+                "    Ok(T)\n"
+                "    Err(E)\n"
+                "func main() -> void:\n"
+                "    let value = Result.Ok(5)\n")
+
+    def test_generic_enum_wrong_type_argument_count(self):
+        with self.assertRaisesRegex(
+                CheckError, "expects 1 type argument\\(s\\) <T>, got 2"):
+            run("enum Option<T>:\n"
+                "    None\n"
+                "    Some(T)\n"
+                "func main() -> void:\n"
+                "    let value: Option<i32, str> = Option.None\n")
+
+    def test_generic_enum_family_requires_arguments(self):
+        with self.assertRaisesRegex(
+                CheckError, "generic type 'Option' requires type arguments"):
+            run("enum Option<T>:\n"
+                "    None\n"
+                "func f(value: Option) -> void:\n"
+                "    return\n")
+
+    def test_generic_enum_nested_match(self):
+        run("enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "func unwrap(value: Option<Option<i32>>) -> i32:\n"
+            "    match value:\n"
+            "        Option.None:\n"
+            "            return -1\n"
+            "        Option.Some(inner):\n"
+            "            match inner:\n"
+            "                Option.None:\n"
+            "                    return 0\n"
+            "                Option.Some(v):\n"
+            "                    return v\n")
+
+    def test_generic_enum_expected_type_from_struct_field(self):
+        run("enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "struct Holder:\n"
+            "    value: Option<i32>\n"
+            "func main() -> void:\n"
+            "    let holder = Holder(value: Option.None)\n"
+            "    print_bool(holder.value == Option.None)\n")
+
+    def test_generic_enum_expected_type_from_list_push(self):
+        run("enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(1024)\n"
+            "    let values = arena.list::<Option<i32>>()\n"
+            "    values.push(Option.None)\n"
+            "    values.push(Option.Some(3))\n")
+
+    def test_generic_enum_expected_type_from_comparison(self):
+        run("enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "enum Result<T, E>:\n"
+            "    Ok(T)\n"
+            "    Err(E)\n"
+            "func main() -> void:\n"
+            "    let value: Result<i32, str> = Result.Ok(3)\n"
+            "    if value == Result.Ok(3):\n"
+            "        print_i32(1)\n"
+            "    if Result.Err(\"bad\") != value:\n"
+            "        print_i32(2)\n"
+            "    if Option.None == Option.Some(3):\n"
+            "        print_i32(3)\n"
+            "    if Option.Some(3) != Option.None:\n"
+            "        print_i32(4)\n")
+
+    def test_generic_enum_recursive_instantiation_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError, "recursive generic enum instantiation"):
+            run("enum Seq<T>:\n"
+                "    Nil\n"
+                "    Cons(T, Seq<T>)\n"
+                "func main() -> void:\n"
+                "    let value: Seq<i32> = Seq.Nil\n")
+
+    def test_generic_enum_noncopyable_argument_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError, "must be copyable and non-void"):
+            run("enum Box<T>:\n"
+                "    Empty\n"
+                "    Value(T)\n"
+                "func main() -> void:\n"
+                "    let value: Box<Arena> = Box.Empty\n")
+
+    def test_generic_enum_reserved_type_parameter(self):
+        with self.assertRaisesRegex(
+                CheckError, "type parameter name 'i32' is reserved"):
+            run("enum Bad<i32>:\n"
+                "    A\n")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -2,6 +2,43 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.31.0 - 2026-10-21
+
+- Generic enum declarations. `enum Option<T>:` and `enum Result<T, E>:`
+  declare type parameters, and payloads may use them anywhere a type is
+  accepted: `Some(T)`, `Ok(T)`, `Err(E)`, `Cons(T, Seq<T>)`. Type arguments
+  are written in angle brackets (`Option<i32>`, `Option<Option<i32>>`), and
+  `Option<i32>` and `Option<str>` are distinct, nominally different types.
+  v0.31.0 adds generics only to enum declarations; generic structs and
+  functions remain out of scope.
+- Constructor inference and explicit arguments. `Option.Some(5)` infers
+  `Option<i32>` from its payload. `Option.None`, `Result.Ok`, and
+  `Result.Err` take missing parameters from an expected type - an annotation,
+  return type, struct field, function argument, list/array element,
+  assignment, or either side of `==`/`!=`. When no context supplies a
+  parameter, the diagnostic names it and shows the explicit form:
+  `Option.None::<i32>()`, `Result.Err::<i32, str>("missing")`.
+- Instantiation rules. Each concrete instance is monomorphized with its own
+  layout, tags, and constructor helpers; generated names are internal and
+  diagnostics keep the source spelling. Matches resolve against the concrete
+  instance while still checking exhaustiveness by member. Type arguments obey
+  module privacy, payloads must remain copyable and non-void after
+  substitution, recursive by-value instantiation is rejected with a
+  store-behind-a-pointer hint, and `VantaTag` remains reserved for payload
+  enums.
+- Standard library. `stdlib/option.vnt` ships `Option<T>` (`None`/`Some(T)`)
+  and `stdlib/result.vnt` ships `Result<T, E>` (`Ok(T)`/`Err(E)`) as ordinary
+  generic enums, not compiler-special-cased types. Imports starting with
+  `std/` resolve from the checkout or the installed wheel after checking for
+  a sibling file, so projects can vendor their own copy. The wheel and sdist
+  include the library, and `vanta doctor` reports its location.
+- Examples and docs. `examples/option_result.vnt` covers constructor
+  inference, explicit type arguments, nested error payloads, and exhaustive
+  matches; its output and the new tutorial/reference snippets are frozen in
+  the integration suite. The reference, tutorial, README, roadmap, and
+  changelog are updated. 674 tests total; the frozen pong, strike, and
+  breakout runs are unchanged.
+
 ## v0.30.0 - 2026-10-21
 
 - Modules, namespaces, and privacy. A file may start with `module name`;

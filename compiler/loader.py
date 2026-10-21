@@ -27,6 +27,25 @@ from .lexer import Lexer
 from .parser import Parser
 
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_HERE)
+
+
+def _first_existing_dir(*candidates):
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+# A wheel ships the standard library beside the compiler modules; a checkout
+# keeps it at the repository root.
+STDLIB_DIR = _first_existing_dir(
+    os.path.join(_HERE, 'templates', 'stdlib'),
+    os.path.join(_REPO_ROOT, 'stdlib'),
+)
+
+
 class LoadError(Exception):
     """A file could not be read, an import target is missing, or a cycle exists."""
 
@@ -161,8 +180,7 @@ class _Loader:
         self._active.append((real, path))
         try:
             for imp in imports:
-                target = os.path.normpath(
-                    os.path.join(os.path.dirname(path), imp.path))
+                target = self._import_target(path, imp)
                 child = self._load(target, path, imp.pos)
                 mod.imports.append((imp, child))
         finally:
@@ -170,6 +188,25 @@ class _Loader:
 
         self._order.append(mod)
         return mod
+
+    @staticmethod
+    def _import_target(path, imp):
+        """Resolve an import relative to the importer, then the stdlib.
+
+        `std/...` is the only special prefix. An actual sibling file with the
+        same path wins, so projects can vendor their own copy.
+        """
+        target = os.path.normpath(
+            os.path.join(os.path.dirname(path), imp.path))
+        if os.path.exists(target) or STDLIB_DIR is None:
+            return target
+        rel = imp.path.replace('\\', '/')
+        if rel.startswith('std/'):
+            candidate = os.path.normpath(
+                os.path.join(STDLIB_DIR, rel[len('std/'):]))
+            if os.path.exists(candidate):
+                return candidate
+        return target
 
 
 class _Scopes:
@@ -402,9 +439,10 @@ class _Resolver:
             for (_name, ftype, _pos) in d.fields:
                 self._resolve_type(ftype, mod)
         elif isinstance(d, A.EnumDecl):
+            type_params = set(d.type_params)
             for member in d.members:
                 for te in (member.payload or []):
-                    self._resolve_type(te, mod)
+                    self._resolve_type(te, mod, type_params=type_params)
         elif isinstance(d, A.ConstDecl):
             if d.type_ann is not None:
                 self._resolve_type(d.type_ann, mod)
@@ -449,6 +487,8 @@ class _Resolver:
             yield from self._walk_type_exprs(te.inner)
         elif te.kind == 'named':
             yield te
+            for arg in (te.args or []):
+                yield from self._walk_type_exprs(arg)
 
     def _check_public_types(self, d, mod):
         if mod.is_legacy or not getattr(d, 'is_public', False):
@@ -639,19 +679,25 @@ class _Resolver:
             return sym.internal
         return name
 
-    def _resolve_type(self, te, mod):
+    def _resolve_type(self, te, mod, type_params=None):
         if te is None:
             return
+        type_params = type_params or set()
         if te.kind in ('ptr', 'array', 'list'):
-            self._resolve_type(te.inner, mod)
+            self._resolve_type(te.inner, mod, type_params)
             return
         if te.kind == 'func':
             for p in (te.params or []):
-                self._resolve_type(p, mod)
-            self._resolve_type(te.inner, mod)
+                self._resolve_type(p, mod, type_params)
+            self._resolve_type(te.inner, mod, type_params)
             return
         if te.kind == 'named':
-            te.name = self._resolve_type_name(mod, te.name, te.pos)
+            for arg in (te.args or []):
+                self._resolve_type(arg, mod, type_params)
+            # A type parameter belongs to the enum being resolved; it is not
+            # a module symbol and must be left for instantiation.
+            if te.name not in type_params:
+                te.name = self._resolve_type_name(mod, te.name, te.pos)
 
 
 def load_program(entry_path):

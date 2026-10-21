@@ -9,7 +9,7 @@ import tempfile
 from . import VERSION
 from .lexer import LexError
 from .parser import ParseError
-from .loader import load_program, LoadError
+from .loader import load_program, LoadError, STDLIB_DIR
 from .type_checker import TypeChecker, CheckError
 from .codegen_cpp import CodeGen
 from .ast_nodes import ExternDecl, FuncDecl
@@ -566,6 +566,7 @@ def cmd_doctor(args):
     print(f"c++ compiler: {name} ({path})")
     print(f"runtime header: {os.path.join(RUNTIME_DIR, 'vanta_runtime.hpp')}")
     print(f"game kit: {_GAMEKIT_DIR}")
+    print(f"standard library: {STDLIB_DIR or 'not found'}")
 
     # Compile and run the smallest possible program: this checks the compiler,
     # the include path, and the runtime header in one step.

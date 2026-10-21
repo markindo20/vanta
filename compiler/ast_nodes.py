@@ -37,6 +37,9 @@ class TypeExpr:
     # For kind == 'func': the parameter type expressions. `inner` holds the
     # return type, or None for void.
     params: Optional[List['TypeExpr']] = None
+    # For kind == 'named': generic arguments, e.g. Option<i32>. None when the
+    # type name was written without angle brackets.
+    args: Optional[List['TypeExpr']] = None
 
 
 @dataclass
@@ -81,6 +84,8 @@ class EnumDecl:
     members: List[EnumMember]
     pos: Pos
     is_public: bool = False
+    # Type parameters for a generic enum, e.g. ['T', 'E'] for Result<T, E>.
+    type_params: List[str] = field(default_factory=list)
 
 
 @dataclass

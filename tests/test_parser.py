@@ -303,6 +303,36 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(call, A.Call)
         self.assertIsInstance(call.func, A.Call)
 
+    def test_generic_enum_declaration_parse(self):
+        prog = parse("enum Result<T, E>:\n"
+                     "    Ok(T)\n"
+                     "    Err(E)\n")
+        decl = prog.decls[0]
+        self.assertIsInstance(decl, A.EnumDecl)
+        self.assertEqual(decl.type_params, ['T', 'E'])
+        self.assertEqual([t.name for t in decl.members[0].payload], ['T'])
+        self.assertEqual([t.name for t in decl.members[1].payload], ['E'])
+
+    def test_generic_type_annotation_and_ctor_args_parse(self):
+        prog = parse("func f() -> void:\n"
+                     "    let x: Option<Result<i32, str>> = "
+                     "Option.Some(Result.Ok::<i32, str>(1))\n")
+        decl = prog.decls[0].body[0]
+        ann = decl.type_ann
+        self.assertEqual(ann.name, 'Option')
+        self.assertEqual(len(ann.args), 1)
+        self.assertEqual(ann.args[0].name, 'Result')
+        self.assertEqual([a.name for a in ann.args[0].args], ['i32', 'str'])
+        call = decl.value
+        self.assertEqual(call.func.field, 'Some')
+        inner = call.args[0]
+        self.assertIsInstance(inner, A.Call)
+        self.assertEqual([a.name for a in inner.type_args], ['i32', 'str'])
+
+    def test_generic_enum_duplicate_type_parameter_rejected(self):
+        with self.assertRaisesRegex(ParseError, "duplicate type parameter 'T'"):
+            parse("enum E<T, T>:\n    A(T)\n")
+
 
 if __name__ == '__main__':
     unittest.main()

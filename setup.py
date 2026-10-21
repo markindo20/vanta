@@ -1,10 +1,12 @@
-"""Build hook: put the C++ runtime and game kit inside the installed package.
+"""Build hook: put the C++ runtime and shipped Vanta files in the wheel.
 
-The compiler emits `#include "vanta_runtime.hpp"` and `vanta new` points at
-the shipped game kit, so both have to travel with the wheel. Keeping the
-canonical copies at the repo root (runtime/, examples/gamekit/) means the
-checkout and the examples stay the single source of truth; this hook copies
-them into the build tree, where setuptools picks them up as package data.
+The compiler emits `#include "vanta_runtime.hpp"`, `vanta new` points at the
+shipped game kit, and `import "std/..."` resolves from the installed standard
+library, so all three have to travel with the wheel. Keeping the canonical
+copies at the repo root (runtime/, examples/gamekit/, examples/assets/,
+stdlib/) means the checkout and the installed package stay the single source
+of truth; this hook copies them into the build tree, where setuptools picks
+them up as package data.
 """
 import os
 import shutil
@@ -25,6 +27,8 @@ class build_py(_build_py):
                         os.path.join(package, 'templates', 'gamekit'))
         self._copy_tree(os.path.join(ROOT, 'examples', 'assets'),
                         os.path.join(package, 'templates', 'assets'))
+        self._copy_tree(os.path.join(ROOT, 'stdlib'),
+                        os.path.join(package, 'templates', 'stdlib'))
 
     @staticmethod
     def _copy_tree(source, target):

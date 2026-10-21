@@ -1,0 +1,15 @@
+module option
+
+# A value that may or may not be present.
+#
+# Construct with Option.Some(value) or Option.None. The type argument is
+# inferred from a payload or from the surrounding annotation:
+#
+#     let found: Option<i32> = Option.None
+#     let port = Option.Some(8080)
+#
+# A bare Option.None needs an annotation or an explicit type argument:
+# Option.None::<i32>().
+pub enum Option<T>:
+    None
+    Some(T)

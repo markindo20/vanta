@@ -493,6 +493,164 @@ class ModuleTests(unittest.TestCase):
         self.assertIn("function 'broken'", text)
         self.assertNotIn('vanta_m_bad__broken', text)
 
+    # ---------- generic enums (v0.31.0) ----------
+
+    def test_generic_enum_qualified_import(self):
+        self.write('opt.vnt', '''
+            module opt
+
+            pub enum Option<T>:
+                None
+                Some(T)
+        ''')
+        self.write('main.vnt', '''
+            import "opt.vnt" as opt
+
+            func read(value: opt.Option<i32>) -> i32:
+                match value:
+                    opt.Option.None:
+                        return 0
+                    opt.Option.Some(v):
+                        return v
+
+            func main() -> void:
+                let value: opt.Option<i32> = opt.Option.Some(4)
+                print_i32(read(value))
+        ''')
+        _program, tc = self.check()
+        family = 'vanta_m_opt__Option'
+        self.assertIn(family, tc.generic_enums)
+        self.assertTrue(any(et.family == family for et in tc.enums.values()))
+
+    def test_stdlib_option_and_result_imports(self):
+        self.write('main.vnt', '''
+            import "std/option.vnt"
+            import "std/result.vnt"
+
+            func parse(n: i32) -> Result<i32, str>:
+                if n < 0:
+                    return Result.Err("negative")
+                return Result.Ok(n)
+
+            func main() -> void:
+                let maybe: Option<i32> = Option.None
+                match maybe:
+                    Option.None:
+                        print_i32(0)
+                    Option.Some(v):
+                        print_i32(v)
+                match parse(7):
+                    Result.Ok(v):
+                        print_i32(v)
+                    Result.Err(message):
+                        print_str(message)
+        ''')
+        _program, tc = self.check()
+        displays = {repr(et) for et in tc.enums.values()}
+        self.assertIn('Option<i32>', displays)
+        self.assertIn('Result<i32, str>', displays)
+
+    def test_generic_type_argument_private_in_public_signature(self):
+        self.write('secret.vnt', '''
+            module secret
+
+            enum Hidden:
+                Value
+
+            pub enum Option<T>:
+                None
+                Some(T)
+
+            pub func leak(value: Option<Hidden>) -> void:
+                return
+        ''')
+        self.write('main.vnt', '''
+            import "secret.vnt" as secret
+
+            func main() -> void:
+                print_i32(1)
+        ''')
+        with self.assertRaises(LoadError) as cm:
+            self.check()
+        self.assertIn("exposes private type 'Hidden'", str(cm.exception))
+
+    def test_inferred_generic_type_argument_private(self):
+        self.write('secret.vnt', '''
+            module secret
+
+            enum Hidden:
+                Value
+
+            pub enum Option<T>:
+                None
+                Some(T)
+
+            pub func leak():
+                let value: Option<Hidden> = Option.None
+                return value
+        ''')
+        self.write('main.vnt', '''
+            import "secret.vnt" as secret
+
+            func main() -> void:
+                print_i32(1)
+        ''')
+        with self.assertRaises(CheckError) as cm:
+            self.check()
+        text = str(cm.exception)
+        self.assertIn("exposes private type 'Hidden'", text)
+        self.assertIn('inferred type', text)
+
+    def test_private_generic_family_in_public_signature(self):
+        self.write('secret.vnt', '''
+            module secret
+
+            enum Option<T>:
+                None
+                Some(T)
+
+            pub func leak() -> Option<i32>:
+                return Option.None
+        ''')
+        self.write('main.vnt', '''
+            import "secret.vnt" as secret
+
+            func main() -> void:
+                print_i32(1)
+        ''')
+        with self.assertRaises(LoadError) as cm:
+            self.check()
+        self.assertIn("exposes private type 'Option'", str(cm.exception))
+
+    def test_same_generic_name_in_two_modules(self):
+        self.write('alpha.vnt', '''
+            module alpha
+
+            pub enum Option<T>:
+                None
+                Some(T)
+        ''')
+        self.write('beta.vnt', '''
+            module beta
+
+            pub enum Option<T>:
+                None
+                Some(T)
+        ''')
+        self.write('main.vnt', '''
+            import "alpha.vnt" as a
+            import "beta.vnt" as b
+
+            func main() -> void:
+                let x: a.Option<i32> = a.Option.None
+                let y: b.Option<str> = b.Option.Some("x")
+                print_i32(1)
+        ''')
+        _program, tc = self.check()
+        families = {et.family for et in tc.enums.values()}
+        self.assertIn('vanta_m_alpha__Option', families)
+        self.assertIn('vanta_m_beta__Option', families)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1410,6 +1410,57 @@ class IntegrationTests(unittest.TestCase):
                             ['1', '2', '10', 'medium', 'segment',
                              'true', 'hello', '3'])
 
+    def test_option_result_example(self):
+        # The standard-library Option/Result generic enums, constructor
+        # inference, explicit type arguments, and nested error payloads.
+        # This is also the tutorial's Option and Result snippet, so the
+        # documented output is frozen here.
+        self._build_and_run(os.path.join(EXAMPLES, 'option_result.vnt'),
+                            ['8080', 'true', 'true', 'ok', 'err',
+                             '7', '400', 'missing'])
+
+    def test_generic_enum_reference_snippet(self):
+        # The code block in docs/LANGUAGE_REFERENCE.md, generic enums section.
+        src = (
+            "enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "\n"
+            "enum Result<T, E>:\n"
+            "    Ok(T)\n"
+            "    Err(E)\n"
+            "\n"
+            "struct ParseError:\n"
+            "    code: i32\n"
+            "\n"
+            "func parse(n: i32) -> Result<i32, ParseError>:\n"
+            "    if n < 0:\n"
+            "        return Result.Err(ParseError(code: 400))\n"
+            "    return Result.Ok(n)\n"
+            "\n"
+            "func main() -> void:\n"
+            "    let absent: Option<i32> = Option.None\n"
+            "    let present = Option.Some(7)\n"
+            "    match present:\n"
+            "        Option.None:\n"
+            "            print_i32(0)\n"
+            "        Option.Some(value):\n"
+            "            print_i32(value)\n"
+            "    match parse(-1):\n"
+            "        Result.Ok(value):\n"
+            "            print_i32(value)\n"
+            "        Result.Err(error):\n"
+            "            print_i32(error.code)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_docs_generic_')
+        try:
+            path = os.path.join(tmp, 'snippet.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(src)
+            self._build_and_run(path, ['7', '400'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_match_break_binds_to_loop(self):
         # break/continue in an arm control the enclosing loop: match is
         # not a loop and never captures them (codegen uses if/else, not

@@ -108,6 +108,8 @@ jobs:
           mkdir -p /tmp/vanta-smoke
           printf 'func main() -> void:\n    print_str("installed ok")\n' > /tmp/vanta-smoke/hello.vnt
           .venv/bin/vanta /tmp/vanta-smoke/hello.vnt
+          printf 'import "std/option.vnt"\nimport "std/result.vnt"\nfunc main() -> void:\n    let value: Option<i32> = Option.None\n    match value:\n        Option.None:\n            print_str("stdlib ok")\n        Option.Some(v):\n            print_i32(v)\n    let parsed: Result<i32, str> = Result.Ok(3)\n    match parsed:\n        Result.Ok(v):\n            print_i32(v)\n        Result.Err(message):\n            print_str(message)\n' > /tmp/vanta-smoke/stdlib.vnt
+          .venv/bin/vanta /tmp/vanta-smoke/stdlib.vnt
           cd /tmp/vanta-smoke
           "$GITHUB_WORKSPACE/.venv/bin/vanta" new game.vnt
           "$GITHUB_WORKSPACE/.venv/bin/vanta" check game.vnt
@@ -124,6 +126,24 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$env:TEMP\vanta-smoke" | Out-Null
           Set-Content -Path "$env:TEMP\vanta-smoke\hello.vnt" -Value "func main() -> void:`n    print_str(`"installed ok`")`n"
           .venv\Scripts\vanta.exe "$env:TEMP\vanta-smoke\hello.vnt"
+          Set-Content -Path "$env:TEMP\vanta-smoke\stdlib.vnt" -Value @"
+          import "std/option.vnt"
+          import "std/result.vnt"
+          func main() -> void:
+              let value: Option<i32> = Option.None
+              match value:
+                  Option.None:
+                      print_str("stdlib ok")
+                  Option.Some(v):
+                      print_i32(v)
+              let parsed: Result<i32, str> = Result.Ok(3)
+              match parsed:
+                  Result.Ok(v):
+                      print_i32(v)
+                  Result.Err(message):
+                      print_str(message)
+          "@
+          .venv\Scripts\vanta.exe "$env:TEMP\vanta-smoke\stdlib.vnt"
           Push-Location "$env:TEMP\vanta-smoke"
           & "$env:GITHUB_WORKSPACE\.venv\Scripts\vanta.exe" new game.vnt
           & "$env:GITHUB_WORKSPACE\.venv\Scripts\vanta.exe" check game.vnt

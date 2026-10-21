@@ -19,7 +19,9 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    module-scoped declarations are private unless marked `pub`. An unqualified
    import brings public names into the importing file, an aliased import
    creates qualified names, and module-less files keep the original flat,
-   all-public behaviour. The resolver rewrites declarations and references to
+   all-public behaviour. Imports whose path starts with `std/` fall back to
+   `stdlib/` in a checkout or `compiler/templates/stdlib/` in a wheel, but a
+   sibling file with the same path wins. The resolver rewrites declarations and references to
    unique internal names (`vanta_m_<module>__<name>`) and validates
    visibility, ambiguous imports, duplicate module names, and private-type
    leaks in public signatures. The resulting `Program` is still flat for the
@@ -33,6 +35,14 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`), where `extern` functions are registered
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
+   Generic enum families are registered from their declarations and
+   instantiated on demand in `_instantiate_enum`; the cache key is the family
+   plus concrete type arguments, and each instance gets an internal name such
+   as `Option__g0` while diagnostics keep `Option<i32>`. Constructor
+   parameters come from explicit `::<...>` arguments, an expected type, or
+   payload inference, in that order. Instantiation substitutes payload type
+   expressions, checks copyability and recursive by-value use, and records
+   every concrete enum for code generation.
    Assignment targets are validated by walking the storage chain (fields,
    indexes, and checked `at()` calls) to its root: an index on a pointer is
    writable regardless of the binding, otherwise the root binding must be
@@ -65,9 +75,11 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    forward-declared ahead of the block. Each distinct function type is
    emitted as a `using FnPtrN = R(*)(P...)` alias at the top of the
    namespace, innermost first, and drives the in-namespace spellings.
-   Struct and enum definitions are emitted in source order; forward tags and
-   aliases come first. Payload types must be declared before the enum that
-   carries them, so source order is a valid dependency order. A plain enum is
+   Struct and enum definitions are emitted in dependency order; forward tags
+   and aliases come first. Generic instances can be created while a field or
+   signature is resolved, so `_ordered_user_types` walks direct by-value
+   fields, payloads, and arrays and emits dependencies first; pointers and
+   `List<T>` are handles and do not force completion. A plain enum is
    `enum class E : int32_t`; a payload enum is a struct with a nested
    `VantaTag` and one field per payload value, plus a `make_E_Member`
    constructor for each member. A function that can fall through gets a
@@ -147,13 +159,14 @@ distinct semantics.
 
 ## Packaging (v0.28.0)
 
-A checkout keeps the runtime at `runtime/` and the kit at `examples/gamekit/`,
-so the examples and tests use the canonical copies. A wheel has no checkout
+A checkout keeps the runtime at `runtime/`, the kit at `examples/gamekit/`,
+the assets at `examples/assets/`, and the standard library at `stdlib/`, so
+the examples and tests use the canonical copies. A wheel has no checkout
 around it, so `setup.py` overrides `build_py` to copy those directories into
-the build tree as `compiler/runtime/`, `compiler/templates/gamekit/`, and
-`compiler/templates/assets/`; setuptools then packs them into the wheel.
-`MANIFEST.in` includes the same files in the sdist, so building a wheel from
-the sdist works too.
+the build tree as `compiler/runtime/`, `compiler/templates/gamekit/`,
+`compiler/templates/assets/`, and `compiler/templates/stdlib/`; setuptools
+then packs them into the wheel. `MANIFEST.in` includes the same files in the
+sdist, so building a wheel from the sdist works too.
 
 The driver resolves each directory through `_first_existing_dir`: it looks
 beside `compiler/` first (the installed layout) and falls back to the repo root
@@ -194,7 +207,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 613 `unittest` cases across the lexer, parser, type checker,
+`tests/` holds 674 `unittest` cases across the lexer, parser, type checker,
 code generator, and end-to-end integration. Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

@@ -399,21 +399,24 @@ class CodeGen:
         # Extern declarations (outside namespace)
         externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
         structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
-        enums = [d for d in self.program.decls if isinstance(d, A.EnumDecl)]
+        struct_types = [self.tc.structs[sd.name] for sd in structs]
+        # `tc.enums` holds every concrete enum: ordinary declarations and
+        # each monomorphized generic instance.
+        enums = list(self.tc.enums.values())
 
         # Tags ahead of the extern block: an extern signature may mention a
         # user struct or enum (a callback carrying a ptr<State>, say), and
         # the definitions live inside the namespace below.
-        if externs and (structs or enums):
+        if externs and (struct_types or enums):
             self.emit('namespace vanta_user {')
             self.indent += 1
-            for ed in enums:
-                if self.tc.enums[ed.name].has_payloads:
-                    self.emit(f'struct {ed.name};')
+            for et in enums:
+                if et.has_payloads:
+                    self.emit(f'struct {et.name};')
                 else:
-                    self.emit(f'enum class {ed.name} : int32_t;')
-            for sd in structs:
-                self.emit(f'struct {sd.name};')
+                    self.emit(f'enum class {et.name} : int32_t;')
+            for st in struct_types:
+                self.emit(f'struct {st.name};')
             self.indent -= 1
             self.emit('}')
             self.emit('')
@@ -430,13 +433,13 @@ class CodeGen:
         # alias may mention a struct or enum by value (a comparator
         # func(Item, Item) -> i32), and the definitions come after the
         # aliases because a struct field may hold a function value.
-        for ed in enums:
-            if self.tc.enums[ed.name].has_payloads:
-                self.emit(f'struct {ed.name};')
+        for et in enums:
+            if et.has_payloads:
+                self.emit(f'struct {et.name};')
             else:
-                self.emit(f'enum class {ed.name} : int32_t;')
-        for sd in structs:
-            self.emit(f'struct {sd.name};')
+                self.emit(f'enum class {et.name} : int32_t;')
+        for st in struct_types:
+            self.emit(f'struct {st.name};')
         self.emit('')
 
         # Function-pointer aliases, innermost first.
@@ -446,14 +449,16 @@ class CodeGen:
                 self.emit(f'using {self.tc.func_types[ft]} = {self._ctype(ft.ret)}(*)({params});')
             self.emit('')
 
-        # Type definitions in source order. Payload types must be declared
-        # before the enum that carries them, and struct fields may use an
-        # earlier enum, so declaration order is a valid dependency order.
-        for d in self.program.decls:
-            if isinstance(d, A.StructDecl):
-                self._gen_struct(d)
-            elif isinstance(d, A.EnumDecl):
-                self._gen_enum(d)
+        # Type definitions in dependency order. Source order is enough for
+        # non-generic declarations, but a generic instance can be created
+        # while resolving a field or signature and may depend on a type
+        # declared later in the file.
+        user_types = list(struct_types) + list(enums)
+        for t in self._ordered_user_types(user_types):
+            if isinstance(t, StructType):
+                self._gen_struct(t)
+            else:
+                self._gen_enum(t)
 
         consts = [d for d in self.program.decls if isinstance(d, A.ConstDecl)]
         for cd in consts:
@@ -463,7 +468,7 @@ class CodeGen:
         if consts:
             self.emit('')
 
-        self._gen_equality(structs, enums)
+        self._gen_equality(struct_types, enums)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
@@ -504,15 +509,65 @@ class CodeGen:
                            for i, p in enumerate(fn.params))
         return f'{ret_s} fn_{fn.name}({params})'
 
-    def _gen_enum(self, ed: A.EnumDecl):
-        et = self.tc.enums[ed.name]
+    def _ordered_user_types(self, types):
+        """Order concrete user types so by-value fields are complete first.
+
+        Pointers and Lists are handles and do not require the element type to
+        be complete, so they do not create an ordering edge. Arrays do, and
+        a direct struct/enum field does.
+        """
+        def direct_deps(t):
+            if isinstance(t, StructType):
+                if t.builtin:
+                    return ()
+                return tuple(t.fields.values())
+            if isinstance(t, EnumType):
+                return tuple(pt for payload in t.payloads.values()
+                             for pt in payload)
+            if isinstance(t, ArrayType):
+                return (t.inner,)
+            return ()
+
+        def type_deps(t):
+            out = []
+            for dep in direct_deps(t):
+                if isinstance(dep, (StructType, EnumType)) and not getattr(
+                        dep, 'builtin', False):
+                    out.append(dep)
+                elif isinstance(dep, ArrayType):
+                    out.extend(type_deps(dep))
+            return out
+
+        remaining = list(types)
+        known = set(remaining)
+        ordered = []
+        emitted = set()
+        while remaining:
+            progressed = False
+            for t in list(remaining):
+                deps = [d for d in type_deps(t)
+                        if d in known and d is not t]
+                if all(d in emitted for d in deps):
+                    ordered.append(t)
+                    emitted.add(t)
+                    remaining.remove(t)
+                    progressed = True
+            if not progressed:
+                # A by-value cycle cannot be represented in C++ either.
+                # Leave the rest in declaration order so the compiler can
+                # report the offending field rather than looping here.
+                ordered.extend(remaining)
+                break
+        return ordered
+
+    def _gen_enum(self, et: EnumType):
         body = ', '.join(f'{m} = {v}' for m, v in et.members.items())
         if not et.has_payloads:
-            self.emit(f'enum class {ed.name} : int32_t {{ {body} }};')
+            self.emit(f'enum class {et.name} : int32_t {{ {body} }};')
             self.emit('')
             return
 
-        self.emit(f'struct {ed.name} {{')
+        self.emit(f'struct {et.name} {{')
         self.indent += 1
         self.emit(f'enum class VantaTag : int32_t {{ {body} }};')
         self.emit('VantaTag v_tag;')
@@ -526,10 +581,10 @@ class CodeGen:
         for member, payload in et.payloads.items():
             params = ', '.join(f'{self._ctype(ptype)} a{i}'
                                for i, ptype in enumerate(payload))
-            self.emit(f'inline {ed.name} make_{ed.name}_{member}({params}) {{')
+            self.emit(f'inline {et.name} make_{et.name}_{member}({params}) {{')
             self.indent += 1
-            self.emit(f'{ed.name} v{{}};')
-            self.emit(f'v.v_tag = {ed.name}::VantaTag::{member};')
+            self.emit(f'{et.name} v{{}};')
+            self.emit(f'v.v_tag = {et.name}::VantaTag::{member};')
             for i, _ptype in enumerate(payload):
                 self.emit(f'v.p_{member}_{i} = a{i};')
             self.emit('return v;')
@@ -537,9 +592,8 @@ class CodeGen:
             self.emit('}')
         self.emit('')
 
-    def _gen_struct(self, sd: A.StructDecl):
-        st = self.tc.structs[sd.name]
-        self.emit(f'struct {sd.name} {{')
+    def _gen_struct(self, st: StructType):
+        self.emit(f'struct {st.name} {{')
         self.indent += 1
         for fname, ftype in st.fields.items():
             self.emit(f'{self._ctype(ftype)} v_{fname};')
@@ -547,8 +601,7 @@ class CodeGen:
         self.emit('};')
         self.emit('')
 
-    def _equality_fields(self, sd: A.StructDecl):
-        st = self.tc.structs[sd.name]
+    def _equality_fields(self, st: StructType):
         if st.builtin or eq_blocker(st) is not None:
             return None
         return st
@@ -559,9 +612,8 @@ class CodeGen:
         can refer to each other's operators in any declaration order."""
         struct_eqs = [st for st in (self._equality_fields(sd) for sd in structs)
                       if st is not None]
-        enum_eqs = [self.tc.enums[ed.name] for ed in enums
-                    if self.tc.enums[ed.name].has_payloads
-                    and eq_blocker(self.tc.enums[ed.name]) is None]
+        enum_eqs = [et for et in enums
+                    if et.has_payloads and eq_blocker(et) is None]
         if not struct_eqs and not enum_eqs:
             return
         for st in struct_eqs:
@@ -900,6 +952,8 @@ class CodeGen:
                 et = getattr(e, 'type', None)
                 if isinstance(et, EnumType) and et.has_payloads:
                     return f'make_{et.name}_{e.field}()'
+                if isinstance(et, EnumType):
+                    return f'{et.name}::{e.field}'
                 return f'{e.obj.name}::{e.field}'
             obj_t = getattr(e.obj, 'type', None)
             base = self._expr(e.obj)

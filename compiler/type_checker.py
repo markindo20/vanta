@@ -43,7 +43,7 @@ def _payload_enum_name(t, seen=None) -> str | None:
     if seen is None:
         seen = set()
     if isinstance(t, EnumType):
-        return t.name if t.has_payloads else None
+        return repr(t) if t.has_payloads else None
     if isinstance(t, (PtrType, ArrayType, ListType)):
         return _payload_enum_name(t.inner, seen)
     if isinstance(t, StructType):
@@ -84,6 +84,21 @@ class FuncSig:
         self.name = name; self.params = params; self.ret = ret; self.is_extern = is_extern
 
 
+class GenericEnumInfo:
+    """An enum declaration with type parameters, before instantiation.
+
+    Payloads stay as TypeExprs so a type parameter may stand for a concrete
+    type, or even another generic application such as List<T>. Instantiating
+    the enum resolves those expressions in a type environment.
+    """
+
+    def __init__(self, name, type_params, members, payloads):
+        self.name = name
+        self.type_params = tuple(type_params)
+        self.members = members
+        self.payloads = payloads
+
+
 class TypeChecker:
     def __init__(self, program: A.Program, filename="<input>"):
         self.program = program
@@ -92,6 +107,14 @@ class TypeChecker:
         self.private_types = getattr(program, 'private_types', set()) or set()
         self.structs: dict[str, StructType] = {}
         self.enums: dict[str, EnumType] = {}
+        self.generic_enums: dict[str, GenericEnumInfo] = {}
+        # (family, concrete type arguments) -> instantiated EnumType. Keeping
+        # one instance per combination makes named types behave nominally and
+        # lets codegen emit each concrete representation exactly once.
+        self._enum_instances: dict[tuple[str, tuple[Type, ...]], EnumType] = {}
+        self._enum_instance_order: list[EnumType] = []
+        self._enum_instance_counter = 0
+        self._enum_instantiating: set[tuple[str, tuple[Type, ...]]] = set()
         self.functions: dict[str, FuncSig] = {}
         self.constants: dict[str, Type] = {}
         # Function types seen anywhere in the program, mapped to the C++
@@ -167,29 +190,154 @@ class TypeChecker:
         bf("scale", [("s", F32)], self.structs["Matrix4"])
         bf("from_quat", [("q", self.structs["Quat"])], self.structs["Matrix4"])
 
-    def _resolve_type(self, te: A.TypeExpr) -> Type:
+    def _resolve_type(self, te: A.TypeExpr, type_env=None) -> Type:
+        type_env = type_env or {}
         if te.kind == 'ptr':
-            return PtrType(self._resolve_type(te.inner))
+            return PtrType(self._resolve_type(te.inner, type_env))
         if te.kind == 'list':
-            return self._make_list_type(self._resolve_type(te.inner), te.pos)
+            return self._make_list_type(
+                self._resolve_type(te.inner, type_env), te.pos)
         if te.kind == 'array':
             if te.size is None or te.size <= 0:
                 raise CheckError("array size must be a positive integer", self.filename, te.pos)
-            return ArrayType(self._resolve_type(te.inner), te.size)
+            return ArrayType(self._resolve_type(te.inner, type_env), te.size)
         if te.kind == 'func':
-            params = tuple(self._resolve_type(p) for p in (te.params or []))
-            ret = self._resolve_type(te.inner) if te.inner is not None else VOID
+            params = tuple(self._resolve_type(p, type_env)
+                           for p in (te.params or []))
+            ret = (self._resolve_type(te.inner, type_env)
+                   if te.inner is not None else VOID)
             return self._func_type(params, ret)
         n = te.name
+        if n in type_env:
+            if te.args:
+                raise CheckError(
+                    f"type parameter '{n}' does not take type arguments",
+                    self.filename, te.pos)
+            return type_env[n]
         if n in PRIM_TYPES:
+            if te.args:
+                raise CheckError(
+                    f"type '{n}' does not take type arguments",
+                    self.filename, te.pos)
             return PRIM_TYPES[n]
         if n in self.structs:
+            if te.args:
+                raise CheckError(
+                    f"type '{n}' does not take type arguments",
+                    self.filename, te.pos)
             return self.structs[n]
+        if te.args:
+            args = tuple(self._resolve_type(a, type_env) for a in te.args)
+            if n in self.generic_enums:
+                return self._instantiate_enum(n, args, te.pos)
+            if n in self.enums:
+                raise CheckError(
+                    f"enum '{n}' does not take type arguments",
+                    self.filename, te.pos)
+            if n == 'List':
+                raise CheckError(
+                    "List requires exactly one element type: List<T>",
+                    self.filename, te.pos)
+            raise CheckError(f"unknown generic type '{n}'", self.filename, te.pos)
         if n in self.enums:
             return self.enums[n]
+        if n in self.generic_enums:
+            info = self.generic_enums[n]
+            params = ', '.join(info.type_params)
+            raise CheckError(
+                f"generic type '{n}' requires type arguments: {n}<{params}>",
+                self.filename, te.pos)
         if n == 'List':
             raise CheckError("List requires an element type: List<T>", self.filename, te.pos)
         raise CheckError(f"unknown type '{n}'", self.filename, te.pos)
+
+    def _type_spelling(self, t) -> str:
+        """A source-shaped type name for generic diagnostics."""
+        if isinstance(t, EnumType):
+            return repr(t)
+        if isinstance(t, (PrimType, StructType, IntLitType, FloatLitType, InferType)):
+            return repr(t)
+        if isinstance(t, PtrType):
+            return f"ptr<{self._type_spelling(t.inner)}>"
+        if isinstance(t, ListType):
+            return f"List<{self._type_spelling(t.inner)}>"
+        if isinstance(t, ArrayType):
+            return f"[{self._type_spelling(t.inner)}, {t.size}]"
+        if isinstance(t, FuncType):
+            params = ', '.join(self._type_spelling(p) for p in t.params)
+            if t.ret is VOID:
+                return f"func({params})"
+            return f"func({params}) -> {self._type_spelling(t.ret)}"
+        return repr(t)
+
+    def _instantiate_enum(self, family, args, pos) -> EnumType:
+        info = self.generic_enums[family]
+        if len(args) != len(info.type_params):
+            expected = ', '.join(info.type_params)
+            raise CheckError(
+                f"generic enum '{self._display(family)}' expects "
+                f"{len(info.type_params)} type argument(s) <{expected}>, "
+                f"got {len(args)}", self.filename, pos)
+        for arg, param in zip(args, info.type_params):
+            if arg is VOID:
+                raise CheckError(
+                    f"type argument for '{param}' cannot be void",
+                    self.filename, pos)
+            if isinstance(arg, (InferType, IntLitType, FloatLitType)):
+                raise CheckError(
+                    f"type argument for '{param}' must be a concrete type, "
+                    f"got {arg}", self.filename, pos)
+        key = (family, tuple(args))
+        existing = self._enum_instances.get(key)
+        if existing is not None:
+            return existing
+        if key in self._enum_instantiating:
+            display = self._generic_display(family, args)
+            raise CheckError(
+                f"recursive generic enum instantiation of '{display}' is "
+                f"not supported; store the nested value behind a pointer",
+                self.filename, pos)
+
+        self._enum_instantiating.add(key)
+        try:
+            env = dict(zip(info.type_params, args))
+            payloads = {}
+            for member, payload_exprs in info.payloads.items():
+                resolved = []
+                for te in payload_exprs:
+                    ptype = self._resolve_type(te, env)
+                    if _contains_noncopyable(ptype):
+                        where = f"value {len(resolved) + 1} of '{member}'"
+                        display = self._generic_display(family, args)
+                        raise CheckError(
+                            f"enum payload {where} cannot be "
+                            f"{self._type_spelling(ptype)} in '{display}': "
+                            f"payload values must be copyable and non-void",
+                            self.filename, pos)
+                    resolved.append(ptype)
+                payloads[member] = tuple(resolved)
+
+            while True:
+                self._enum_instance_counter += 1
+                internal = f"{family}__g{self._enum_instance_counter - 1}"
+                if (internal not in self.enums
+                        and internal not in self.structs
+                        and internal not in self.generic_enums):
+                    break
+            display = self._generic_display(family, args)
+            et = EnumType(internal, dict(info.members), payloads,
+                          family=family, type_args=tuple(args), display=display)
+            self.enums[internal] = et
+            self._enum_instances[key] = et
+            self._enum_instance_order.append(et)
+            return et
+        finally:
+            self._enum_instantiating.discard(key)
+
+    def _generic_display(self, family, args) -> str:
+        name = self._display(family)
+        inner = ', '.join(self._type_spelling(a) for a in args)
+        return f"{name}<{inner}>"
 
     def _make_list_type(self, inner: Type, pos) -> ListType:
         if inner is VOID:
@@ -216,7 +364,22 @@ class TypeChecker:
         raise CheckError(self._display(exc.msg), exc.filename, exc.pos) from None
 
     def _find_private_type(self, t):
-        if isinstance(t, (StructType, EnumType)):
+        if isinstance(t, EnumType):
+            if t.name in self.private_types:
+                return t.name
+            if t.family is not None and t.family in self.private_types:
+                return t.family
+            for arg in t.type_args:
+                found = self._find_private_type(arg)
+                if found is not None:
+                    return found
+            for payload in t.payloads.values():
+                for ptype in payload:
+                    found = self._find_private_type(ptype)
+                    if found is not None:
+                        return found
+            return None
+        if isinstance(t, StructType):
             return t.name if t.name in self.private_types else None
         if isinstance(t, (PtrType, ArrayType, ListType)):
             return self._find_private_type(t.inner)
@@ -256,7 +419,7 @@ class TypeChecker:
             self._reraise_pretty(exc)
 
     def _register_struct(self, d):
-        if d.name in self.structs or d.name in self.enums:
+        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
         if d.name in self.functions:
             raise CheckError(f"type name '{d.name}' collides with function",
@@ -275,7 +438,7 @@ class TypeChecker:
         self.structs[d.name] = StructType(d.name, fields, builtin=False)
 
     def _register_enum(self, d):
-        if d.name in self.structs or d.name in self.enums:
+        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
         if d.name in self.functions:
             raise CheckError(f"type name '{d.name}' collides with function",
@@ -286,8 +449,12 @@ class TypeChecker:
                 self.filename, d.pos)
         if d.name == 'List':
             raise CheckError("'List' is a reserved built-in type name", self.filename, d.pos)
+        for param in d.type_params:
+            if param in PRIM_TYPES or param in ('List', 'ptr'):
+                raise CheckError(
+                    f"type parameter name '{param}' is reserved",
+                    self.filename, d.pos)
         members = {}
-        payloads = {}
         used_values = {}
         next_value = 0
         for m in d.members:
@@ -306,6 +473,23 @@ class TypeChecker:
                     self.filename, m.pos)
             members[m.name] = value
             used_values[value] = m.name
+            next_value = value + 1
+        if any(m.payload for m in d.members) and 'VantaTag' in members:
+            member = next(m for m in d.members if m.name == 'VantaTag')
+            raise CheckError(
+                "member name 'VantaTag' is reserved in payload enums",
+                self.filename, member.pos)
+
+        if d.type_params:
+            # Payloads stay unresolved until instantiation: a declaration
+            # such as `enum Result<T, E>` cannot choose concrete layouts yet.
+            payloads = {m.name: tuple(m.payload or []) for m in d.members}
+            self.generic_enums[d.name] = GenericEnumInfo(
+                d.name, d.type_params, members, payloads)
+            return
+
+        payloads = {}
+        for m in d.members:
             payload = []
             for te in (m.payload or []):
                 ptype = self._resolve_type(te)
@@ -317,18 +501,12 @@ class TypeChecker:
                         self.filename, te.pos)
                 payload.append(ptype)
             payloads[m.name] = tuple(payload)
-            next_value = value + 1
-        if any(payloads.values()) and 'VantaTag' in members:
-            member = next(m for m in d.members if m.name == 'VantaTag')
-            raise CheckError(
-                "member name 'VantaTag' is reserved in payload enums",
-                self.filename, member.pos)
         self.enums[d.name] = EnumType(d.name, members, payloads)
 
     def _register_func(self, d):
         if d.name in self.functions:
             raise CheckError(f"duplicate function '{d.name}'", self.filename, d.pos)
-        if d.name in self.structs or d.name in self.enums:
+        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
             raise CheckError(f"function name '{d.name}' collides with type", self.filename, d.pos)
         params = []
         for p in d.params:
@@ -339,17 +517,17 @@ class TypeChecker:
     def _register_const(self, c):
         if c.name in self.constants:
             raise CheckError(f"duplicate constant '{c.name}'", self.filename, c.pos)
-        if c.name in self.structs or c.name in self.enums:
+        if c.name in self.structs or c.name in self.enums or c.name in self.generic_enums:
             raise CheckError(f"constant '{c.name}' collides with type", self.filename, c.pos)
         if c.name in self.functions:
             raise CheckError(f"constant '{c.name}' collides with function", self.filename, c.pos)
-        vt = self._check_expr(c.value)
+        declared = self._resolve_type(c.type_ann) if c.type_ann is not None else None
+        vt = self._check_expr(c.value, declared)
         if not self._is_constexpr(c.value):
             raise CheckError(
                 f"constant initializer must be a compile-time expression",
                 self.filename, c.pos)
-        if c.type_ann is not None:
-            declared = self._resolve_type(c.type_ann)
+        if declared is not None:
             self._coerce_value(c.value, vt, declared, c.pos, "constant initializer")
             vt = declared
         else:
@@ -364,7 +542,7 @@ class TypeChecker:
         for fd in d.funcs:
             if fd.name in self.functions:
                 raise CheckError(f"duplicate function '{fd.name}'", self.filename, fd.pos)
-            if fd.name in self.structs or fd.name in self.enums:
+            if fd.name in self.structs or fd.name in self.enums or fd.name in self.generic_enums:
                 raise CheckError(f"function name '{fd.name}' collides with type", self.filename, fd.pos)
             params = []
             for p in fd.params:
@@ -517,9 +695,9 @@ class TypeChecker:
             raise CheckError(f"unsupported statement {type(stmt).__name__}", self.filename, stmt.pos)
 
     def _check_var_decl(self, v: A.VarDecl):
-        vt = self._check_expr(v.value)
-        if v.type_ann is not None:
-            declared = self._resolve_type(v.type_ann)
+        declared = self._resolve_type(v.type_ann) if v.type_ann is not None else None
+        vt = self._check_expr(v.value, declared)
+        if declared is not None:
             self._coerce_value(v.value, vt, declared, v.pos, "initializer")
             vt = declared
         else:
@@ -539,7 +717,7 @@ class TypeChecker:
         tt = self._check_expr(a.target)
         if not self._is_assignable(a.target):
             raise CheckError("invalid assignment target", self.filename, a.pos)
-        vt = self._check_expr(a.value)
+        vt = self._check_expr(a.value, tt)
         self._coerce_value(a.value, vt, tt, a.pos, "assignment")
         if isinstance(tt, StructType) and tt.name == "Arena":
             raise CheckError("Arena values cannot be assigned", self.filename, a.pos)
@@ -586,7 +764,8 @@ class TypeChecker:
                 raise CheckError("return without value in non-void function", self.filename, r.pos)
             self.return_values.append((None, VOID))
             return
-        vt = self._check_expr(r.value)
+        expected = None if isinstance(self.current_ret, InferType) else self.current_ret
+        vt = self._check_expr(r.value, expected)
         if isinstance(vt, StructType) and vt.name == "Arena":
             raise CheckError("cannot return an Arena", self.filename, r.pos)
         if isinstance(self.current_ret, InferType):
@@ -667,11 +846,15 @@ class TypeChecker:
                 has_else = True
             else:
                 for pat in arm.patterns:
-                    if pat.enum_name != vt.name:
+                    family = pat.enum_name
+                    if family != vt.name and family != vt.family:
                         raise CheckError(
-                            f"cannot match {pat.enum_name}.{pat.member} "
-                            f"against '{vt.name}'",
+                            f"cannot match {self._display(family)}.{pat.member} "
+                            f"against '{vt}'",
                             self.filename, pat.pos)
+                    # Codegen spells tags against the concrete enum instance,
+                    # not the source-level generic family name.
+                    pat.enum_name = vt.name
                     if pat.member not in vt.members:
                         raise CheckError(f"enum '{vt.name}' has no member "
                                          f"'{pat.member}'",
@@ -729,7 +912,7 @@ class TypeChecker:
         if ct is not BOOL:
             raise CheckError(f"condition must be bool, got {ct}", self.filename, pos)
 
-    def _check_expr(self, expr) -> Type:
+    def _check_expr(self, expr, expected=None) -> Type:
         if isinstance(expr, A.IntLit):
             expr.type = INT_LIT; return INT_LIT
         if isinstance(expr, A.FloatLit):
@@ -739,7 +922,7 @@ class TypeChecker:
         if isinstance(expr, A.StringLit):
             expr.type = STR; return STR
         if isinstance(expr, A.ArrayLit):
-            return self._check_array_lit(expr)
+            return self._check_array_lit(expr, expected)
         if isinstance(expr, A.Name):
             ent = self._lookup(expr.name)
             if ent is not None:
@@ -749,7 +932,8 @@ class TypeChecker:
                              'ptr_is_null', 'ptr_cast', 'ptr_offset', 'ptr_null'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
-            if expr.name in self.structs or expr.name in self.enums or expr.name == 'List':
+            if (expr.name in self.structs or expr.name in self.enums
+                    or expr.name in self.generic_enums or expr.name == 'List'):
                 raise CheckError(f"cannot use type '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.functions:
@@ -766,8 +950,25 @@ class TypeChecker:
                 return ft
             raise CheckError(f"unknown name '{expr.name}'", self.filename, expr.pos)
         if isinstance(expr, A.BinOp):
-            lt = self._check_expr(expr.left)
-            rt = self._check_expr(expr.right)
+            left_generic = self._is_generic_enum_expr(expr.left)
+            right_generic = self._is_generic_enum_expr(expr.right)
+            # Check the side that already knows its type first. A generic
+            # constructor with a payload (Option.Some(5)) or explicit type
+            # arguments can stand alone; a bare Option.None needs the other
+            # side. This keeps `Option.None == Option.Some(5)` symmetric with
+            # `Option.Some(5) == Option.None`.
+            right_first = (
+                (left_generic and not right_generic)
+                or (left_generic and right_generic
+                    and self._generic_enum_expr_self_describing(expr.right)
+                    and not self._generic_enum_expr_self_describing(expr.left))
+            )
+            if right_first:
+                rt = self._check_expr(expr.right)
+                lt = self._check_expr(expr.left, rt)
+            else:
+                lt = self._check_expr(expr.left)
+                rt = self._check_expr(expr.right, lt)
             t = self._check_binop(expr, lt, rt)
             expr.type = t
             return t
@@ -788,7 +989,7 @@ class TypeChecker:
                 expr.type = BOOL; return BOOL
             raise CheckError(f"unknown unary '{expr.op}'", self.filename, expr.pos)
         if isinstance(expr, A.Call):
-            return self._check_call(expr)
+            return self._check_call(expr, expected)
         if isinstance(expr, A.Member):
             if (isinstance(expr.obj, A.Name) and self._lookup(expr.obj.name) is None
                     and expr.obj.name in self.enums):
@@ -804,6 +1005,10 @@ class TypeChecker:
                 expr.is_enum_member = True
                 expr.type = et
                 return et
+            if (isinstance(expr.obj, A.Name) and self._lookup(expr.obj.name) is None
+                    and expr.obj.name in self.generic_enums):
+                return self._check_generic_enum_member(
+                    self.generic_enums[expr.obj.name], expr, expected)
             ot = self._check_expr(expr.obj)
             if isinstance(ot, EnumType):
                 raise CheckError(f"enum values have no fields; write {ot}.Member",
@@ -859,10 +1064,55 @@ class TypeChecker:
         raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename,
                          getattr(expr, 'pos', A.Pos(0, 0)))
 
-    def _check_array_lit(self, expr: A.ArrayLit) -> Type:
+    def _is_generic_enum_expr(self, expr) -> bool:
+        """True when expr is a generic enum constructor or member value.
+
+        Used by binary operators to try the non-generic side first, so a
+        comparison such as `Result.Ok(7) == result` can infer T and E.
+        """
+        if isinstance(expr, A.Call):
+            f = expr.func
+        elif isinstance(expr, A.Member):
+            f = expr
+        else:
+            return False
+        return (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
+                and self._lookup(f.obj.name) is None
+                and f.obj.name in self.generic_enums)
+
+    def _generic_enum_expr_self_describing(self, expr) -> bool:
+        """True when a generic enum call can infer its type by itself.
+
+        A bare member (`Option.None`) cannot; a payload constructor or an
+        explicit `::<...>` argument list can. Used only to choose which side
+        of a comparison to check first.
+        """
+        if not isinstance(expr, A.Call):
+            return False
+        f = expr.func
+        return (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
+                and self._lookup(f.obj.name) is None
+                and f.obj.name in self.generic_enums
+                and bool(expr.type_args or expr.args))
+
+    def _check_array_lit(self, expr: A.ArrayLit, expected=None) -> Type:
         if not expr.elements:
             raise CheckError("empty array literal is not supported; use an explicit type",
                              self.filename, expr.pos)
+        if isinstance(expected, ArrayType):
+            if len(expr.elements) != expected.size:
+                raise CheckError(
+                    f"array literal has {len(expr.elements)} element(s), "
+                    f"expected {expected.size}", self.filename, expr.pos)
+            types = []
+            for i, e in enumerate(expr.elements):
+                et = self._check_expr(e, expected.inner)
+                self._coerce_value(e, et, expected.inner, expr.pos,
+                                   f"array element {i}")
+                types.append(expected.inner)
+            expr.element_types = list(types)
+            expr.type = expected
+            return expected
         types = [self._check_expr(e) for e in expr.elements]
         expr.element_types = list(types)
         concrete = [t for t in types if not (t is INT_LIT or t is FLOAT_LIT)]
@@ -1054,12 +1304,17 @@ class TypeChecker:
             return F32
         return t
 
-    def _check_call(self, call: A.Call) -> Type:
+    def _check_call(self, call: A.Call, expected=None) -> Type:
         f = call.func
         if (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
                 and self._lookup(f.obj.name) is None
                 and f.obj.name in self.enums):
             return self._check_enum_ctor(self.enums[f.obj.name], f.field, call)
+        if (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
+                and self._lookup(f.obj.name) is None
+                and f.obj.name in self.generic_enums):
+            return self._check_generic_enum_ctor(
+                self.generic_enums[f.obj.name], f.field, call, expected)
         if isinstance(f, A.Name):
             name = f.name
             # A local binding (parameter or variable) shadows any function
@@ -1126,6 +1381,144 @@ class TypeChecker:
             return self._check_indirect_call(call, t)
         raise CheckError(f"cannot call a value of type {t}", self.filename, call.pos)
 
+    def _check_generic_enum_member(self, info, expr, expected) -> Type:
+        label = self._display(info.name)
+        if expr.field not in info.members:
+            raise CheckError(f"enum '{label}' has no member '{expr.field}'",
+                             self.filename, expr.pos)
+        if info.payloads.get(expr.field):
+            raise CheckError(
+                f"enum member '{label}.{expr.field}' carries values; "
+                f"construct it with {label}.{expr.field}(...)",
+                self.filename, expr.pos)
+        if isinstance(expected, EnumType) and expected.family == info.name:
+            et = expected
+        else:
+            params = ', '.join(info.type_params)
+            raise CheckError(
+                f"cannot infer type parameters for '{label}.{expr.field}'; "
+                f"add a type annotation or write "
+                f"{label}.{expr.field}::<{params}>()",
+                self.filename, expr.pos)
+        expr.is_enum_member = True
+        expr.type = et
+        expr.enum_instance = et
+        return et
+
+    def _bind_type_param(self, info, bindings, name, actual, pos):
+        if actual is VOID:
+            raise CheckError(
+                f"cannot use void as type argument for '{name}'",
+                self.filename, pos)
+        old = bindings.get(name)
+        if old is not None and old != actual:
+            raise CheckError(
+                f"conflicting types for '{name}': "
+                f"{self._type_spelling(old)} and {self._type_spelling(actual)}",
+                self.filename, pos)
+        bindings[name] = actual
+
+    def _infer_type_params(self, te, actual, info, bindings):
+        """Infer enum type parameters from a payload argument's type."""
+        if te is None:
+            return
+        if te.kind == 'named':
+            if te.name in info.type_params:
+                self._bind_type_param(info, bindings, te.name, actual, te.pos)
+                return
+            if (te.args and te.name in self.generic_enums
+                    and isinstance(actual, EnumType)
+                    and actual.family == te.name
+                    and len(te.args) == len(actual.type_args)):
+                for sub_te, sub_actual in zip(te.args, actual.type_args):
+                    self._infer_type_params(sub_te, sub_actual, info, bindings)
+            return
+        if te.kind == 'ptr' and isinstance(actual, PtrType):
+            self._infer_type_params(te.inner, actual.inner, info, bindings)
+            return
+        if te.kind == 'list' and isinstance(actual, ListType):
+            self._infer_type_params(te.inner, actual.inner, info, bindings)
+            return
+        if te.kind == 'array' and isinstance(actual, ArrayType):
+            self._infer_type_params(te.inner, actual.inner, info, bindings)
+            return
+        if te.kind == 'func' and isinstance(actual, FuncType):
+            for sub_te, sub_actual in zip(te.params or [], actual.params):
+                self._infer_type_params(sub_te, sub_actual, info, bindings)
+            self._infer_type_params(te.inner, actual.ret, info, bindings)
+
+    def _check_generic_enum_ctor(self, info, member, call, expected) -> Type:
+        label = self._display(info.name)
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("enum constructors do not accept named arguments",
+                             self.filename, call.pos)
+        if member not in info.members:
+            raise CheckError(f"enum '{label}' has no member '{member}'",
+                             self.filename, call.pos)
+        payload_exprs = tuple(info.payloads.get(member, ()))
+        if len(call.args) != len(payload_exprs):
+            if not payload_exprs:
+                raise CheckError(f"'{label}.{member}' takes no values",
+                                 self.filename, call.pos)
+            raise CheckError(
+                f"'{label}.{member}' expects {len(payload_exprs)} value(s), "
+                f"got {len(call.args)}", self.filename, call.pos)
+
+        params = list(info.type_params)
+        bindings = {}
+        if call.type_args:
+            explicit = [self._resolve_type(te) for te in call.type_args]
+            if len(explicit) != len(params):
+                raise CheckError(
+                    f"'{label}.{member}' expects {len(params)} type "
+                    f"argument(s), got {len(explicit)}",
+                    self.filename, call.pos)
+            for pname, arg in zip(params, explicit):
+                bindings[pname] = arg
+        elif isinstance(expected, EnumType) and expected.family == info.name:
+            for pname, arg in zip(params, expected.type_args):
+                bindings[pname] = arg
+
+        actuals = []
+        if all(pname in bindings for pname in params):
+            env = dict(bindings)
+            for i, (arg, pte) in enumerate(zip(call.args, payload_exprs)):
+                ptype = self._resolve_type(pte, env)
+                at = self._check_expr(arg, ptype)
+                self._coerce_value(
+                    arg, at, ptype, call.pos,
+                    f"value {i + 1} of '{label}.{member}'")
+                actuals.append(at)
+        else:
+            for arg, pte in zip(call.args, payload_exprs):
+                at = self._check_expr(arg)
+                at = self._default_type(at, arg)
+                actuals.append(at)
+                self._infer_type_params(pte, at, info, bindings)
+            missing = [pname for pname in params if pname not in bindings]
+            if missing:
+                names = ', '.join(f"'{pname}'" for pname in missing)
+                word = 'parameter' if len(missing) == 1 else 'parameters'
+                type_params = ', '.join(params)
+                raise CheckError(
+                    f"cannot infer type {word} {names} for "
+                    f"'{label}.{member}'; add a type annotation or write "
+                    f"{label}.{member}::<{type_params}>(...)",
+                    self.filename, call.pos)
+            env = dict(bindings)
+            for i, (arg, pte) in enumerate(zip(call.args, payload_exprs)):
+                ptype = self._resolve_type(pte, env)
+                self._coerce_value(
+                    arg, actuals[i], ptype, call.pos,
+                    f"value {i + 1} of '{label}.{member}'")
+
+        args = tuple(bindings[pname] for pname in params)
+        et = self._instantiate_enum(info.name, args, call.pos)
+        call.is_enum_ctor = True
+        call.type = et
+        call.enum_instance = et
+        return et
+
     def _check_enum_ctor(self, et: EnumType, member: str, call: A.Call) -> Type:
         if call.type_args:
             raise CheckError("enum constructors do not accept type arguments",
@@ -1145,7 +1538,7 @@ class TypeChecker:
                 f"'{et.name}.{member}' expects {len(payload)} value(s), "
                 f"got {len(call.args)}", self.filename, call.pos)
         for i, (arg, ptype) in enumerate(zip(call.args, payload)):
-            at = self._check_expr(arg)
+            at = self._check_expr(arg, ptype)
             self._coerce_value(arg, at, ptype, call.pos,
                                f"value {i + 1} of '{et.name}.{member}'")
         call.is_enum_ctor = True
@@ -1165,7 +1558,7 @@ class TypeChecker:
                 f"function value expects {len(ft.params)} argument(s), got {len(call.args)}",
                 self.filename, call.pos)
         for arg, ptype in zip(call.args, ft.params):
-            at = self._check_expr(arg)
+            at = self._check_expr(arg, ptype)
             if isinstance(at, StructType) and at.name == "Arena":
                 raise CheckError("cannot pass Arena to a function", self.filename, call.pos)
             self._coerce_value(arg, at, ptype, call.pos, "argument")
@@ -1335,7 +1728,7 @@ class TypeChecker:
             if len(call.args) != 1:
                 raise CheckError(f"'push' expects one value, got {len(call.args)}",
                                  self.filename, call.pos)
-            at = self._check_expr(call.args[0])
+            at = self._check_expr(call.args[0], lt.inner)
             if isinstance(at, StructType) and at.name == "Arena":
                 raise CheckError("cannot store Arena in a List (it is non-copyable)",
                                  self.filename, call.pos)
@@ -1364,7 +1757,7 @@ class TypeChecker:
                     self.filename, call.pos)
             it = self._check_expr(call.args[0])
             self._coerce_value(call.args[0], it, I32, call.pos, "index")
-            vt = self._check_expr(call.args[1])
+            vt = self._check_expr(call.args[1], lt.inner)
             if isinstance(vt, StructType) and vt.name == "Arena":
                 raise CheckError("cannot store Arena in a List (it is non-copyable)",
                                  self.filename, call.pos)
@@ -1476,7 +1869,7 @@ class TypeChecker:
                 if nm in seen:
                     raise CheckError(f"duplicate field '{nm}'", self.filename, call.pos)
                 seen.add(nm)
-                at = self._check_expr(arg)
+                at = self._check_expr(arg, ftype)
                 self._coerce_value(arg, at, ftype, call.pos, f"field '{nm}'")
             if len(seen) != len(fields):
                 raise CheckError("missing fields in constructor", self.filename, call.pos)
@@ -1487,7 +1880,7 @@ class TypeChecker:
             if len(call.args) != len(fields):
                 raise CheckError(f"expected {len(fields)} arguments, got {len(call.args)}", self.filename, call.pos)
             for arg in call.args:
-                at = self._check_expr(arg)
+                at = self._check_expr(arg, ftype)
                 self._coerce_value(arg, at, ftype, call.pos, "argument")
 
     def _check_user_struct_ctor(self, st: StructType, call: A.Call) -> Type:
@@ -1501,7 +1894,7 @@ class TypeChecker:
             if nm in seen:
                 raise CheckError(f"duplicate field '{nm}'", self.filename, call.pos)
             seen.add(nm)
-            at = self._check_expr(arg)
+            at = self._check_expr(arg, st.fields[nm])
             self._coerce_value(arg, at, st.fields[nm], call.pos, f"field '{nm}'")
             by_name[nm] = arg
         if len(seen) != len(st.fields):
@@ -1524,7 +1917,7 @@ class TypeChecker:
         if len(call.args) != len(sig.params):
             raise CheckError(f"'{name}' expects {len(sig.params)} arguments, got {len(call.args)}", self.filename, call.pos)
         for arg, (_, ptype) in zip(call.args, sig.params):
-            at = self._check_expr(arg)
+            at = self._check_expr(arg, ptype)
             if isinstance(at, StructType) and at.name == "Arena":
                 raise CheckError("cannot pass Arena to a function", self.filename, call.pos)
             self._coerce_value(arg, at, ptype, call.pos, "argument")

@@ -40,6 +40,8 @@ jobs:
           mkdir -p /tmp/vanta-smoke
           printf 'func main() -> void:\n    print_str("installed ok")\n' > /tmp/vanta-smoke/hello.vnt
           .venv/bin/vanta /tmp/vanta-smoke/hello.vnt
+          printf 'import "std/option.vnt"\nimport "std/result.vnt"\nfunc main() -> void:\n    let value: Option<i32> = Option.None\n    match value:\n        Option.None:\n            print_str("stdlib ok")\n        Option.Some(v):\n            print_i32(v)\n    let parsed: Result<i32, str> = Result.Ok(3)\n    match parsed:\n        Result.Ok(v):\n            print_i32(v)\n        Result.Err(message):\n            print_str(message)\n' > /tmp/vanta-smoke/stdlib.vnt
+          .venv/bin/vanta /tmp/vanta-smoke/stdlib.vnt
 
       - name: Keep the distributions for the publish job
         uses: actions/upload-artifact@v4

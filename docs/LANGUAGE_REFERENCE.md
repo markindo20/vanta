@@ -1,6 +1,6 @@
-# Vanta Language Reference (v0.30.0)
+# Vanta Language Reference (v0.31.0)
 
-This is the reference for the language as implemented at tag `v0.30.0`. Every
+This is the reference for the language as implemented at tag `v0.31.0`. Every
 claim here was checked against the compiler; where behaviour surprised us, the
 surprise is called out explicitly.
 
@@ -392,6 +392,86 @@ true
 - `match` (v0.13.0, below) switches on enum values; when every member has
   an arm the checker proves it and no `else` is needed.
 - `enum` is a reserved keyword.
+
+## Generic enums and the standard library (v0.31.0)
+
+A generic enum declaration takes type parameters after its name. The
+parameters are in scope in that enum's payload types and are replaced by
+concrete types when the enum is used. v0.31.0 deliberately adds generics only
+to enum declarations - there are no generic structs or generic functions.
+
+```vanta
+enum Option<T>:
+    None
+    Some(T)
+
+enum Result<T, E>:
+    Ok(T)
+    Err(E)
+
+struct ParseError:
+    code: i32
+
+func parse(n: i32) -> Result<i32, ParseError>:
+    if n < 0:
+        return Result.Err(ParseError(code: 400))
+    return Result.Ok(n)
+
+func main() -> void:
+    let absent: Option<i32> = Option.None
+    let present = Option.Some(7)
+    match present:
+        Option.None:
+            print_i32(0)
+        Option.Some(value):
+            print_i32(value)
+    match parse(-1):
+        Result.Ok(value):
+            print_i32(value)
+        Result.Err(error):
+            print_i32(error.code)
+```
+
+```
+7
+400
+```
+
+- Type arguments are written in angle brackets: `Option<i32>`,
+  `Result<i32, str>`, and nested forms such as `Option<Option<i32>>`.
+  Every argument must be a complete, non-void type. `Option<i32>` and
+  `Option<str>` are different types and cannot be assigned to each other.
+- Constructors infer type parameters from the expected type first, then from
+  their values: `let value: Option<i32> = Option.None`,
+  `return Result.Ok(n)` in a function returning `Result<i32, ParseError>`, a
+  struct field, a function argument, a list element, an array element, an
+  assignment, and either side of `==`/`!=` all supply an expected type.
+  `Option.Some(5)` with no annotation infers `Option<i32>`.
+- A bare `Option.None` needs an expected type. If none is available, use an
+  annotation or the explicit constructor form `Option.None::<i32>()`.
+  `Result.Ok` and `Result.Err` similarly need both parameters from context or
+  explicit arguments such as `Result.Err::<i32, str>("missing")`. The error
+  for a missing parameter names it and shows the explicit form.
+- Generic enum instances are monomorphized in generated C++. Each distinct
+  set of type arguments gets its own concrete enum layout and constructor
+  functions. Diagnostics and matches continue to use the source spelling,
+  `Option<i32>`; generated internal names are not part of the source language.
+- `match` still checks exhaustiveness over the enum's members. Patterns name
+  the source family, `Option.Some(value)`, not a concrete internal instance.
+  Payload bindings receive the instantiated payload types.
+- Type arguments obey visibility: a public declaration cannot expose a
+  private type through `Option<Hidden>`, whether written explicitly or inferred.
+  Generic payloads must still be copyable and non-void after substitution, so
+  `Option<Arena>` is rejected when a member stores `T`. A recursive
+  instantiation such as `enum Seq<T>: Cons(T, Seq<T>)` is rejected with a
+  hint to store the nested value behind a pointer.
+- `import "std/option.vnt"` and `import "std/result.vnt"` load the shipped
+  library definitions. They are ordinary module files: import them
+  unqualified to use `Option`/`Result`, or with an alias
+  (`import "std/option.vnt" as opt`) to use `opt.Option`. A sibling
+  `std/option.vnt` next to the importing file wins over the installed copy.
+  The library is library-shaped: Option and Result are generic enum
+  declarations, not compiler-special-cased types.
 
 ## Match (v0.13.0)
 

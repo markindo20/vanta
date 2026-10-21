@@ -201,6 +201,17 @@ class Parser:
     def parse_enum(self):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
+        type_params = []
+        if self.match(TT.LT):
+            while True:
+                ptok = self.expect(TT.IDENT, "expected a type parameter")
+                if ptok.value in type_params:
+                    self.error(f"duplicate type parameter '{ptok.value}'", ptok)
+                type_params.append(ptok.value)
+                if self.match(TT.COMMA):
+                    continue
+                break
+            self.expect(TT.GT)
         self.expect(TT.COLON)
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
@@ -226,7 +237,18 @@ class Parser:
             members.append(A.EnumMember(
                 mn.value, payload, value, A.Pos(mn.line, mn.col)))
         self.expect(TT.DEDENT)
-        return A.EnumDecl(name, members, A.Pos(tok.line, tok.col))
+        return A.EnumDecl(name, members, A.Pos(tok.line, tok.col),
+                          type_params=type_params)
+
+    def parse_type_args(self):
+        """Parse a comma-separated type argument list, without the brackets."""
+        args = []
+        while True:
+            args.append(self.parse_type())
+            if self.match(TT.COMMA):
+                continue
+            break
+        return args
 
     def parse_type(self):
         t = self.peek()
@@ -270,7 +292,12 @@ class Parser:
         name = t.value
         while self.match(TT.DOT):
             name += '.' + self.expect(TT.IDENT, "expected a type name after '.'").value
-        return A.TypeExpr('named', name=name, pos=A.Pos(t.line, t.col))
+        args = None
+        if self.match(TT.LT):
+            args = self.parse_type_args()
+            self.expect(TT.GT)
+        return A.TypeExpr('named', name=name, args=args,
+                          pos=A.Pos(t.line, t.col))
 
     def parse_block(self):
         self.expect(TT.NEWLINE)
@@ -482,14 +509,14 @@ class Parser:
                 if self.check(TT.COLONCOLON):
                     self.advance()
                     self.expect(TT.LT)
-                    type_arg = self.parse_type()
+                    type_args = self.parse_type_args()
                     self.expect(TT.GT)
                     self.expect(TT.LPAREN)
                     args, names = self._parse_args_until_rparen()
                     self.expect(TT.RPAREN)
                     expr = A.Call(
                         A.Member(expr, field.value, A.Pos(t.line, t.col)),
-                        args, names, [type_arg], A.Pos(t.line, t.col)
+                        args, names, type_args, A.Pos(t.line, t.col)
                     )
                 elif self.check(TT.LPAREN):
                     self.advance()
@@ -546,12 +573,12 @@ class Parser:
             if self.check(TT.COLONCOLON):
                 self.advance()
                 self.expect(TT.LT)
-                type_arg = self.parse_type()
+                type_args = self.parse_type_args()
                 self.expect(TT.GT)
                 self.expect(TT.LPAREN)
                 args, names = self._parse_args_until_rparen()
                 self.expect(TT.RPAREN)
-                return A.Call(A.Name(t.value, name_pos), args, names, [type_arg], name_pos)
+                return A.Call(A.Name(t.value, name_pos), args, names, type_args, name_pos)
             if self.check(TT.LPAREN):
                 self.advance()
                 args, names = self._parse_args_until_rparen()

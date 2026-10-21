@@ -63,6 +63,15 @@ class EnumType(Type):
     members: Dict[str, int]
     # Member name -> payload types. Members without a payload map to ().
     payloads: Dict[str, Tuple[Type, ...]] = field(default_factory=dict)
+    # Generic enum instances carry the declaration family they came from and
+    # the concrete type arguments. `display` is the source-level spelling
+    # used in diagnostics (e.g. Option<i32>); C++ codegen keeps using `name`.
+    family: Optional[str] = None
+    type_args: Tuple[Type, ...] = ()
+    display: Optional[str] = None
+    @property
+    def is_generic_instance(self) -> bool:
+        return self.family is not None
     @property
     def has_payloads(self) -> bool:
         return any(self.payloads.values())
@@ -71,7 +80,7 @@ class EnumType(Type):
     def __eq__(self, other):
         return isinstance(other, EnumType) and self.name == other.name
     def __hash__(self): return hash(self.name)
-    def __repr__(self): return self.name
+    def __repr__(self): return self.display or self.name
 
 
 @dataclass(frozen=True)

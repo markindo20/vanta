@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.30.0)
+# Vanta - a game-oriented systems language (v0.31.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -78,6 +78,18 @@ A file can begin with `module name` and export declarations with `pub`.
 all-public import behaviour. See the
 [module example](examples/modules_demo/main.vnt) and the
 [language reference](docs/LANGUAGE_REFERENCE.md#modules-and-imports-v040-modules-v0300).
+
+### Option and Result
+
+v0.31.0 adds generic enum declarations and a small standard library.
+`import "std/option.vnt"` provides `Option<T>` (`None`/`Some(T)`) for values
+that may be absent, and `import "std/result.vnt"` provides `Result<T, E>`
+(`Ok(T)`/`Err(E)`) for success-or-error APIs. Both are ordinary enums, so
+`match` destructures them exhaustively; constructors infer their type
+arguments from the expected type or payload, with
+`Option.None::<i32>()` and `Result.Err::<i32, str>("missing")` as the explicit
+forms. See [examples/option_result.vnt](examples/option_result.vnt) and the
+[reference](docs/LANGUAGE_REFERENCE.md#generic-enums-and-the-standard-library-v0310).
 
 Start a new game with a playable paddle-and-ball starter:
 
@@ -173,11 +185,12 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 |---|---|
 | `main.py` | CLI entry point for a checkout |
 | `pyproject.toml` | Package metadata; installing creates the `vanta` command |
-| `setup.py` | Build hook that puts the runtime, game kit, and assets in the wheel |
+| `setup.py` | Build hook that puts the runtime, game kit, assets, and standard library in the wheel |
 | `compiler/` | Python frontend: lexer, parser, import loader and module resolver, type checker, C++ code generator, driver |
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
+| `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (641 tests) |
+| `tests/` | `unittest` suite (674 tests) |
 | `docs/` | Language reference and architecture notes |
 
 ## Examples
@@ -212,6 +225,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `str_builder.vnt` | String building: append into an arena-backed `StrBuilder` |
 | `enums.vnt` | Named states: `enum State:`, members, `==`, `enum_to_i32` |
 | `enums_advanced.vnt` | Explicit member values and payload enums, destructured by `match` |
+| `option_result.vnt` | Generic enums and the standard library: `Option<T>`, `Result<T, E>`, constructor inference, explicit type arguments |
 | `match.vnt` | Branching on enums: exhaustive `match`, multi-pattern arms, `else` |
 | `sdl_window.vnt` | An SDL2 window: init, renderer, event loop, headless frame limit |
 | `sdl_text.vnt` | Text with SDL_ttf: `SDL_Color` by value, `TTF_SizeUTF8`, render to texture |
@@ -263,7 +277,8 @@ compare structs field by field with `==`, reinterpret pointers with
 explicit nulls with `ptr_null::<T>()`,
 build strings incrementally with `StrBuilder`, own runtime strings with
 automatic reference counting, name states and modes with enums (including
-explicit values and payloads) and branch on them exhaustively with `match`,
+explicit values, payloads, and generic instances), use the shipped
+`Option`/`Result` library, branch on enum values exhaustively with `match`,
 and build and run real SDL2 games
 on the game kit, text rendering, sprite images, sprite-sheet animation, and
 WAV sound files included
@@ -287,10 +302,13 @@ are real:
   is no default ordering); `arena.reset()` invalidates the lists made from that
   arena
 - enums name members with optional explicit `i32` values and payloads;
-  `==`/`!=` compare the tag and active payload, and `match` destructures
-  payloads with bindings. Payload enums have no C representation and cannot
-  appear in `extern` signatures; plain enums still map to fixed-`int32_t`
-  C++ enums
+  enum declarations may take type parameters, and each concrete instance is
+  monomorphized (`Option<i32>` and `Option<str>` are distinct types).
+  `Option<T>` and `Result<T, E>` ship in `stdlib/` as ordinary generic enums,
+  not compiler-special-cased types. `==`/`!=` compare the tag and active
+  payload, and `match` destructures payloads with bindings. Payload enums
+  have no C representation and cannot appear in `extern` signatures; plain
+  enums still map to fixed-`int32_t` C++ enums
 - windowing, images, and sound are shipped as SDL2 examples plus the game
   kit: the kit wraps controllers, sprite-sheet animation, textures, text,
   audio, and rectangle/circle collision; events are still read by hand (an
@@ -301,7 +319,8 @@ are real:
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
 - modules are one file each: imports are paths, with no nested modules,
-  package manager, or search path; `pub` controls top-level declarations, not
+  package manager, or general search path (only `std/` falls back to the
+  shipped standard library); `pub` controls top-level declarations, not
   individual struct fields, and a public declaration cannot expose a private
   type, including through an inferred function or constant type
 

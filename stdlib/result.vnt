@@ -1,0 +1,15 @@
+module result
+
+# A success value or an error value.
+#
+# Construct with Result.Ok(value) or Result.Err(error). When the surrounding
+# annotation supplies both types, neither constructor needs to spell them:
+#
+#     let parsed: Result<i32, str> = Result.Ok(42)
+#
+# When only one side is inferable, use explicit type arguments:
+#
+#     let missing = Result.Err::<i32, str>("missing")
+pub enum Result<T, E>:
+    Ok(T)
+    Err(E)
