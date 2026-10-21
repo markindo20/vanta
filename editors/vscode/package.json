@@ -2,7 +2,7 @@
   "name": "vanta-language",
   "displayName": "Vanta",
   "description": "Vanta language support: diagnostics, completion, hover, definitions, document symbols, and native debugging.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "vanta",
   "license": "MIT",
   "repository": {

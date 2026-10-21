@@ -5,10 +5,25 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.35.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.36.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.36.0
+
+Debugger navigation landed. The debug build carries a source map of the
+program, so the adapter can tell an editor which lines hold a statement and
+can hold a breakpoint, and it offers the lines of the running function as
+jump targets. A jump moves the program counter and continues the program.
+Exception breakpoints for C++ exceptions thrown or caught are available as
+GDB catchpoints. 749 tests total, including unit tests for the source-line
+map and stdio sessions that list the valid lines, jump, and set an exception
+breakpoint.
+
+The next debugger milestone is deliberately separate again: attach and remote
+debugging, reverse debugging, LLDB, and MSVC/PDB support. A debug session
+always uses an unoptimized build.
 
 ## Landed in v0.35.0
 
@@ -112,7 +127,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.36.0)
+## Next: language (candidate v0.37.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -156,8 +171,9 @@ public declarations. `examples/modules_demo/` is the worked example.
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and
   restart. Debugger editing shipped in v0.35.0: editing mutable locals, data
-  breakpoints, registers, and memory reads. The next debugger work is
-  exception breakpoints, attach/remote debugging, reverse debugging, `goto`,
+  breakpoints, registers, and memory reads. Debugger navigation shipped in
+  v0.36.0: valid breakpoint lines, run to cursor, and exception breakpoints.
+  The next debugger work is attach/remote debugging, reverse debugging,
   LLDB, and MSVC/PDB support.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package

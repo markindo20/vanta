@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.35.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.36.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -23,12 +23,14 @@ it:
 - editing mutable locals
 - data breakpoints that stop when a value changes
 - a registers view and raw memory reads
+- valid breakpoint lines, and jumping to a line ("run to cursor")
+- exception breakpoints
 - restart, which rebuilds the program and runs it again
 - clean exit, terminate, and disconnect
 
 ## Requirements
 
-- Vanta 0.35.0 or newer (`vanta --version`)
+- Vanta 0.36.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -49,7 +51,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.6.0.vsix
+code --install-extension vanta-language-0.7.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -87,7 +89,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.6.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.7.0.vsix`.
 
 ## Breakpoints
 
@@ -125,6 +127,25 @@ time the program stops. Expressions use Vanta names, so `total`, `hp`, and
 `len(items)` all work. An expression that cannot be evaluated - because the
 variable is not in scope yet, for example - shows `<not available>` instead of
 failing the session.
+
+## Breakpoint lines and jumping to a line
+
+Not every line of a Vanta file can hold a breakpoint: a line with only a
+declaration or a blank line has no code to stop at. The adapter knows the
+lines that do, so an editor can grey out the others instead of setting a
+breakpoint that never hits.
+
+The same knowledge powers **Run to Cursor** (right-click a line and choose
+*Set Cursor* / *Run to Cursor*). The program counter of the current frame is
+moved to that line and the program continues from there. Only lines of the
+function that is running can be used, and only when the program is stopped.
+
+## Exception breakpoints
+
+Vanta has no exceptions of its own, but the C++ runtime and any C library
+reached through `extern` can raise one. The **Exception Breakpoints** section
+of the debugger offers two filters: exceptions thrown and exceptions caught.
+Both are GDB catchpoints.
 
 ## Editing values
 
@@ -263,8 +284,10 @@ vanta build game.vnt --debug -o build/game-debug.exe
   immutable bindings are refused on purpose.
 - Data breakpoints watch one address, so they stop on a write to that
   address, not on a change of a larger value such as a struct.
-- No exception breakpoints, attach, or remote debugging.
-- No reverse debugging and no `goto`.
+- "Run to cursor" moves the program counter, which GDB does not fully
+  support. It works inside the running function, and the values of the
+  variables may be inconsistent afterwards.
+- No attach, remote debugging, or reverse debugging.
 - No LLDB or MSVC/PDB backend. GDB/MI2 is the only transport.
 - Multi-threaded programs expose GDB threads and report when a thread starts
   or exits, but the first milestone focuses on the main thread and

@@ -29,7 +29,11 @@ from compiler.dap import (
     read_dap_message,
     write_dap_message,
 )
-from compiler.driver import build_debug, find_debug_compiler, mutable_locals
+from compiler.driver import (
+    build_debug,
+    find_debug_compiler,
+    mutable_locals,
+)
 
 
 def _messages(data: bytes):
@@ -543,6 +547,26 @@ class MutableLocalTests(unittest.TestCase):
             self.assertIn('main', table)
             self.assertEqual(table['main'], {'counter'})
 
+    def test_source_lines_cover_every_statement(self):
+        from compiler.driver import _frontend_only, source_lines
+        import tempfile
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'main.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n'
+                        '    let fixed = 1\n'
+                        '    mut counter = 0\n'
+                        '    while counter < 3:\n'
+                        '        counter = counter + 1\n'
+                        '    print_i32(fixed)\n')
+            program, _tc = _frontend_only(path)
+            table = source_lines(program)
+            key = os.path.normcase(os.path.abspath(path))
+            self.assertEqual(table['files'][key], [2, 3, 4, 5, 6])
+            self.assertEqual(table['functions']['main'][key],
+                             [2, 3, 4, 5, 6])
+
 
 class DapStdioIntegrationTests(_DapSessionTestCase):
     """Exercise the real adapter process, not just its helpers."""
@@ -745,6 +769,99 @@ class DapFeatureIntegrationTests(_DapSessionTestCase):
             lambda m: m.get('type') == 'response' and
             m.get('command') == 'stackTrace')
         self.assertEqual(response['body']['stackFrames'][0]['line'], 6)
+
+
+class DapNavigationIntegrationTests(_DapSessionTestCase):
+    """Breakpoint locations, jump targets, and exception breakpoints."""
+
+    PROGRAM = ('func main() -> void:\n'
+               '    let fixed = 41\n'
+               '    mut counter = 0\n'
+               '    mut total = 0\n'
+               '    while counter < 3:\n'
+               '        total = total + counter\n'
+               '        counter = counter + 1\n'
+               '    print_i32(total)\n')
+
+    def test_breakpoint_locations_list_the_statements(self):
+        self.initialize()
+        self.launch()
+        self.send('breakpointLocations', {'source': {'path': self.source}})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'breakpointLocations')
+        lines = [b['line'] for b in response['body']['breakpoints']]
+        self.assertEqual(lines, [2, 3, 4, 5, 6, 7, 8])
+
+    def test_breakpoint_locations_for_one_line(self):
+        self.initialize()
+        self.launch()
+        self.send('breakpointLocations', {'source': {'path': self.source},
+                                          'line': 3})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'breakpointLocations')
+        self.assertEqual(response['body']['breakpoints'], [{'line': 3}])
+        self.send('breakpointLocations', {'source': {'path': self.source},
+                                          'line': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'breakpointLocations')
+        self.assertEqual(response['body']['breakpoints'], [])
+
+    def test_goto_targets_are_the_lines_of_the_function(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('gotoTargets', {'source': {'path': self.source}})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'gotoTargets')
+        lines = [t['line'] for t in response['body']['targets']]
+        self.assertIn(7, lines)
+        self.assertNotIn(1, lines)
+
+    def test_goto_continues_the_program(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('goto', {'target': {'source': {'path': self.source},
+                                      'line': 7}})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'goto', timeout=60)
+        self.assertTrue(response['success'], response)
+        # The program keeps running and stops at the breakpoint again.
+        stopped = self.stopped_event()
+        self.assertEqual(stopped['body']['reason'], 'breakpoint')
+
+    def test_goto_outside_the_function_is_refused(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('goto', {'target': {'source': {'path': self.source},
+                                      'line': 1}})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'goto')
+        self.assertFalse(response['success'], response)
+
+    def test_exception_breakpoints_are_accepted(self):
+        self.initialize()
+        self.launch()
+        self.send('setExceptionBreakpoints', {'filters': ['throw']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setExceptionBreakpoints')
+        self.assertTrue(response['success'], response)
+        self.assertTrue(response['body']['breakpoints'][0]['verified'],
+                        response)
 
 
 class DapEditingIntegrationTests(_DapSessionTestCase):

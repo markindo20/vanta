@@ -2,6 +2,26 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.36.0 - 2026-10-21
+
+- Breakpoint lines. The adapter knows which lines of a Vanta file hold a
+  statement and answers the breakpoint-locations request, so an editor greys
+  out the lines that cannot hold a breakpoint instead of setting one that
+  never hits.
+- Run to cursor. The adapter answers the jump-targets request with the lines
+  of the function that is running, and a jump moves the program counter
+  there and lets the program continue.
+- Exception breakpoints. The debugger offers filters for C++ exceptions
+  thrown and caught, which are GDB catchpoints. Vanta has no exceptions of
+  its own, but the runtime and any C library reached through `extern` can
+  raise one.
+- Docs and tests. `docs/DEBUGGER.md` documents the breakpoint lines, run to
+  cursor, and exception breakpoints. 749 tests total, including unit tests
+  for the source-line map and stdio sessions that list the valid breakpoint
+  lines, offer jump targets, jump, and set an exception breakpoint. Attach
+  and remote debugging, reverse debugging, LLDB, and MSVC/PDB remain future
+  work.
+
 ## v0.35.0 - 2026-10-21
 
 - Editable variables. A local can be changed from the Variables view, but

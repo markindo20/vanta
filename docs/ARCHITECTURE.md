@@ -167,7 +167,7 @@ that can import `compiler`. It passes the workspace as the server's working
 directory so relative imports and Python module discovery behave like the
 editor's project.
 
-## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0)
+## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0, navigation in v0.36.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -223,6 +223,16 @@ is only handed out to clients that advertise `supportsDataBreakpoints`,
 because computing it costs one GDB round trip per variable. The registers
 view reads `-data-list-register-names` and `-data-list-register-values`, and
 raw memory reads use `-data-read-memory-bytes`.
+
+The debug build also carries the source map of the program: which lines
+hold a statement, and which function they belong to (`source_lines()` in
+`driver.py` walks the function bodies). That map answers the
+`breakpointLocations` request, so an editor knows which lines can hold a
+breakpoint, and it limits the jump targets to the function that is
+running. A jump moves the program counter with GDB's `jump` command and
+lets the program continue. Exception breakpoints are GDB catchpoints; GDB's
+machine interface has no catchpoint command, so they are set through the
+console and their numbers are picked up from the notification GDB sends.
 
 DAP stdio lifecycle is intentionally blunt: after `serve()` cleans up GDB and
 the temporary build, `run_stdio()` flushes and exits with `os._exit(0)`. A
@@ -322,13 +332,14 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 742 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 749 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
 through launch, stop, locals, continue, and disconnect, and two more groups
 cover the breakpoint kinds, watch expressions, restart, editing, data
-breakpoints, registers, and memory reads.
+breakpoints, registers, memory reads, breakpoint locations, jump targets,
+and exception breakpoints.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

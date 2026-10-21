@@ -586,6 +586,7 @@ class DapAdapter:
         self._function_requests: list[dict] = []
         self._function_breakpoints: list[str] = []
         self._data_breakpoints: list[str] = []
+        self._catchpoints: list[str] = []
         self._watch_expressions: list[dict] = []
         self._threads: dict[int, dict] = {}
         self._current_thread: Optional[int] = None
@@ -723,7 +724,7 @@ class DapAdapter:
             'supportsEvaluateForHovers': False,
             'supportsSetVariable': True,
             'supportsRestartFrame': False,
-            'supportsGotoTargetsRequest': False,
+            'supportsGotoTargetsRequest': True,
             'supportsCompletionsRequest': False,
             'supportsModulesRequest': False,
             'supportsRestartRequest': True,
@@ -734,13 +735,18 @@ class DapAdapter:
             'supportsReadMemoryRequest': True,
             'supportsDisassembleRequest': False,
             'supportsCancelRequest': False,
-            'supportsBreakpointLocationsRequest': False,
+            'supportsBreakpointLocationsRequest': True,
             'supportsClipboardContext': False,
             'supportsSteppingGranularity': False,
             'supportsInstructionBreakpoints': False,
             'supportsLoadedSourcesRequest': False,
             'supportsRegisterEvaluate': True,
-            'exceptionBreakpointFilters': [],
+            'exceptionBreakpointFilters': [
+                {'filter': 'throw', 'label': 'C++ exceptions thrown',
+                 'default': False},
+                {'filter': 'catch', 'label': 'C++ exceptions caught',
+                 'default': False},
+            ],
             'supportsDelayedStackTraceLoading': False,
         }
         self.response(request, capabilities)
@@ -857,7 +863,104 @@ class DapAdapter:
         self.response(request, {'breakpoints': out})
 
     def _request_setExceptionBreakpoints(self, request, args):
-        self.response(request, {'breakpoints': []})
+        """Stop when a C++ exception is thrown or caught.
+
+        Vanta itself has no exceptions, but the runtime and any C library
+        reached through ``extern`` can raise one. GDB's machine interface
+        has no catchpoint command, so the catchpoint is set through the
+        console and picked up from the notification GDB sends.
+        """
+        wanted = [str(item) for item in (args.get('filters') or [])]
+        for number in self._catchpoints:
+            try:
+                self._gdb.command('-interpreter-exec console ' +
+                                  _mi_quote(f'delete {number}'))
+            except Exception:
+                pass
+        self._catchpoints = []
+        out = []
+        for name in ('throw', 'catch'):
+            if name not in wanted:
+                continue
+            try:
+                self._gdb.command('-interpreter-exec console ' +
+                                  _mi_quote(f'catch {name}'))
+            except Exception as exc:
+                out.append({'verified': False, 'message': str(exc)})
+                continue
+            out.append({'verified': True})
+        self.response(request, {'breakpoints': out})
+
+    def _request_breakpointLocations(self, request, args):
+        """The lines of a file that can hold a breakpoint."""
+        source = _path_from_dap((args.get('source') or {}).get('path'))
+        if not source:
+            self.error(request, 'breakpointLocations requires source.path')
+            return
+        line = _int_or_none(args.get('line')) or 0
+        lines = self._source_lines().get(_source_key(source), [])
+        if line > 0:
+            lines = [item for item in lines if item == line]
+        self.response(request, {'breakpoints': [{'line': item} for item in lines]})
+
+    def _request_gotoTargets(self, request, args):
+        """The lines the program can jump to from the current frame."""
+        source = _path_from_dap((args.get('source') or {}).get('path'))
+        if not source:
+            self.error(request, 'gotoTargets requires source.path')
+            return
+        function = self._current_function()
+        lines = self._function_lines(function).get(_source_key(source), [])
+        targets = []
+        for index, line in enumerate(lines, 1):
+            targets.append({
+                'id': index,
+                'label': f'line {line}',
+                'line': line,
+                'column': 1,
+            })
+        self.response(request, {'targets': targets})
+
+    def _request_goto(self, request, args):
+        """Move the program counter to a line of the current function."""
+        target = args.get('target') or {}
+        line = _int_or_none(target.get('line'))
+        if not line:
+            self.error(request, 'goto requires a target line')
+            return
+        if self._gdb is None:
+            self.error(request, 'debugger has not been launched')
+            return
+        source = _path_from_dap((target.get('source') or {}).get('path')) or \
+            self._current_source()
+        if not source:
+            self.error(request, 'goto requires a target source')
+            return
+        function = self._current_function()
+        allowed = self._function_lines(function).get(_source_key(source), [])
+        if line not in allowed:
+            self.error(request, f'line {line} is not in the current function')
+            return
+        path = os.path.abspath(source).replace('\\', '/')
+        try:
+            record = self._gdb.command('-interpreter-exec console ' +
+                                       _mi_quote(f'jump {path}:{line}'))
+        except Exception as exc:
+            self.error(request, f'could not jump: {exc}')
+            return
+        if record.class_ != 'running':
+            # GDB continues the program itself after a jump; only resume it
+            # when the console command did not.
+            try:
+                self._gdb.run_command('-exec-continue')
+            except Exception as exc:
+                self.error(request, f'could not continue: {exc}')
+                return
+        self._stopped = False
+        self._running_inferior = True
+        self.event('continued', {'threadId': self._current_thread or 1,
+                                 'allThreadsContinued': True})
+        self.response(request)
 
     def _request_setVariable(self, request, args):
         """Write a value into a local.
@@ -1518,6 +1621,44 @@ class DapAdapter:
         self._watch_expressions.append({'expression': expression,
                                         'frameId': frame_id})
 
+    def _source_lines(self) -> dict:
+        """The lines of every source file that hold a statement."""
+        table = (self._build or {}).get('source_lines') or {}
+        return table.get('files', {})
+
+    def _function_lines(self, function: str) -> dict:
+        """The lines of one function, per source file."""
+        table = (self._build or {}).get('source_lines') or {}
+        return table.get('functions', {}).get(function, {})
+
+    def _current_function(self) -> str:
+        """The internal name of the function the current frame is in."""
+        if self._gdb is None:
+            return ''
+        try:
+            record = self._gdb.command('-stack-list-frames')
+        except Exception:
+            return ''
+        for item in record.results.get('stack', []) or []:
+            frame = item.get('frame') if isinstance(item, dict) else None
+            if isinstance(frame, dict):
+                return _internal_function_name(frame.get('func') or '')
+        return ''
+
+    def _current_source(self) -> str:
+        """The source file of the current frame."""
+        if self._gdb is None:
+            return ''
+        try:
+            record = self._gdb.command('-stack-list-frames')
+        except Exception:
+            return ''
+        for item in record.results.get('stack', []) or []:
+            frame = item.get('frame') if isinstance(item, dict) else None
+            if isinstance(frame, dict):
+                return str(frame.get('fullname') or frame.get('file') or '')
+        return ''
+
     def _mutable_names_for_frame(self, thread_id, level) -> set:
         """The names of the mutable locals of the function in a frame."""
         if self._gdb is None or self._build is None:
@@ -1742,6 +1883,13 @@ class DapAdapter:
         if record.sign == '^':
             return
         if record.sign == '=':
+            if record.class_ == 'breakpoint-created':
+                bkpt = record.results.get('bkpt') or {}
+                if isinstance(bkpt, dict) and bkpt.get('type') == 'catchpoint':
+                    number = str(bkpt.get('number', ''))
+                    if number and number not in self._catchpoints:
+                        self._catchpoints.append(number)
+                return
             if record.class_ == 'thread-created':
                 tid = _int_or_none(record.results.get('id'))
                 if tid is not None:
@@ -1803,6 +1951,8 @@ class DapAdapter:
         if self._entry_bp_number and bkptno == self._entry_bp_number:
             dap_reason = 'entry'
             self._entry_bp_number = None
+        elif bkptno and bkptno in self._catchpoints:
+            dap_reason = 'exception'
 
         body = {
             'reason': dap_reason,
@@ -2063,6 +2213,11 @@ def _is_truthy(value) -> bool:
     if not text:
         return False
     return text not in ('0', 'false', 'False', 'FALSE')
+
+
+def _source_key(path: str) -> str:
+    """The key a source file is stored under in the build tables."""
+    return os.path.normcase(os.path.abspath(str(path or '')))
 
 
 def _internal_function_name(func: str) -> str:

@@ -547,6 +547,51 @@ def program_type_aliases(program):
     return result
 
 
+def _collect_statement_lines(body, out):
+    """Collect the (file, line) of every statement that can hold code."""
+    for stmt in body or []:
+        pos = getattr(stmt, 'pos', None)
+        if pos is not None and pos.file and pos.line:
+            out.add((pos.file, pos.line))
+        if isinstance(stmt, A.IfStmt):
+            _collect_statement_lines(stmt.then_body, out)
+            for branch in stmt.elif_branches or []:
+                _collect_statement_lines(branch[1], out)
+            _collect_statement_lines(stmt.else_body, out)
+        elif isinstance(stmt, A.MatchStmt):
+            for arm in stmt.arms or []:
+                _collect_statement_lines(arm.body, out)
+        elif isinstance(stmt, (A.WhileStmt, A.ForRangeStmt, A.ForEachStmt)):
+            _collect_statement_lines(stmt.body, out)
+
+
+def source_lines(program):
+    """Map the source files and functions to the lines that hold a statement.
+
+    The debugger uses this to answer breakpoint-location requests and to
+    offer jump targets: a line without a statement cannot hold a breakpoint.
+    """
+    files: dict = {}
+    functions: dict = {}
+    for decl in program.decls:
+        if not isinstance(decl, FuncDecl):
+            continue
+        lines = set()
+        _collect_statement_lines(decl.body, lines)
+        per_file: dict = {}
+        for file, line in lines:
+            key = os.path.normcase(os.path.abspath(file))
+            files.setdefault(key, set()).add(line)
+            per_file.setdefault(key, set()).add(line)
+        functions[decl.name] = {
+            key: sorted(value) for key, value in per_file.items()
+        }
+    return {
+        'files': {key: sorted(value) for key, value in files.items()},
+        'functions': functions,
+    }
+
+
 def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
                 link=None):
     """Build an unoptimized executable with Vanta source locations.
@@ -618,6 +663,7 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
         'mutable_locals': mutable_locals(program),
         'types': program_types(program),
         'type_aliases': program_type_aliases(program),
+        'source_lines': source_lines(program),
     }
 
 
