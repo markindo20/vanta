@@ -5,10 +5,25 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.34.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.35.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.35.0
+
+Debugger editing landed. A local can be edited from the Variables view, but
+only where Vanta allows it: only a binding declared with `mut` may be
+written, and an immutable binding is refused with a clear message. The
+adapter also watches a value (a GDB watchpoint on the local's address),
+lists the processor registers, answers raw memory reads, and reports threads
+that start or exit. 742 tests total, including unit tests for the value and
+type rules and stdio sessions that edit, refuse, watch, and read machine
+state.
+
+The next debugger milestone is deliberately separate again: exception
+breakpoints, attach and remote debugging, reverse debugging, `goto`, LLDB,
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.34.0
 
@@ -97,7 +112,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.35.0)
+## Next: language (candidate v0.36.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -140,9 +155,10 @@ public declarations. `examples/modules_demo/` is the worked example.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and
-  restart. The next debugger work is editable variables, data and exception
-  breakpoints, attach/remote debugging, reverse debugging, LLDB, and MSVC/PDB
-  support.
+  restart. Debugger editing shipped in v0.35.0: editing mutable locals, data
+  breakpoints, registers, and memory reads. The next debugger work is
+  exception breakpoints, attach/remote debugging, reverse debugging, `goto`,
+  LLDB, and MSVC/PDB support.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,

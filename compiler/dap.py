@@ -585,6 +585,7 @@ class DapAdapter:
         self._bp_meta: dict[str, dict] = {}
         self._function_requests: list[dict] = []
         self._function_breakpoints: list[str] = []
+        self._data_breakpoints: list[str] = []
         self._watch_expressions: list[dict] = []
         self._threads: dict[int, dict] = {}
         self._current_thread: Optional[int] = None
@@ -710,7 +711,7 @@ class DapAdapter:
     # -- requests ----------------------------------------------------------
 
     def _request_initialize(self, request, args):
-        self._client_capabilities = args or {}
+        self._client_capabilities = (args or {}).get('capabilities') or {}
         capabilities = {
             'supportsConfigurationDoneRequest': True,
             'supportsTerminateRequest': True,
@@ -720,7 +721,7 @@ class DapAdapter:
             'supportsHitConditionalBreakpoints': True,
             'supportsLogPoints': True,
             'supportsEvaluateForHovers': False,
-            'supportsSetVariable': False,
+            'supportsSetVariable': True,
             'supportsRestartFrame': False,
             'supportsGotoTargetsRequest': False,
             'supportsCompletionsRequest': False,
@@ -729,8 +730,8 @@ class DapAdapter:
             'supportsExceptionOptions': False,
             'supportsValueFormattingOptions': False,
             'supportsExceptionInfoRequest': False,
-            'supportsDataBreakpoints': False,
-            'supportsReadMemoryRequest': False,
+            'supportsDataBreakpoints': True,
+            'supportsReadMemoryRequest': True,
             'supportsDisassembleRequest': False,
             'supportsCancelRequest': False,
             'supportsBreakpointLocationsRequest': False,
@@ -738,6 +739,7 @@ class DapAdapter:
             'supportsSteppingGranularity': False,
             'supportsInstructionBreakpoints': False,
             'supportsLoadedSourcesRequest': False,
+            'supportsRegisterEvaluate': True,
             'exceptionBreakpointFilters': [],
             'supportsDelayedStackTraceLoading': False,
         }
@@ -856,6 +858,143 @@ class DapAdapter:
 
     def _request_setExceptionBreakpoints(self, request, args):
         self.response(request, {'breakpoints': []})
+
+    def _request_setVariable(self, request, args):
+        """Write a value into a local.
+
+        Vanta only allows writes to bindings declared with ``mut``, so the
+        adapter enforces that rule itself: GDB would happily overwrite an
+        immutable binding, because the generated C++ variable is not const.
+        """
+        name = str(args.get('name') or '')
+        value = str(args.get('value') or '')
+        ref = _int_or_none(args.get('variablesReference'))
+        info = self._variable_refs.get(ref)
+        if not name or info is None:
+            self.error(request, 'setVariable requires a variable name')
+            return
+        if self._gdb is None:
+            self.error(request, 'debugger has not been launched')
+            return
+        thread_id, level, kind = info
+        self._select_frame(thread_id, level)
+        mutable = self._mutable_names_for_frame(thread_id, level)
+        if name not in mutable:
+            self.error(request,
+                       f'{name!r} is immutable in Vanta; only bindings declared '
+                       f'with mut can be edited')
+            return
+        vanta_type = self._variable_type(thread_id, level, kind, name)
+        problem = _value_type_problem(value, vanta_type)
+        if problem:
+            self.error(request, problem)
+            return
+        expression = self._translate_value(value)
+        try:
+            self._gdb.command('-interpreter-exec console ' +
+                              _mi_quote(f'set var v_{name} = {expression}'))
+        except Exception as exc:
+            self.error(request, f'could not set {name}: {exc}')
+            return
+        new_value, ok = self._evaluate_expression(name)
+        self.response(request, {'value': new_value if ok else value,
+                                'variablesReference': 0})
+
+    def _request_setDataBreakpoints(self, request, args):
+        """Break when a watched local changes."""
+        requested = args.get('breakpoints') or []
+        for number in self._data_breakpoints:
+            try:
+                self._gdb.command(f'-break-delete {number}')
+            except Exception:
+                pass
+        self._data_breakpoints = []
+        out = []
+        for bp in requested:
+            data_id = str(bp.get('dataId') or '').strip()
+            entry = {'verified': False,
+                     'message': f'cannot watch {data_id!r}'}
+            address = data_id if data_id.startswith('0x') else ''
+            if address and self._gdb is not None:
+                try:
+                    watch = self._gdb.run_command('-break-watch *' + address)
+                    bkpt = watch.results.get('bkpt') or {}
+                    number = str(bkpt.get('number', ''))
+                    if number:
+                        self._data_breakpoints.append(number)
+                    entry = {'verified': True}
+                    if number:
+                        entry['id'] = _int_or_none(number) or 1
+                except Exception as exc:
+                    entry = {'verified': False, 'message': str(exc)}
+            out.append(entry)
+        self.response(request, {'breakpoints': out})
+
+    def _request_registers(self, request, args):
+        if self._gdb is None:
+            self.response(request, {'registers': []})
+            return
+        try:
+            names = self._gdb.command('-data-list-register-names')
+            values = self._gdb.command('-data-list-register-values x')
+        except Exception as exc:
+            self.error(request, exc)
+            return
+        register_names = {}
+        raw_names = names.results.get('register-names', []) or []
+        for index, item in enumerate(raw_names):
+            if isinstance(item, dict):
+                number = _int_or_none(item.get('number'))
+                if number is not None:
+                    register_names[number] = str(item.get('name', ''))
+            elif isinstance(item, str):
+                # GDB reports a flat list of names, indexed by register number.
+                register_names[index] = item
+        out = []
+        for item in values.results.get('register-values', []) or []:
+            if not isinstance(item, dict):
+                continue
+            number = _int_or_none(item.get('number'))
+            if number is None:
+                continue
+            out.append({
+                'name': register_names.get(number, str(number)),
+                'value': str(item.get('value', '')),
+                'variablesReference': 0,
+            })
+        self.response(request, {'registers': out})
+
+    def _request_readMemory(self, request, args):
+        address = str(args.get('address') or '').strip()
+        count = _int_or_none(args.get('count')) or 0
+        if not address or count <= 0:
+            self.error(request, 'readMemory requires an address and a count')
+            return
+        if self._gdb is None:
+            self.error(request, 'debugger has not been launched')
+            return
+        try:
+            record = self._gdb.command(
+                f'-data-read-memory-bytes {address} {count}')
+        except Exception as exc:
+            self.error(request, exc)
+            return
+        contents = ''
+        unreadable = 0
+        for chunk in record.results.get('memory', []) or []:
+            if not isinstance(chunk, dict):
+                continue
+            contents += str(chunk.get('contents', ''))
+            unreadable += _int_or_none(chunk.get('unreadable-bytes')) or 0
+        if not contents:
+            contents = str(record.results.get('contents', ''))
+            unreadable = _int_or_none(
+                record.results.get('unreadable-bytes')) or 0
+        self.response(request, {
+            'address': address,
+            'data': contents,
+            'unreadableBytes': unreadable,
+        })
 
     def _request_setExpression(self, request, args):
         expression = str(args.get('expression') or '')
@@ -1379,6 +1518,70 @@ class DapAdapter:
         self._watch_expressions.append({'expression': expression,
                                         'frameId': frame_id})
 
+    def _mutable_names_for_frame(self, thread_id, level) -> set:
+        """The names of the mutable locals of the function in a frame."""
+        if self._gdb is None or self._build is None:
+            return set()
+        try:
+            self._select_frame(thread_id, level)
+            record = self._gdb.command('-stack-list-frames')
+        except Exception:
+            return set()
+        frames = []
+        for item in record.results.get('stack', []) or []:
+            frame = item.get('frame') if isinstance(item, dict) else None
+            if isinstance(frame, dict):
+                frames.append(frame)
+        if level >= len(frames):
+            return set()
+        key = _internal_function_name(frames[level].get('func') or '')
+        table = self._build.get('mutable_locals') or {}
+        return set(table.get(key, ()))
+
+    def _variable_type(self, thread_id, level, kind, name) -> str:
+        """The Vanta type of a variable, as shown in the scopes view."""
+        try:
+            variables = self._variables_for(thread_id, level, kind)
+        except Exception:
+            return ''
+        for variable in variables:
+            if variable.get('name') == name:
+                return str(variable.get('type', ''))
+        return ''
+
+    def _translate_value(self, value: str) -> str:
+        """Rewrite a Vanta value into something GDB can assign."""
+        text = str(value or '').strip()
+        if not text:
+            return text
+        if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+            return f'vanta::Str::literal({text}, {len(text) - 2})'
+        aliases = (self._build or {}).get('type_aliases') or {}
+        types = (self._build or {}).get('types') or {}
+
+        def rewrite(match):
+            name = match.group(1)
+            member = match.group(3)
+            internal = aliases.get(name, name if name in types else None)
+            if internal is not None:
+                if member and types.get(internal) == 'enum':
+                    return f'vanta_user::{internal}::{member}'
+                return f'vanta_user::{internal}'
+            if member:
+                return f'v_{name}.{member}'
+            if name in _CPP_KEYWORDS:
+                return name
+            return f'v_{name}'
+
+        parts = re.split(r'("(?:[^"\\]|\\.)*")', text)
+        for index, part in enumerate(parts):
+            if index % 2:
+                continue
+            parts[index] = re.sub(
+                r'\b([A-Za-z_][A-Za-z0-9_]*)(\.([A-Za-z_][A-Za-z0-9_]*))?\b',
+                rewrite, part)
+        return ''.join(parts)
+
     def _resume(self, request, command):
         if self._gdb is None:
             self.error(request, 'debugger has not been launched')
@@ -1435,9 +1638,10 @@ class DapAdapter:
                 if _int_or_none(frame.get('level')) not in (None, level):
                     continue
                 args.extend(frame.get('args', []) or [])
-            return self._format_variables(args)
+            return self._format_variables(args, thread_id, level)
         record = self._gdb.command('-stack-list-variables --simple-values')
         return self._format_variables(record.results.get('variables', []) or [],
+                                      thread_id, level,
                                       include_arguments=False)
 
     def _watch_variables(self):
@@ -1454,7 +1658,8 @@ class DapAdapter:
             })
         return out
 
-    def _format_variables(self, raw, include_arguments=True):
+    def _format_variables(self, raw, thread_id=1, level=0,
+                          include_arguments=True):
         out = []
         for item in raw:
             if not isinstance(item, dict):
@@ -1473,13 +1678,37 @@ class DapAdapter:
             if value is None:
                 value = ''
             type_name = _vanta_type(item.get('type', ''))
-            out.append({
+            entry = {
                 'name': display,
                 'value': str(value),
                 'type': type_name,
                 'variablesReference': 0,
-            })
+            }
+            reference = self._memory_reference(thread_id, level, display)
+            if reference:
+                entry['memoryReference'] = reference
+            out.append(entry)
         return out
+
+    def _memory_reference(self, thread_id, level, name) -> str:
+        """The address a client uses to inspect or watch a variable.
+
+        Only clients that asked for data breakpoints get one, because the
+        address of a local is only useful for a watchpoint.
+        """
+        if not self._client_capabilities.get('supportsDataBreakpoints'):
+            return ''
+        if self._gdb is None:
+            return ''
+        try:
+            record = self._gdb.command('-data-evaluate-expression ' +
+                                       _mi_quote(f'&v_{name}'))
+        except Exception:
+            return ''
+        address = str(record.results.get('value', '')).strip()
+        if not address.startswith('0x'):
+            return ''
+        return address
 
     # -- GDB events --------------------------------------------------------
 
@@ -1517,6 +1746,14 @@ class DapAdapter:
                 tid = _int_or_none(record.results.get('id'))
                 if tid is not None:
                     self._threads[tid] = record.results
+                    self.event('thread', {'reason': 'started',
+                                          'threadId': tid})
+            elif record.class_ == 'thread-exited':
+                tid = _int_or_none(record.results.get('id'))
+                if tid is not None:
+                    self._threads.pop(tid, None)
+                    self.event('thread', {'reason': 'exited',
+                                          'threadId': tid})
             return
         if record.sign == '*':
             if record.class_ == 'running':
@@ -1570,7 +1807,7 @@ class DapAdapter:
         body = {
             'reason': dap_reason,
             'threadId': self._current_thread or 1,
-            'allThreadsStopped': True,
+            'allThreadsStopped': self._all_threads_stopped(results),
             'preserveFocusHint': False,
         }
         if dap_reason == 'breakpoint' and bkptno:
@@ -1583,6 +1820,22 @@ class DapAdapter:
             body['text'] = f'{name} {meaning}'.strip()
             body['description'] = body['text']
         self.event('stopped', body)
+
+    def _all_threads_stopped(self, results) -> bool:
+        """Whether every thread of the program is stopped.
+
+        GDB reports the stopped threads as ``all`` or as a list of ids.
+        """
+        stopped = results.get('stopped-threads')
+        if stopped is None:
+            return True
+        if isinstance(stopped, str):
+            return stopped == 'all'
+        if isinstance(stopped, (list, tuple)):
+            stopped_ids = {_int_or_none(item) for item in stopped}
+            known = {tid for tid in self._threads}
+            return known.issubset(stopped_ids)
+        return True
 
     def _emit_terminated(self, exit_code):
         if self._terminated:
@@ -1810,6 +2063,48 @@ def _is_truthy(value) -> bool:
     if not text:
         return False
     return text not in ('0', 'false', 'False', 'FALSE')
+
+
+def _internal_function_name(func: str) -> str:
+    """The loader's internal name of the function a frame belongs to."""
+    text = str(func or '').strip()
+    if '(' in text:
+        text = text.split('(', 1)[0]
+    if '::' in text:
+        text = text.rsplit('::', 1)[-1]
+    if text.startswith('fn_'):
+        text = text[3:]
+    return text
+
+
+def _value_type_problem(value: str, vanta_type: str):
+    """Report a value that cannot be stored in a variable of that type.
+
+    Returns ``None`` when the assignment looks safe.
+    """
+    text = str(value or '').strip()
+    kind = str(vanta_type or '').strip()
+    if not text or not kind:
+        return None
+    if text.startswith('"') and text.endswith('"'):
+        if kind not in ('str', 'Str'):
+            return f'cannot store a string in a {kind} variable'
+        return None
+    if text in ('true', 'false'):
+        if kind != 'bool':
+            return f'cannot store a boolean in a {kind} variable'
+        return None
+    if re.match(r'^-?\d+$', text):
+        if kind in ('f32', 'f64'):
+            return None
+        if kind and not kind.startswith(('i', 'u')):
+            return f'cannot store a number in a {kind} variable'
+        return None
+    if re.match(r'^-?\d+\.\d+$', text):
+        if kind not in ('f32', 'f64'):
+            return f'cannot store a float in a {kind} variable'
+        return None
+    return None
 
 
 def _is_gdb_console_text(text: str) -> bool:

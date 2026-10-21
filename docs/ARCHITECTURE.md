@@ -167,7 +167,7 @@ that can import `compiler`. It passes the workspace as the server's working
 directory so relative imports and Python module discovery behave like the
 editor's project.
 
-## Debugger (v0.33.0, depth in v0.34.0)
+## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -210,6 +210,19 @@ file and line of the function's first statement. Watch expressions are kept
 in a list and re-evaluated for the **Watch** scope on every stop. Restart
 rebuilds the program, reloads it with `-file-exec-and-symbols`, re-creates the
 breakpoints, and runs it again.
+
+Editing a variable follows Vanta's own rule: only a binding declared with
+`mut` may be written. The debug build keeps the set of mutable locals per
+function (`mutable_locals()` in `driver.py` walks the function bodies), and
+the adapter refuses an edit to an immutable binding - GDB would allow it,
+because the generated C++ variable is not `const`. A value that cannot fit
+the variable's type is refused as well.
+
+Data breakpoints are GDB watchpoints on the address of a local. The address
+is only handed out to clients that advertise `supportsDataBreakpoints`,
+because computing it costs one GDB round trip per variable. The registers
+view reads `-data-list-register-names` and `-data-list-register-values`, and
+raw memory reads use `-data-read-memory-bytes`.
 
 DAP stdio lifecycle is intentionally blunt: after `serve()` cleans up GDB and
 the temporary build, `run_stdio()` flushes and exits with `os._exit(0)`. A
@@ -309,12 +322,13 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 729 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 742 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
-through launch, stop, locals, continue, and disconnect, and a third group
-covers the breakpoint kinds, watch expressions, and restart.
+through launch, stop, locals, continue, and disconnect, and two more groups
+cover the breakpoint kinds, watch expressions, restart, editing, data
+breakpoints, registers, and memory reads.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

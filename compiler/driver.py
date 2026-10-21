@@ -13,6 +13,7 @@ from .loader import load_program, LoadError, STDLIB_DIR
 from .type_checker import TypeChecker, CheckError
 from .codegen_cpp import CodeGen
 from .ast_nodes import ExternDecl, FuncDecl
+from . import ast_nodes as A
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -492,6 +493,60 @@ class DebugBuildError(Exception):
         self.tempdir = tempdir
 
 
+def _collect_mutable_names(body, out):
+    """Collect the names of mutable local bindings in a statement list."""
+    for stmt in body or []:
+        if isinstance(stmt, A.VarDecl):
+            if stmt.mutable:
+                out.add(stmt.name)
+        elif isinstance(stmt, A.IfStmt):
+            _collect_mutable_names(stmt.then_body, out)
+            for branch in stmt.elif_branches or []:
+                _collect_mutable_names(branch[1], out)
+            _collect_mutable_names(stmt.else_body, out)
+        elif isinstance(stmt, A.MatchStmt):
+            for arm in stmt.arms or []:
+                _collect_mutable_names(arm.body, out)
+        elif isinstance(stmt, (A.WhileStmt, A.ForRangeStmt, A.ForEachStmt)):
+            _collect_mutable_names(stmt.body, out)
+
+
+def mutable_locals(program):
+    """Map each function to the names of its mutable local bindings.
+
+    The debug adapter uses this to decide whether a variable may be edited:
+    Vanta only allows writes to bindings declared with ``mut``.
+    """
+    result = {}
+    for decl in program.decls:
+        if isinstance(decl, FuncDecl):
+            names = set()
+            _collect_mutable_names(decl.body, names)
+            result[decl.name] = names
+    return result
+
+
+def program_types(program):
+    """Map each user type to its kind (``enum`` or ``struct``)."""
+    result = {}
+    for decl in program.decls:
+        if isinstance(decl, A.EnumDecl):
+            result[decl.name] = 'enum'
+        elif isinstance(decl, A.StructDecl):
+            result[decl.name] = 'struct'
+    return result
+
+
+def program_type_aliases(program):
+    """Map each source type name to the internal name the loader gave it."""
+    result = {}
+    for decl in program.decls:
+        if isinstance(decl, (A.EnumDecl, A.StructDecl)):
+            source = program.display_names.get(decl.name, decl.name)
+            result[source] = decl.name
+    return result
+
+
 def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
                 link=None):
     """Build an unoptimized executable with Vanta source locations.
@@ -560,6 +615,9 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
         'compiler': path,
         'libs': libs,
         'lib_dirs': all_lib_dirs,
+        'mutable_locals': mutable_locals(program),
+        'types': program_types(program),
+        'type_aliases': program_type_aliases(program),
     }
 
 

@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.34.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.35.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -20,9 +20,10 @@ The server and debug adapter are part of the compiler package, so an installed
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
-  function, conditional, hit-count, and log-point breakpoints, stack traces,
-  locals and arguments, watch expressions, continue/step/pause, `stopOnEntry`,
-  program output, restart, and clean termination.
+  function, conditional, hit-count, log-point, and data breakpoints, stack
+  traces, locals and arguments, watch expressions, editing mutable locals,
+  registers and memory, continue/step/pause, `stopOnEntry`, program output,
+  restart, and clean termination.
 - Syntax highlighting and language configuration for `.vnt` files.
 
 The server uses full-document text sync. That keeps the first version small and
@@ -60,11 +61,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.5.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.6.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.5.0.vsix
+code --install-extension vanta-language-0.6.0.vsix
 ```
 
 ### Build from source
@@ -73,7 +74,7 @@ code --install-extension vanta-language-0.5.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.5.0.vsix
+code --install-extension vanta-language-0.6.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -146,10 +147,15 @@ show Vanta names without the generated `v_` prefix. Breakpoints in imported
 Vanta files work because every statement carries its original file and line.
 
 Beyond plain line breakpoints the adapter supports function breakpoints,
-conditional breakpoints, hit counts, log points, watch expressions, and
-restart. Conditions and watch expressions are written in Vanta terms
-(`hp > 0`, `len(items) == 3`), and the adapter maps them onto the generated
-names.
+conditional breakpoints, hit counts, log points, watch expressions, data
+breakpoints, and restart. Conditions and watch expressions are written in
+Vanta terms (`hp > 0`, `len(items) == 3`), and the adapter maps them onto the
+generated names.
+
+A local can be edited from the **Variables** view, but only when Vanta allows
+it: only a binding declared with `mut` may be written, and an immutable
+binding is refused with a clear message. The **Registers** view and raw
+memory reads are available as well.
 
 A debug session needs GDB plus a GCC or Clang toolchain. MSVC builds normal
 programs but emits PDB files, which this debugger does not read. Set
@@ -193,11 +199,11 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   declaration and local-variable information.
 - There is no rename, code action, formatting, workspace symbol, or semantic
   tokens support yet.
-- The debugger is intentionally a first milestone: no data or exception
-  breakpoints; no editable variables; no attach, remote debugging, reverse
-  debugging, LLDB, or MSVC/PDB support. Breakpoint conditions, hit counts, and
-  log points are evaluated by the adapter, so the program pauses briefly at
-  every hit. Debug sessions always use an unoptimized build.
+- The debugger is intentionally a first milestone: no exception breakpoints,
+  attach, or remote debugging; no reverse debugging; no LLDB or MSVC/PDB
+  support. Breakpoint conditions, hit counts, and log points are evaluated by
+  the adapter, so the program pauses briefly at every hit. Debug sessions
+  always use an unoptimized build.
 
 ## Troubleshooting
 

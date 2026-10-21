@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.34.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.35.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -20,12 +20,15 @@ it:
 - log points that print instead of stopping
 - function breakpoints
 - watch expressions in a **Watch** scope
+- editing mutable locals
+- data breakpoints that stop when a value changes
+- a registers view and raw memory reads
 - restart, which rebuilds the program and runs it again
 - clean exit, terminate, and disconnect
 
 ## Requirements
 
-- Vanta 0.34.0 or newer (`vanta --version`)
+- Vanta 0.35.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -46,7 +49,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.5.0.vsix
+code --install-extension vanta-language-0.6.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -84,7 +87,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.5.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.6.0.vsix`.
 
 ## Breakpoints
 
@@ -122,6 +125,40 @@ time the program stops. Expressions use Vanta names, so `total`, `hp`, and
 `len(items)` all work. An expression that cannot be evaluated - because the
 variable is not in scope yet, for example - shows `<not available>` instead of
 failing the session.
+
+## Editing values
+
+A local can be edited from the **Variables** view, but only when Vanta allows
+it. The language has explicit mutability: a binding declared with `let` is
+immutable, and only a binding declared with `mut` can be written. The
+debugger follows the same rule, so an attempt to change an immutable binding
+is refused with a clear message instead of quietly breaking the program's
+meaning. GDB itself would allow it, because the generated C++ variable is not
+`const`; the adapter is what keeps Vanta's promise.
+
+```vanta
+let fixed = 41        # immutable: the debugger refuses to change it
+mut counter = 0       # editable while the program is stopped
+```
+
+Values are written in Vanta terms: `7`, `1.5`, `true`, `"text"`, or an
+expression over the locals in scope. A value that cannot fit the variable is
+refused too, so a string is never written into an `i32` by accident.
+
+## Data breakpoints
+
+Right-click a local and choose **Break on Value Change** to stop the program
+when that value is written. The watch is a GDB watchpoint on the variable's
+address, and the session reports it as a data breakpoint. The address belongs
+to the stack frame it was taken in, so a watch is dropped when the frame is
+gone; re-create it after a restart.
+
+## Registers and memory
+
+The **Variables** view can be switched to the registers view, which lists the
+processor registers with their current values. The adapter also answers the
+DAP `readMemory` request, so an editor that shows raw memory can read it at
+any address the program reports.
 
 ## Restart
 
@@ -222,12 +259,14 @@ vanta build game.vnt --debug -o build/game-debug.exe
 
 - Breakpoint conditions, hit counts, and log points are evaluated by the
   adapter, not by GDB, so the program pauses briefly at every hit.
-- No editable variables yet. The **Evaluate** request accepts simple
-  expressions and maps plain Vanta names to their `v_` C++ names, but it is
-  intentionally minimal, and it does not assign.
-- No data breakpoints, exception breakpoints, attach, or remote debugging.
+- Only locals declared with `mut` can be edited. Module constants and
+  immutable bindings are refused on purpose.
+- Data breakpoints watch one address, so they stop on a write to that
+  address, not on a change of a larger value such as a struct.
+- No exception breakpoints, attach, or remote debugging.
 - No reverse debugging and no `goto`.
 - No LLDB or MSVC/PDB backend. GDB/MI2 is the only transport.
-- Multi-threaded programs expose GDB threads, but the first milestone focuses
-  on the main thread and all-thread stops.
+- Multi-threaded programs expose GDB threads and report when a thread starts
+  or exits, but the first milestone focuses on the main thread and
+  all-thread stops.
 - Optimized debug builds are not offered. A debug session always uses `-O0`.

@@ -2,6 +2,30 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.35.0 - 2026-10-21
+
+- Editable variables. A local can be changed from the Variables view, but
+  only where Vanta allows it: only a binding declared with `mut` may be
+  written, and an immutable binding is refused with a clear message. GDB
+  itself would allow the write, because the generated C++ variable is not
+  `const`; the adapter is what keeps Vanta's promise. A value that cannot
+  fit the variable's type is refused too.
+- Data breakpoints. A local can be watched, and the session stops when its
+  value is written. The watch is a GDB watchpoint on the variable's address,
+  and the address is only handed out to clients that ask for data
+  breakpoints.
+- Registers and memory. The adapter answers the registers request with the
+  processor registers and their values, and it answers raw memory reads, so
+  an editor that shows memory can read it.
+- Thread events. A thread that starts or exits is reported to the editor,
+  and a stop now says whether every thread is stopped.
+- Docs and tests. `docs/DEBUGGER.md` documents editing, data breakpoints,
+  registers, and memory. 742 tests total, including unit tests for the
+  value/type rules and the mutable-local table, plus stdio sessions that
+  edit a variable, refuse an immutable one, watch a value, list the
+  registers, and read memory. Exception breakpoints, attach and remote
+  debugging, reverse debugging, LLDB, and MSVC/PDB remain future work.
+
 ## v0.34.0 - 2026-10-21
 
 - Breakpoint depth. The debug adapter now supports conditional breakpoints,

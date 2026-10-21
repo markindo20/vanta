@@ -17,17 +17,19 @@ from compiler.dap import (
     MiRecord,
     _frame_name,
     _hit_condition_matches,
+    _internal_function_name,
     _interpolate_log_message,
     _is_truthy,
     _mi_quote,
     _translate_vanta_expression,
+    _value_type_problem,
     _vanta_type,
     find_gdb,
     parse_mi_line,
     read_dap_message,
     write_dap_message,
 )
-from compiler.driver import build_debug, find_debug_compiler
+from compiler.driver import build_debug, find_debug_compiler, mutable_locals
 
 
 def _messages(data: bytes):
@@ -355,9 +357,12 @@ class _DapSessionTestCase(unittest.TestCase):
                 return message
         self.fail(f'timed out; messages={seen!r}')
 
-    def initialize(self):
+    def initialize(self, capabilities=None):
+        arguments = {'clientID': 'test'}
+        if capabilities is not None:
+            arguments['capabilities'] = capabilities
         self.start()
-        self.send('initialize', {'clientID': 'test'})
+        self.send('initialize', arguments)
         response = self.expect(
             lambda m: m.get('type') == 'response' and
             m.get('command') == 'initialize')
@@ -486,6 +491,57 @@ class TruthinessTests(unittest.TestCase):
         self.assertFalse(_is_truthy(''))
         self.assertTrue(_is_truthy('1'))
         self.assertTrue(_is_truthy('41'))
+
+
+class ValueTypeTests(unittest.TestCase):
+    def test_number_into_number(self):
+        self.assertIsNone(_value_type_problem('42', 'i32'))
+        self.assertIsNone(_value_type_problem('1.5', 'f32'))
+        self.assertIsNone(_value_type_problem('1.5', 'f64'))
+
+    def test_string_only_into_str(self):
+        self.assertIsNone(_value_type_problem('"hi"', 'str'))
+        self.assertIsNotNone(_value_type_problem('"hi"', 'i32'))
+
+    def test_boolean_only_into_bool(self):
+        self.assertIsNone(_value_type_problem('true', 'bool'))
+        self.assertIsNotNone(_value_type_problem('true', 'i32'))
+
+    def test_number_is_not_stored_in_a_string(self):
+        self.assertIsNotNone(_value_type_problem('42', 'str'))
+        self.assertIsNotNone(_value_type_problem('1.5', 'i32'))
+
+    def test_unknown_type_is_allowed(self):
+        self.assertIsNone(_value_type_problem('42', ''))
+        self.assertIsNone(_value_type_problem('anything', ''))
+
+
+class InternalNameTests(unittest.TestCase):
+    def test_names(self):
+        self.assertEqual(_internal_function_name('vanta_user::fn_main'), 'main')
+        self.assertEqual(
+            _internal_function_name('vanta_user::fn_vanta_m_math__add()'),
+            'vanta_m_math__add')
+        self.assertEqual(_internal_function_name('add'), 'add')
+
+
+class MutableLocalTests(unittest.TestCase):
+    def test_only_mut_bindings_are_mutable(self):
+        from compiler.driver import _frontend_only
+        import tempfile
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'main.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n'
+                        '    let fixed = 1\n'
+                        '    mut counter = 0\n'
+                        '    while counter < 3:\n'
+                        '        counter = counter + 1\n')
+            program, _tc = _frontend_only(path)
+            table = mutable_locals(program)
+            self.assertIn('main', table)
+            self.assertEqual(table['main'], {'counter'})
 
 
 class DapStdioIntegrationTests(_DapSessionTestCase):
@@ -689,6 +745,139 @@ class DapFeatureIntegrationTests(_DapSessionTestCase):
             lambda m: m.get('type') == 'response' and
             m.get('command') == 'stackTrace')
         self.assertEqual(response['body']['stackFrames'][0]['line'], 6)
+
+
+class DapEditingIntegrationTests(_DapSessionTestCase):
+    """Editing variables, watching memory, and reading machine state."""
+
+    PROGRAM = ('func main() -> void:\n'
+               '    let fixed = 41\n'
+               '    mut counter = 0\n'
+               '    mut total = 0\n'
+               '    while counter < 3:\n'
+               '        total = total + counter\n'
+               '        counter = counter + 1\n'
+               '    print_i32(total)\n')
+
+    def locals_reference(self, frame=0):
+        self.send('scopes', {'frameId': frame, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        return next(scope['variablesReference']
+                    for scope in response['body']['scopes']
+                    if scope['name'] == 'Locals')
+
+    def variables(self, reference):
+        self.send('variables', {'variablesReference': reference})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        return response['body']['variables']
+
+    def test_mutable_variable_can_be_edited(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        reference = self.locals_reference()
+        self.send('setVariable', {'variablesReference': reference,
+                                  'name': 'counter', 'value': '7'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setVariable')
+        self.assertTrue(response['success'], response)
+        values = {v['name']: v['value'] for v in self.variables(reference)}
+        self.assertEqual(values.get('counter'), '7')
+
+    def test_immutable_variable_is_rejected(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        reference = self.locals_reference()
+        self.send('setVariable', {'variablesReference': reference,
+                                  'name': 'fixed', 'value': '7'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setVariable')
+        self.assertFalse(response['success'], response)
+        self.assertIn('immutable', response.get('message', ''))
+        values = {v['name']: v['value'] for v in self.variables(reference)}
+        self.assertEqual(values.get('fixed'), '41')
+
+    def test_wrong_value_type_is_rejected(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        reference = self.locals_reference()
+        self.send('setVariable', {'variablesReference': reference,
+                                  'name': 'counter', 'value': '"text"'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setVariable')
+        self.assertFalse(response['success'], response)
+
+    def test_data_breakpoint_watches_the_value(self):
+        self.initialize({'supportsDataBreakpoints': True})
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        reference = self.locals_reference()
+        target = next(v for v in self.variables(reference)
+                      if v['name'] == 'counter')
+        address = target.get('memoryReference')
+        self.assertTrue(address, target)
+        self.send('setDataBreakpoints', {
+            'breakpoints': [{'dataId': address, 'access': 'write'}]})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setDataBreakpoints')
+        self.assertTrue(response['success'], response)
+        self.assertTrue(response['body']['breakpoints'][0]['verified'],
+                        response)
+        self.send('continue', {'threadId': 1})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'continue')
+        stopped = self.stopped_event()
+        self.assertEqual(stopped['body']['reason'], 'data breakpoint')
+
+    def test_registers_are_listed(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('registers', {})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'registers')
+        names = [r['name'] for r in response['body']['registers']]
+        self.assertIn('rip', names)
+        self.assertIn('rsp', names)
+
+    def test_memory_can_be_read(self):
+        self.initialize({'supportsDataBreakpoints': True})
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        reference = self.locals_reference()
+        target = next(v for v in self.variables(reference)
+                      if v['name'] == 'fixed')
+        address = target.get('memoryReference')
+        self.assertTrue(address, target)
+        self.send('readMemory', {'address': address, 'count': 4})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'readMemory')
+        self.assertTrue(response['success'], response)
+        self.assertEqual(len(response['body']['data']), 8)
 
 
 if __name__ == '__main__':
