@@ -2,6 +2,18 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.38.0 - 2026-10-21
+
+- The Variables view speaks Vanta. A struct is a node that expands into its
+  fields, with the names the programmer wrote, and a struct field that is
+  itself a struct expands again. An enum shows the member it holds instead of
+  a number, a `str` shows its text instead of the reference-counted struct
+  behind it, and a `List` shows how many items it holds.
+- Docs and tests. `docs/DEBUGGER.md` documents how the data is shown. 754
+  tests total, including unit tests for the struct and enum layouts and stdio
+  sessions that expand a struct and read an enum member. Remote debugging,
+  reverse debugging, LLDB, and MSVC/PDB remain future work.
+
 ## v0.37.0 - 2026-10-21
 
 - Attach to a running program. A debug session can attach to a program that

@@ -168,7 +168,7 @@ directory so relative imports and Python module discovery behave like the
 editor's project.
 
 ## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0,
-navigation in v0.36.0, sessions in v0.37.0)
+navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -243,6 +243,14 @@ starts the program, and the frontend alone is enough to know the source
 map. Stepping selects the thread the editor asked for, so a step acts on
 that thread, and the disassembly request reads the machine code with
 `-data-disassemble`.
+
+The Variables view speaks Vanta. The debug build carries the layout of every
+struct and enum (`program_layouts()` in `driver.py` reads it from the type
+checker), so the adapter can offer a struct as an expandable node, read its
+fields one at a time, and show the member an enum holds instead of a
+number. The generated C++ prefixes every field with `v_`, so a field is read
+as `v_player.v_hp`. A `str` is shown as its text and a `List` as the number
+of items it holds.
 
 DAP stdio lifecycle is intentionally blunt: after `serve()` cleans up GDB and
 the temporary build, `run_stdio()` flushes and exits with `os._exit(0)`. A
@@ -342,14 +350,15 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 751 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 754 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
 through launch, stop, locals, continue, and disconnect, and two more groups
 cover the breakpoint kinds, watch expressions, restart, editing, data
 breakpoints, registers, memory reads, breakpoint locations, jump targets,
-exception breakpoints, and attaching to a running program.
+exception breakpoints, attaching to a running program, and expanding a
+struct.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless

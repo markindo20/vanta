@@ -558,6 +558,8 @@ class MutableLocalTests(unittest.TestCase):
             self.assertIn('main', table)
             self.assertEqual(table['main'], {'counter'})
 
+
+class SourceLineTests(unittest.TestCase):
     def test_source_lines_cover_every_statement(self):
         from compiler.driver import _frontend_only, source_lines
         import tempfile
@@ -577,6 +579,33 @@ class MutableLocalTests(unittest.TestCase):
             self.assertEqual(table['files'][key], [2, 3, 4, 5, 6])
             self.assertEqual(table['functions']['main'][key],
                              [2, 3, 4, 5, 6])
+
+    def test_layouts_describe_structs_and_enums(self):
+        from compiler.driver import _frontend_only, program_layouts
+        import tempfile
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'main.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('struct Player:\n'
+                        '    hp: i32\n'
+                        '    name: str\n'
+                        '\n'
+                        'enum State:\n'
+                        '    Idle\n'
+                        '    Playing\n'
+                        '\n'
+                        'func main() -> void:\n'
+                        '    let p = Player(hp: 41, name: "hero")\n'
+                        '    print_i32(p.hp)\n')
+            program, tc = _frontend_only(path)
+            layouts = program_layouts(tc)
+            self.assertIn('Player', layouts['structs'])
+            self.assertEqual([name for name, _ in layouts['structs']['Player']],
+                             ['hp', 'name'])
+            self.assertIn('State', layouts['enums'])
+            self.assertEqual(layouts['enums']['State'],
+                             {'Idle': 0, 'Playing': 1})
 
 
 class DapStdioIntegrationTests(_DapSessionTestCase):
@@ -1023,6 +1052,68 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         self.assertTrue(instructions, response)
         self.assertLessEqual(len(instructions), 4)
         self.assertTrue(instructions[0]['instruction'])
+
+
+class DapDataIntegrationTests(_DapSessionTestCase):
+    """Structs expand and enums show their member."""
+
+    PROGRAM = ('struct Player:\n'
+               '    hp: i32\n'
+               '    name: str\n'
+               '\n'
+               'enum State:\n'
+               '    Idle\n'
+               '    Playing\n'
+               '\n'
+               'func main() -> void:\n'
+               '    let p = Player(hp: 41, name: "hero")\n'
+               '    let s = State.Playing\n'
+               '    print_i32(p.hp)\n')
+
+    def locals(self):
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        reference = next(scope['variablesReference']
+                         for scope in response['body']['scopes']
+                         if scope['name'] == 'Locals')
+        self.send('variables', {'variablesReference': reference})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        return {v['name']: v for v in response['body']['variables']}
+
+    def test_a_struct_can_be_expanded(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 12}])
+        self.configuration_done()
+        self.stopped_event()
+        variables = self.locals()
+        player = variables['p']
+        self.assertEqual(player['type'], 'Player')
+        self.assertTrue(player['variablesReference'], player)
+        self.send('variables',
+                  {'variablesReference': player['variablesReference']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        fields = {v['name']: v for v in response['body']['variables']}
+        self.assertIn('hp', fields)
+        self.assertEqual(fields['hp']['value'], '41')
+        self.assertIn('name', fields)
+        self.assertIn('hero', fields['name']['value'])
+
+    def test_an_enum_shows_its_member(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 12}])
+        self.configuration_done()
+        self.stopped_event()
+        variables = self.locals()
+        self.assertEqual(variables['s']['value'], 'State::Playing')
+        self.assertEqual(variables['s']['type'], 'State')
 
 
 class DapEditingIntegrationTests(_DapSessionTestCase):

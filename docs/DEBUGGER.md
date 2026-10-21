@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.37.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.38.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -12,7 +12,8 @@ it:
 
 - line breakpoints, including breakpoints in imported Vanta files
 - stack traces with Vanta file paths and line numbers
-- **Locals** and **Arguments** scopes
+- **Locals** and **Arguments** scopes, with structs that expand into their
+  fields and enums that show their member
 - continue, pause, step over, step into, and step out
 - `stopOnEntry`
 - program stdout/stderr in the debug console
@@ -31,7 +32,7 @@ it:
 
 ## Requirements
 
-- Vanta 0.37.0 or newer (`vanta --version`)
+- Vanta 0.38.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -52,7 +53,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.8.0.vsix
+code --install-extension vanta-language-0.9.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -90,7 +91,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.8.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.9.0.vsix`.
 
 ## Breakpoints
 
@@ -211,6 +212,30 @@ address, and the session reports it as a data breakpoint. The address belongs
 to the stack frame it was taken in, so a watch is dropped when the frame is
 gone; re-create it after a restart.
 
+## Looking at data
+
+The **Variables** view speaks Vanta, not C++:
+
+- a struct is a node that expands into its fields, with the field names the
+  programmer wrote;
+- an enum shows the member it holds, so `State::Playing` is shown as
+  `State::Playing` instead of a number;
+- a `str` shows its text, not the reference-counted struct behind it;
+- a `List` shows how many items it holds.
+
+```vanta
+struct Player:
+    hp: i32
+    name: str
+
+enum State:
+    Idle
+    Playing
+```
+
+A struct field that is itself a struct expands again, so a whole object tree
+can be walked without leaving the debugger.
+
 ## Registers, disassembly, and memory
 
 The **Variables** view can be switched to the registers view, which lists the
@@ -320,6 +345,8 @@ vanta build game.vnt --debug -o build/game-debug.exe
   adapter, not by GDB, so the program pauses briefly at every hit.
 - Only locals declared with `mut` can be edited. Module constants and
   immutable bindings are refused on purpose.
+- A struct expands into its fields, but a list shows its length rather
+  than its items, and an enum with a payload is shown as a number.
 - Data breakpoints watch one address, so they stop on a write to that
   address, not on a change of a larger value such as a struct.
 - "Run to cursor" moves the program counter, which GDB does not fully

@@ -592,6 +592,27 @@ def source_lines(program):
     }
 
 
+def program_layouts(tc):
+    """The fields of every struct and the members of every enum.
+
+    The debugger uses this to expand a struct in the Variables view and to
+    show the member an enum holds.  The keys are the internal names, which
+    are the names the generated C++ uses.
+    """
+    structs = {}
+    for name, st in tc.structs.items():
+        if st.builtin and name not in ('Vec2', 'Vec3', 'Quat'):
+            continue
+        structs[name] = [(field, repr(ftype))
+                         for field, ftype in st.fields.items()]
+    enums = {}
+    for name, et in tc.enums.items():
+        if getattr(et, 'has_payloads', False):
+            continue
+        enums[name] = dict(et.members)
+    return {'structs': structs, 'enums': enums}
+
+
 def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
                 link=None):
     """Build an unoptimized executable with Vanta source locations.
@@ -664,6 +685,7 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
         'types': program_types(program),
         'type_aliases': program_type_aliases(program),
         'source_lines': source_lines(program),
+        'layouts': program_layouts(tc),
     }
 
 

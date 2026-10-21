@@ -36,6 +36,7 @@ from .driver import (
     build_debug,
     find_debug_compiler,
     mutable_locals,
+    program_layouts,
     source_lines,
     _frontend_only,
 )
@@ -603,7 +604,7 @@ class DapAdapter:
         self._stopped = False
         self._running_inferior = False
         self._terminated = False
-        self._variable_refs: dict[int, tuple[int, int, str]] = {}
+        self._variable_refs: dict[int, dict] = {}
         self._next_var_ref = 1
 
     # -- protocol ----------------------------------------------------------
@@ -932,12 +933,13 @@ class DapAdapter:
         if not source:
             return {}
         try:
-            program, _tc = _frontend_only(source)
+            program, tc = _frontend_only(source)
         except Exception:
             return {}
         return {
             'source_lines': source_lines(program),
             'mutable_locals': mutable_locals(program),
+            'layouts': program_layouts(tc),
         }
 
     def _request_disassemble(self, request, args):
@@ -1105,7 +1107,9 @@ class DapAdapter:
         if self._gdb is None:
             self.error(request, 'debugger has not been launched')
             return
-        thread_id, level, kind = info
+        thread_id = info['thread']
+        level = info['level']
+        kind = info['kind']
         self._select_frame(thread_id, level)
         mutable = self._mutable_names_for_frame(thread_id, level)
         if name not in mutable:
@@ -1390,13 +1394,18 @@ class DapAdapter:
         if info is None:
             self.response(request, {'variables': []})
             return
-        thread_id, level, kind = info
+        thread_id = info['thread']
+        level = info['level']
+        kind = info['kind']
         if self._gdb is None:
             self.response(request, {'variables': []})
             return
         try:
             self._select_frame(thread_id, level)
-            variables = self._variables_for(thread_id, level, kind)
+            if kind == 'struct':
+                variables = self._struct_variables(thread_id, level, info)
+            else:
+                variables = self._variables_for(thread_id, level, kind)
         except Exception as exc:
             self.error(request, exc)
             return
@@ -1768,10 +1777,12 @@ class DapAdapter:
             return {
                 'source_lines': self._build.get('source_lines') or {},
                 'mutable_locals': self._build.get('mutable_locals') or {},
+                'layouts': self._build.get('layouts') or {},
             }
         return {
             'source_lines': self._source_map.get('source_lines') or {},
             'mutable_locals': self._source_map.get('mutable_locals') or {},
+            'layouts': self._source_map.get('layouts') or {},
         }
 
     def _source_lines(self) -> dict:
@@ -1918,10 +1929,12 @@ class DapAdapter:
         except Exception:
             pass
 
-    def _new_var_ref(self, thread_id, level, kind):
+    def _new_var_ref(self, thread_id, level, kind, **extra):
         ref = self._next_var_ref
         self._next_var_ref += 1
-        self._variable_refs[ref] = (thread_id, level, kind)
+        info = {'thread': thread_id, 'level': level, 'kind': kind}
+        info.update(extra)
+        self._variable_refs[ref] = info
         return ref
 
     def _variables_for(self, thread_id, level, kind):
@@ -1943,6 +1956,32 @@ class DapAdapter:
                                       thread_id, level,
                                       include_arguments=False)
 
+    def _struct_variables(self, thread_id, level, info):
+        """The fields of a struct, read one field at a time."""
+        layouts = self._program_tables()['layouts']
+        structs = layouts.get('structs', {})
+        fields = structs.get(str(info.get('type') or ''), [])
+        expression = str(info.get('expr') or '')
+        out = []
+        for field, field_type in fields:
+            # The code generator prefixes every field with v_.
+            path = f'{expression}.v_{field}'
+            value, ok = self._evaluate_expression(path)
+            entry = {
+                'name': field,
+                'value': value if ok else '<unavailable>',
+                'type': field_type,
+                'variablesReference': 0,
+            }
+            if field_type in structs:
+                entry['variablesReference'] = self._new_var_ref(
+                    thread_id, level, 'struct', expr=path, type=field_type)
+            elif field_type == 'str' or field_type.startswith('List<'):
+                entry['value'] = self._display_value(path, field_type,
+                                                     entry['value'])
+            out.append(entry)
+        return out
+
     def _watch_variables(self):
         """Evaluate the watch expressions for the Watch scope."""
         out = []
@@ -1957,8 +1996,29 @@ class DapAdapter:
             })
         return out
 
+    def _display_value(self, expression: str, type_name: str, raw_value: str):
+        """A value that reads like Vanta, not like the generated C++.
+
+        A ``str`` is a small C++ struct and a ``List`` is a handle, so both
+        are shown the way the programmer would write them.
+        """
+        if type_name == 'str':
+            value, ok = self._evaluate_expression(f'{expression}.data_')
+            if ok:
+                return _strip_pointer(value)
+            return raw_value
+        if type_name.startswith('List<'):
+            value, ok = self._evaluate_expression(f'{expression}.h->len')
+            if ok:
+                count = value.strip()
+                return f'{count} item' if count == '1' else f'{count} items'
+        return raw_value
+
     def _format_variables(self, raw, thread_id=1, level=0,
                           include_arguments=True):
+        layouts = self._program_tables()['layouts']
+        structs = layouts.get('structs', {})
+        enums = layouts.get('enums', {})
         out = []
         for item in raw:
             if not isinstance(item, dict):
@@ -1983,6 +2043,18 @@ class DapAdapter:
                 'type': type_name,
                 'variablesReference': 0,
             }
+            if type_name in enums:
+                # GDB prints the member of a scoped enum; the namespace is
+                # noise, the member is the name the programmer wrote.
+                entry['value'] = str(value).replace('vanta_user::', '')
+            elif type_name in structs:
+                entry['value'] = '{...}'
+                entry['variablesReference'] = self._new_var_ref(
+                    thread_id, level, 'struct', expr=f'v_{display}',
+                    type=type_name)
+            elif type_name in ('str',) or type_name.startswith('List<'):
+                entry['value'] = self._display_value(f'v_{display}', type_name,
+                                                     str(value))
             reference = self._memory_reference(thread_id, level, display)
             if reference:
                 entry['memoryReference'] = reference
@@ -2237,6 +2309,7 @@ def _vanta_type(type_name: str) -> str:
         return ''
     out = str(type_name)
     replacements = {
+        'unsigned int': 'u32', 'int': 'i32', 'unsigned char': 'u8',
         'int8_t': 'i8', 'uint8_t': 'u8',
         'int16_t': 'i16', 'uint16_t': 'u16',
         'int32_t': 'i32', 'uint32_t': 'u32',
@@ -2245,6 +2318,7 @@ def _vanta_type(type_name: str) -> str:
     for cpp, vanta in replacements.items():
         out = re.sub(r'\b' + re.escape(cpp) + r'\b', vanta, out)
     out = out.replace('vanta::', '')
+    out = out.replace('vanta_user::', '')
     out = out.replace('std::', '')
     # Str is the runtime spelling of Vanta's str; StrBuilder stays as-is
     # because the two capital letters are part of a longer word.
@@ -2363,6 +2437,15 @@ def _interpolate_log_message(message: str, evaluate) -> str:
         out.append(char)
         index += 1
     return ''.join(out)
+
+
+def _strip_pointer(value: str) -> str:
+    """Drop the address GDB prints in front of a string."""
+    text = str(value).strip()
+    match = re.match(r'^0x[0-9a-fA-F]+\s+(".*")$', text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return text
 
 
 def _is_truthy(value) -> bool:
