@@ -575,12 +575,17 @@ class DapAdapter:
         self._client_capabilities: dict = {}
         self._launch_args: dict = {}
         self._build: Optional[dict] = None
+        self._source: Optional[str] = None
         self._gdb: Optional[GdbMi] = None
         self._configuration_done = False
         self._stop_on_entry = False
         self._entry_bp_number: Optional[str] = None
         self._breakpoints: dict[str, tuple[str, list[dict]]] = {}
         self._gdb_breakpoints: dict[str, list[str]] = {}
+        self._bp_meta: dict[str, dict] = {}
+        self._function_requests: list[dict] = []
+        self._function_breakpoints: list[str] = []
+        self._watch_expressions: list[dict] = []
         self._threads: dict[int, dict] = {}
         self._current_thread: Optional[int] = None
         self._stopped = False
@@ -710,17 +715,17 @@ class DapAdapter:
             'supportsConfigurationDoneRequest': True,
             'supportsTerminateRequest': True,
             'supportsTerminateDebuggee': True,
-            'supportsFunctionBreakpoints': False,
-            'supportsConditionalBreakpoints': False,
-            'supportsHitConditionalBreakpoints': False,
-            'supportsLogPoints': False,
+            'supportsFunctionBreakpoints': True,
+            'supportsConditionalBreakpoints': True,
+            'supportsHitConditionalBreakpoints': True,
+            'supportsLogPoints': True,
             'supportsEvaluateForHovers': False,
             'supportsSetVariable': False,
             'supportsRestartFrame': False,
             'supportsGotoTargetsRequest': False,
             'supportsCompletionsRequest': False,
             'supportsModulesRequest': False,
-            'supportsRestartRequest': False,
+            'supportsRestartRequest': True,
             'supportsExceptionOptions': False,
             'supportsValueFormattingOptions': False,
             'supportsExceptionInfoRequest': False,
@@ -756,6 +761,7 @@ class DapAdapter:
                        show_user=True)
             return
         self._stop_on_entry = bool(self._launch_args.get('stopOnEntry'))
+        self._source = source
 
         self.output('console', f'Building {os.path.basename(source)}...\n')
         try:
@@ -836,10 +842,40 @@ class DapAdapter:
         self.response(request, {'breakpoints': result})
 
     def _request_setFunctionBreakpoints(self, request, args):
-        self.response(request, {'breakpoints': []})
+        requested = [dict(bp) for bp in (args.get('breakpoints') or [])]
+        self._function_requests = requested
+        if self._gdb is None:
+            self.response(request, {'breakpoints': [
+                {'verified': False, 'message': 'debugger has not started'}
+                for _ in requested
+            ]})
+            return
+        self._delete_function_breakpoints()
+        out = [self._insert_function_breakpoint(bp) for bp in requested]
+        self.response(request, {'breakpoints': out})
 
     def _request_setExceptionBreakpoints(self, request, args):
         self.response(request, {'breakpoints': []})
+
+    def _request_setExpression(self, request, args):
+        expression = str(args.get('expression') or '')
+        if not expression:
+            self.error(request, 'setExpression requires an expression')
+            return
+        value = str(args.get('value') or expression)
+        context = str(args.get('context') or '')
+        frame_id = _int_or_none(args.get('frameId'))
+        if context == 'watch':
+            self._add_watch(expression, frame_id)
+            result, ok = self._evaluate_expression(expression)
+            self.response(request, {'value': result if ok else expression,
+                                    'variablesReference': 0})
+            return
+        result, ok = self._evaluate_expression(value)
+        if not ok:
+            self.error(request, f'cannot evaluate {value!r}')
+            return
+        self.response(request, {'value': result, 'variablesReference': 0})
 
     def _request_configurationDone(self, request, args):
         if self._gdb is None:
@@ -849,6 +885,11 @@ class DapAdapter:
         for source, bps in list(self._breakpoints.values()):
             try:
                 self._apply_breakpoints(source, bps)
+            except Exception as exc:
+                self.output('console', f'vanta debugger: {exc}\n')
+        for bp in list(self._function_requests):
+            try:
+                self._insert_function_breakpoint(bp)
             except Exception as exc:
                 self.output('console', f'vanta debugger: {exc}\n')
         if self._stop_on_entry:
@@ -965,6 +1006,10 @@ class DapAdapter:
             {'name': 'Arguments', 'presentationHint': 'arguments',
              'variablesReference': args_ref, 'expensive': False},
         ]
+        if self._watch_expressions:
+            watch_ref = self._new_var_ref(thread_id, level, 'watch')
+            scopes.append({'name': 'Watch', 'presentationHint': 'watch',
+                           'variablesReference': watch_ref, 'expensive': False})
         self.response(request, {'scopes': scopes})
 
     def _request_variables(self, request, args):
@@ -1020,22 +1065,11 @@ class DapAdapter:
         frame_id = _int_or_none(args.get('frameId'))
         if frame_id is not None:
             self._select_frame(self._current_thread or 1, frame_id)
-        # Accept Vanta identifiers for convenience: user variables live as
-        # v_<name> in the generated C++.
-        candidates = [expression]
-        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', expression):
-            candidates.insert(0, 'v_' + expression)
-        for candidate in candidates:
-            try:
-                record = self._gdb.command('-data-evaluate-expression ' +
-                                           _mi_quote(candidate))
-                value = record.results.get('value', '')
-                self.response(request, {'result': str(value),
-                                        'variablesReference': 0})
-                return
-            except Exception:
-                continue
-        self.error(request, f'cannot evaluate {expression!r}')
+        value, ok = self._evaluate_expression(expression)
+        if not ok:
+            self.error(request, f'cannot evaluate {expression!r}')
+            return
+        self.response(request, {'result': value, 'variablesReference': 0})
 
     def _request_source(self, request, args):
         source = args.get('source') or {}
@@ -1061,7 +1095,167 @@ class DapAdapter:
         self.response(request)
         self._emit_terminated(None)
 
+    def _request_restart(self, request, args):
+        """Rebuild the program and run it again in the same session."""
+        if self._gdb is None or self._build is None or not self._source:
+            self.error(request, 'debugger has not been launched')
+            return
+        self._stop_inferior()
+        try:
+            build = build_debug(
+                self._source,
+                include_dirs=_as_list(self._launch_args.get('includeDirs')),
+                lib_dirs=_as_list(self._launch_args.get('libDirs')),
+                link=_as_list(self._launch_args.get('libs')),
+            )
+        except DebugBuildError as exc:
+            if exc.tempdir:
+                shutil.rmtree(exc.tempdir, ignore_errors=True)
+            if exc.output:
+                self.output('stderr', exc.output.rstrip() + '\n')
+            self.error(request, exc.message, show_user=True)
+            return
+        except Exception as exc:
+            self.error(request, f'debug build failed: {exc}', show_user=True)
+            return
+        old_build = self._build
+        self._build = build
+        try:
+            self._gdb.command('-file-exec-and-symbols ' +
+                              _mi_quote(build['exe']))
+        except Exception as exc:
+            self._build = old_build
+            shutil.rmtree(build.get('tempdir') or '', ignore_errors=True)
+            self.error(request, f'could not reload the program: {exc}',
+                       show_user=True)
+            return
+        if old_build:
+            tempdir = old_build.get('tempdir')
+            if tempdir:
+                shutil.rmtree(tempdir, ignore_errors=True)
+        # The new symbols shift every address, so the breakpoints are
+        # recreated from the client's requests.
+        self._gdb_breakpoints = {}
+        self._bp_meta = {}
+        self._function_breakpoints = []
+        for source, bps in list(self._breakpoints.values()):
+            try:
+                self._apply_breakpoints(source, bps)
+            except Exception as exc:
+                self.output('console', f'vanta debugger: {exc}\n')
+        for bp in list(self._function_requests):
+            try:
+                self._insert_function_breakpoint(bp)
+            except Exception as exc:
+                self.output('console', f'vanta debugger: {exc}\n')
+        if self._stop_on_entry:
+            try:
+                record = self._gdb.run_command(
+                    '-break-insert -t vanta_user::fn_main')
+                bkpt = record.results.get('bkpt') or {}
+                if isinstance(bkpt, dict):
+                    self._entry_bp_number = str(bkpt.get('number', ''))
+            except Exception as exc:
+                self.output('console',
+                            f'could not set entry breakpoint: {exc}\n')
+        self._terminated = False
+        self._running_inferior = True
+        try:
+            self._gdb.run_command('-exec-run')
+        except Exception as exc:
+            self.error(request, f'could not restart the program: {exc}',
+                       show_user=True)
+            return
+        self.response(request)
+
     # -- breakpoints -------------------------------------------------------
+
+    def _breakpoint_meta(self, bp: dict) -> dict:
+        """Collect the DAP extras of a breakpoint request.
+
+        Conditions, hit counts, and log messages are evaluated by the
+        adapter itself: GDB cannot evaluate a Vanta condition before the
+        program is running, and adapter-side evaluation keeps the Vanta
+        variable names intact.
+        """
+        meta: dict = {}
+        condition = bp.get('condition')
+        if condition:
+            meta['condition'] = str(condition)
+        hit_condition = bp.get('hitCondition')
+        if hit_condition:
+            if _hit_condition_matches(hit_condition, 1) is None:
+                meta['hitConditionError'] = (
+                    f'unsupported hit condition: {hit_condition}')
+            else:
+                meta['hitCondition'] = str(hit_condition)
+        log_message = bp.get('logMessage')
+        if log_message:
+            meta['logMessage'] = str(log_message)
+        return meta
+
+    def _insert_function_breakpoint(self, bp: dict) -> dict:
+        """Insert a breakpoint on a Vanta function name."""
+        name = str(bp.get('name') or '')
+        entry: dict = {'verified': False,
+                       'message': f'function {name!r} not found'}
+        for symbol in self._function_symbol_candidates(name):
+            try:
+                record = self._gdb.command('-break-insert ' + _mi_quote(symbol))
+            except Exception:
+                continue
+            bkpt = record.results.get('bkpt') or {}
+            if not isinstance(bkpt, dict):
+                continue
+            number = str(bkpt.get('number', ''))
+            if number:
+                self._function_breakpoints.append(number)
+                meta = self._breakpoint_meta(bp)
+                if meta:
+                    self._bp_meta[number] = meta
+            entry = {'verified': True}
+            if number:
+                entry['id'] = _int_or_none(number) or 1
+            line = _int_or_none(bkpt.get('line'))
+            if line:
+                entry['line'] = line
+            fullname = bkpt.get('fullname') or bkpt.get('file') or ''
+            if fullname:
+                entry['source'] = {'name': os.path.basename(fullname),
+                                   'path': os.path.normpath(fullname)}
+            if meta.get('hitConditionError'):
+                entry['message'] = meta['hitConditionError']
+            return entry
+        return entry
+
+    def _function_symbol_candidates(self, name: str) -> list:
+        """Candidate C++ symbols for a Vanta function name."""
+        text = str(name or '').strip()
+        if not text:
+            return []
+        candidates: list = []
+
+        def add(value):
+            if value and value not in candidates:
+                candidates.append(value)
+
+        if '.' in text:
+            module, _, base = text.rpartition('.')
+            add(f'vanta_user::fn_vanta_m_{module}__{base}')
+            add(f'fn_vanta_m_{module}__{base}')
+        add(f'vanta_user::fn_{text}')
+        add(f'fn_{text}')
+        add(text)
+        return candidates
+
+    def _delete_function_breakpoints(self):
+        for number in self._function_breakpoints:
+            try:
+                self._gdb.command(f'-break-delete {number}')
+            except Exception:
+                pass
+            self._bp_meta.pop(number, None)
+        self._function_breakpoints = []
 
     def _apply_breakpoints(self, source, requested):
         assert self._gdb is not None
@@ -1085,8 +1279,11 @@ class DapAdapter:
                                 'message': 'GDB returned no breakpoint'})
                     continue
                 number = str(bkpt.get('number', ''))
+                meta = self._breakpoint_meta(bp)
                 if number:
                     numbers.append(number)
+                    if meta:
+                        self._bp_meta[number] = meta
                 actual_line = _int_or_none(bkpt.get('line')) or line
                 pending = bool(bkpt.get('pending'))
                 entry = {
@@ -1097,6 +1294,8 @@ class DapAdapter:
                 }
                 if pending:
                     entry['message'] = 'pending until the code is loaded'
+                if meta.get('hitConditionError'):
+                    entry['message'] = meta['hitConditionError']
                 out.append(entry)
             except Exception as exc:
                 out.append({'verified': False, 'line': line,
@@ -1105,6 +1304,80 @@ class DapAdapter:
         return out
 
     # -- execution helpers -------------------------------------------------
+
+    def _evaluate_expression(self, expression: str):
+        """Evaluate an expression in the current frame.
+
+        Vanta names are tried first through the generated ``v_`` prefix, so
+        conditions and log messages can be written in Vanta terms.  Returns a
+        ``(value, ok)`` pair.
+        """
+        if self._gdb is None:
+            return '', False
+        text = str(expression or '').strip()
+        if not text:
+            return '', False
+        candidates = [text]
+        translated = _translate_vanta_expression(text)
+        if translated != text:
+            candidates.append(translated)
+        for candidate in candidates:
+            try:
+                record = self._gdb.command('-data-evaluate-expression ' +
+                                           _mi_quote(candidate))
+            except Exception:
+                continue
+            return str(record.results.get('value', '')), True
+        return '', False
+
+    def _should_skip_breakpoint(self, meta: dict) -> bool:
+        """Decide whether a breakpoint hit should pass without stopping."""
+        hit_condition = meta.get('hitCondition')
+        if hit_condition:
+            count = int(meta.get('hits', 0)) + 1
+            meta['hits'] = count
+            matched = _hit_condition_matches(hit_condition, count)
+            if matched is None:
+                self.output('console',
+                            f'vanta debugger: unsupported hit condition '
+                            f'{hit_condition!r}\n')
+            elif not matched:
+                return True
+        condition = meta.get('condition')
+        if condition:
+            value, ok = self._evaluate_expression(condition)
+            if not ok:
+                self.output('console',
+                            f'vanta debugger: cannot evaluate breakpoint '
+                            f'condition {condition!r}\n')
+                return False
+            if not _is_truthy(value):
+                return True
+        log_message = meta.get('logMessage')
+        if log_message:
+            text = _interpolate_log_message(log_message,
+                                             self._evaluate_expression)
+            self.output('console', text.rstrip('\n') + '\n')
+            return True
+        return False
+
+    def _auto_continue(self):
+        """Resume the program after a skipped breakpoint hit."""
+        try:
+            self._gdb.run_command('-exec-continue')
+        except Exception as exc:
+            self.output('console', f'vanta debugger: cannot continue: {exc}\n')
+            return
+        self._stopped = False
+        self._running_inferior = True
+
+    def _add_watch(self, expression: str, frame_id: Optional[int]):
+        for watch in self._watch_expressions:
+            if watch['expression'] == expression:
+                watch['frameId'] = frame_id
+                return
+        self._watch_expressions.append({'expression': expression,
+                                        'frameId': frame_id})
 
     def _resume(self, request, command):
         if self._gdb is None:
@@ -1150,6 +1423,8 @@ class DapAdapter:
         return ref
 
     def _variables_for(self, thread_id, level, kind):
+        if kind == 'watch':
+            return self._watch_variables()
         if kind == 'arguments':
             record = self._gdb.command('-stack-list-arguments --simple-values')
             args = []
@@ -1164,6 +1439,20 @@ class DapAdapter:
         record = self._gdb.command('-stack-list-variables --simple-values')
         return self._format_variables(record.results.get('variables', []) or [],
                                       include_arguments=False)
+
+    def _watch_variables(self):
+        """Evaluate the watch expressions for the Watch scope."""
+        out = []
+        for watch in self._watch_expressions:
+            expression = watch['expression']
+            value, ok = self._evaluate_expression(expression)
+            out.append({
+                'name': expression,
+                'value': value if ok else '<not available>',
+                'type': '',
+                'variablesReference': 0,
+            })
+        return out
 
     def _format_variables(self, raw, include_arguments=True):
         out = []
@@ -1258,6 +1547,11 @@ class DapAdapter:
         self._running_inferior = False
         self._variable_refs.clear()
 
+        meta = self._bp_meta.get(bkptno) if bkptno else None
+        if meta and self._should_skip_breakpoint(meta):
+            self._auto_continue()
+            return
+
         dap_reason = 'breakpoint'
         if reason in ('end-stepping-range', 'function-finished'):
             dap_reason = 'step'
@@ -1279,6 +1573,10 @@ class DapAdapter:
             'allThreadsStopped': True,
             'preserveFocusHint': False,
         }
+        if dap_reason == 'breakpoint' and bkptno:
+            breakpoint_id = _int_or_none(bkptno)
+            if breakpoint_id is not None:
+                body['hitBreakpointIds'] = [breakpoint_id]
         if dap_reason == 'exception':
             name = results.get('signal-name', 'signal')
             meaning = results.get('signal-meaning', '')
@@ -1305,6 +1603,22 @@ class DapAdapter:
         except Exception:
             pass
         self._shutdown(cleanup=True)
+
+    def _stop_inferior(self):
+        """Stop a running inferior so the program can be restarted."""
+        if self._gdb is None:
+            return
+        try:
+            self._gdb.run_command('-exec-interrupt')
+        except Exception:
+            pass
+        for command in ('-exec-terminate',
+                        '-interpreter-exec console "kill"'):
+            try:
+                self._gdb.run_command(command)
+                return
+            except Exception:
+                continue
 
     # -- cleanup -----------------------------------------------------------
 
@@ -1375,6 +1689,127 @@ def _vanta_type(type_name: str) -> str:
     # because the two capital letters are part of a longer word.
     out = re.sub(r'\bStr\b', 'str', out)
     return out
+
+
+# Identifiers that must keep their meaning when a Vanta expression is
+# rewritten into the names the code generator emits.
+_CPP_KEYWORDS = frozenset({
+    'and', 'asm', 'auto', 'bool', 'break', 'case', 'catch', 'char', 'class',
+    'const', 'constexpr', 'continue', 'decltype', 'default', 'delete', 'do',
+    'double', 'else', 'enum', 'explicit', 'extern', 'false', 'float', 'for',
+    'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable', 'namespace',
+    'new', 'noexcept', 'not', 'nullptr', 'operator', 'or', 'private',
+    'protected', 'public', 'register', 'restrict', 'return', 'short',
+    'signed', 'sizeof', 'static', 'struct', 'switch', 'template', 'this',
+    'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union',
+    'unsigned', 'using', 'virtual', 'void', 'volatile', 'while', 'xor',
+})
+
+_HIT_CONDITION_RE = re.compile(r'^\s*(==|>=|<=|!=|>|<)?\s*(\d+)\s*$')
+_HIT_MODULO_RE = re.compile(r'^\s*%\s*(\d+)\s*==\s*0\s*$')
+
+
+def _translate_vanta_expression(expression: str) -> str:
+    """Rewrite a Vanta-flavoured expression into the generated C++ names.
+
+    User variables are emitted as ``v_<name>``, so a condition like
+    ``x > 5`` has to become ``v_x > 5`` before GDB can evaluate it.  String
+    literals are left alone, C++ keywords keep their meaning, and ``len(x)``
+    is rewritten to the field the code generator inlines.
+    """
+    if not expression:
+        return expression
+
+    def rewrite_identifier(match):
+        name = match.group(0)
+        if name in _CPP_KEYWORDS or name.startswith('v_'):
+            return name
+        return 'v_' + name
+
+    def rewrite_part(part: str) -> str:
+        part = re.sub(r'\b[A-Za-z_][A-Za-z0-9_]*\b', rewrite_identifier, part)
+        # The code generator inlines len(x) as (x).h->len, so the rewritten
+        # v_len(x) has to become the same field access.
+        part = re.sub(r'\bv_len\(([^()]*)\)', r'(\1).h->len', part)
+        return part
+
+    # Split out string literals so their contents are never rewritten.
+    parts = re.split(r'("(?:[^"\\]|\\.)*")', expression)
+    for index, part in enumerate(parts):
+        if index % 2:
+            continue
+        parts[index] = rewrite_part(part)
+    return ''.join(parts)
+
+
+def _hit_condition_matches(spec, count: int) -> Optional[bool]:
+    """Evaluate a DAP hit condition against a hit count.
+
+    Returns True when the breakpoint should stop, False when the hit should
+    be skipped, and None when the condition is not understood.
+    """
+    if spec is None:
+        return None
+    text = str(spec).strip()
+    if not text:
+        return None
+    match = _HIT_MODULO_RE.match(text)
+    if match:
+        period = int(match.group(1))
+        if period <= 0:
+            return None
+        return count % period == 0
+    match = _HIT_CONDITION_RE.match(text)
+    if not match:
+        return None
+    operator = match.group(1) or '=='
+    value = int(match.group(2))
+    if operator == '==':
+        return count == value
+    if operator == '>=':
+        return count >= value
+    if operator == '<=':
+        return count <= value
+    if operator == '>':
+        return count > value
+    if operator == '<':
+        return count < value
+    if operator == '!=':
+        return count != value
+    return None
+
+
+def _interpolate_log_message(message: str, evaluate) -> str:
+    """Fill a DAP ``logMessage`` template, evaluating ``{expression}`` holes.
+
+    ``evaluate`` is called with the expression text and returns a
+    ``(value, ok)`` pair.
+    """
+    if not message:
+        return ''
+    out = []
+    index = 0
+    while index < len(message):
+        char = message[index]
+        if char == '{':
+            end = message.find('}', index)
+            if end != -1:
+                expression = message[index + 1:end]
+                value, ok = evaluate(expression)
+                out.append(value if ok else '{' + expression + '}')
+                index = end + 1
+                continue
+        out.append(char)
+        index += 1
+    return ''.join(out)
+
+
+def _is_truthy(value) -> bool:
+    """Interpret a GDB expression result as a boolean."""
+    text = str(value).strip()
+    if not text:
+        return False
+    return text not in ('0', 'false', 'False', 'FALSE')
 
 
 def _is_gdb_console_text(text: str) -> bool:

@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.33.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.34.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -19,9 +19,10 @@ The server and debug adapter are part of the compiler package, so an installed
   imported declarations, enum members, and struct fields.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
-- **Native debugging** through a `vanta` debug configuration: line
-  breakpoints, stack traces, locals and arguments, continue/step/pause,
-  `stopOnEntry`, program output, and clean termination.
+- **Native debugging** through a `vanta` debug configuration: line,
+  function, conditional, hit-count, and log-point breakpoints, stack traces,
+  locals and arguments, watch expressions, continue/step/pause, `stopOnEntry`,
+  program output, restart, and clean termination.
 - Syntax highlighting and language configuration for `.vnt` files.
 
 The server uses full-document text sync. That keeps the first version small and
@@ -59,11 +60,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.4.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.5.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.4.0.vsix
+code --install-extension vanta-language-0.5.0.vsix
 ```
 
 ### Build from source
@@ -72,7 +73,7 @@ code --install-extension vanta-language-0.4.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.4.0.vsix
+code --install-extension vanta-language-0.5.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -144,6 +145,12 @@ scopes, stepping, and output into DAP. The **Locals** and **Arguments** scopes
 show Vanta names without the generated `v_` prefix. Breakpoints in imported
 Vanta files work because every statement carries its original file and line.
 
+Beyond plain line breakpoints the adapter supports function breakpoints,
+conditional breakpoints, hit counts, log points, watch expressions, and
+restart. Conditions and watch expressions are written in Vanta terms
+(`hp > 0`, `len(items) == 3`), and the adapter maps them onto the generated
+names.
+
 A debug session needs GDB plus a GCC or Clang toolchain. MSVC builds normal
 programs but emits PDB files, which this debugger does not read. Set
 `vanta.debug.gdbPath` when GDB is not on `PATH`. The debug adapter is launched
@@ -186,10 +193,11 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   declaration and local-variable information.
 - There is no rename, code action, formatting, workspace symbol, or semantic
   tokens support yet.
-- The debugger is intentionally a first milestone: no conditional, function,
-  logpoint, or data breakpoints; no watch expressions or editable variables;
-  no attach, remote, restart, LLDB, or MSVC/PDB support. Debug sessions always
-  use an unoptimized build.
+- The debugger is intentionally a first milestone: no data or exception
+  breakpoints; no editable variables; no attach, remote debugging, reverse
+  debugging, LLDB, or MSVC/PDB support. Breakpoint conditions, hit counts, and
+  log points are evaluated by the adapter, so the program pauses briefly at
+  every hit. Debug sessions always use an unoptimized build.
 
 ## Troubleshooting
 
@@ -213,6 +221,8 @@ process. `tests/test_lsp.py` exercises the transport through both
 `vanta lsp` and `python -m compiler lsp`, along with every editor request,
 unsaved buffers, imported-file diagnostics, and UTF-16 position conversion.
 `tests/test_dap.py` covers DAP framing, GDB/MI parsing, debug source markers,
-and optional GDB tests that verify a breakpoint lands on the original Vanta
-file and line and that a real stdio adapter session can inspect locals and
-finish cleanly.
+expression translation, and optional GDB tests that verify a breakpoint lands
+on the original Vanta file and line, that a real stdio adapter session can
+inspect locals and finish cleanly, and that log points, conditions, hit
+counts, function breakpoints, watch expressions, and restart behave as
+documented.

@@ -5,10 +5,27 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.33.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.34.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.34.0
+
+Debugger depth landed. The adapter now supports conditional breakpoints, hit
+counts, log points, and function breakpoints, plus watch expressions in a
+**Watch** scope and a `restart` request that rebuilds the program and runs it
+again. Conditions, hit counts, and log messages are evaluated by the adapter
+in the frame that was hit, so they can be written in Vanta terms
+(`hp > 0`, `len(items) == 3`) instead of the generated `v_` names. 729 tests
+total, including unit tests for the expression translation and the hit
+condition forms, and stdio sessions that exercise the new breakpoint kinds
+against a real GDB.
+
+The next debugger milestone is deliberately separate again: editable
+variables, data and exception breakpoints, attach and remote debugging,
+reverse debugging, LLDB, and MSVC/PDB support. A debug session always uses an
+unoptimized build.
 
 ## Landed in v0.33.0
 
@@ -80,7 +97,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.34.0)
+## Next: language (candidate v0.35.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -121,9 +138,11 @@ public declarations. `examples/modules_demo/` is the worked example.
 - Editor support is shipped in v0.32.0: `vanta lsp` plus the VS Code client
   provide diagnostics, completion, hover, definition, and document symbols.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
-  adapter over GDB/MI2. The next debugger work is conditional/function
-  breakpoints, watch expressions, editable variables, attach/remote debugging,
-  LLDB, and MSVC/PDB support; these are separate from the first milestone.
+  adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
+  function breakpoints, hit counts, log points, watch expressions, and
+  restart. The next debugger work is editable variables, data and exception
+  breakpoints, attach/remote debugging, reverse debugging, LLDB, and MSVC/PDB
+  support.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,

@@ -16,7 +16,11 @@ from compiler.dap import (
     GdbMi,
     MiRecord,
     _frame_name,
+    _hit_condition_matches,
+    _interpolate_log_message,
+    _is_truthy,
     _mi_quote,
+    _translate_vanta_expression,
     _vanta_type,
     find_gdb,
     parse_mi_line,
@@ -246,8 +250,13 @@ class DebuggerIntegrationTests(unittest.TestCase):
             shutil.rmtree(tempdir, ignore_errors=True)
 
 
-class DapStdioIntegrationTests(unittest.TestCase):
-    """Exercise the real adapter process, not just its helpers."""
+class _DapSessionTestCase(unittest.TestCase):
+    """Shared plumbing for tests that drive a real adapter process."""
+
+    PROGRAM = ('func main() -> void:\n'
+               '    let x = 41\n'
+               '    let y = x + 1\n'
+               '    print_i32(y)\n')
 
     @classmethod
     def setUpClass(cls):
@@ -262,13 +271,11 @@ class DapStdioIntegrationTests(unittest.TestCase):
         self.tempdir = tempfile.mkdtemp(prefix='vanta-dap-stdio-')
         self.source = os.path.join(self.tempdir, 'main.vnt')
         with open(self.source, 'w', encoding='utf-8', newline='\n') as f:
-            f.write('func main() -> void:\n'
-                    '    let x = 41\n'
-                    '    let y = x + 1\n'
-                    '    print_i32(y)\n')
+            f.write(self.PROGRAM)
         self.process = None
         self.messages: queue.Queue = queue.Queue()
         self.seq = 0
+        self.received: list = []
 
     def tearDown(self):
         if self.process is not None and self.process.poll() is None:
@@ -343,9 +350,146 @@ class DapStdioIntegrationTests(unittest.TestCase):
             if message is None:
                 self.fail(f'adapter exited; messages={seen!r}')
             seen.append(message)
+            self.received.append(message)
             if predicate(message):
                 return message
         self.fail(f'timed out; messages={seen!r}')
+
+    def initialize(self):
+        self.start()
+        self.send('initialize', {'clientID': 'test'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'initialize')
+        self.assertTrue(response['success'], response)
+        self.expect(lambda m: m.get('event') == 'initialized')
+
+    def launch(self, **extra):
+        arguments = {'program': self.source, 'cwd': self.tempdir}
+        arguments.update(extra)
+        self.send('launch', arguments)
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'launch', timeout=90)
+        self.assertTrue(response['success'], response)
+
+    def set_breakpoints(self, breakpoints, source=None):
+        self.send('setBreakpoints', {
+            'source': {'name': 'main.vnt', 'path': source or self.source},
+            'breakpoints': breakpoints,
+        })
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setBreakpoints')
+        self.assertTrue(response['success'], response)
+        return response
+
+    def configuration_done(self):
+        self.send('configurationDone')
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'configurationDone')
+        self.assertTrue(response['success'], response)
+
+    def outputs(self, category=None):
+        out = []
+        for message in self.received:
+            if message.get('event') != 'output':
+                continue
+            body = message.get('body', {})
+            if category is None or body.get('category') == category:
+                out.append(body.get('output', ''))
+        return ''.join(out)
+
+    def stopped_event(self, timeout=40):
+        return self.expect(lambda m: m.get('event') == 'stopped',
+                            timeout=timeout)
+
+    def terminated_event(self, timeout=40):
+        return self.expect(lambda m: m.get('event') == 'terminated',
+                            timeout=timeout)
+
+
+class ExpressionTranslationTests(unittest.TestCase):
+    def test_locals_get_the_generated_prefix(self):
+        self.assertEqual(_translate_vanta_expression('x > 5'), 'v_x > 5')
+        self.assertEqual(_translate_vanta_expression('x > 5 && y == 2'),
+                         'v_x > 5 && v_y == 2')
+        self.assertEqual(_translate_vanta_expression('total + 1'),
+                         'v_total + 1')
+
+    def test_existing_prefix_and_keywords_are_kept(self):
+        self.assertEqual(_translate_vanta_expression('v_x > 5'), 'v_x > 5')
+        self.assertEqual(_translate_vanta_expression('true && false'),
+                         'true && false')
+        self.assertEqual(_translate_vanta_expression('sizeof(int) == 4'),
+                         'sizeof(int) == 4')
+
+    def test_string_literals_are_untouched(self):
+        self.assertEqual(_translate_vanta_expression('"hello world"'),
+                         '"hello world"')
+        self.assertEqual(_translate_vanta_expression('x == "total"'),
+                         'v_x == "total"')
+
+    def test_len_is_rewritten_to_the_inlined_field(self):
+        self.assertEqual(_translate_vanta_expression('len(xs) == 3'),
+                         '(v_xs).h->len == 3')
+
+    def test_empty_expression(self):
+        self.assertEqual(_translate_vanta_expression(''), '')
+
+
+class HitConditionTests(unittest.TestCase):
+    def test_plain_count(self):
+        self.assertTrue(_hit_condition_matches('3', 3))
+        self.assertFalse(_hit_condition_matches('3', 2))
+
+    def test_comparison_forms(self):
+        self.assertTrue(_hit_condition_matches('== 3', 3))
+        self.assertTrue(_hit_condition_matches('>= 2', 3))
+        self.assertTrue(_hit_condition_matches('<= 3', 3))
+        self.assertTrue(_hit_condition_matches('> 2', 3))
+        self.assertTrue(_hit_condition_matches('< 4', 3))
+        self.assertTrue(_hit_condition_matches('!= 2', 3))
+
+    def test_every_nth_hit(self):
+        self.assertTrue(_hit_condition_matches('% 2 == 0', 4))
+        self.assertFalse(_hit_condition_matches('% 2 == 0', 3))
+
+    def test_unsupported_conditions(self):
+        self.assertIsNone(_hit_condition_matches('nonsense', 1))
+        self.assertIsNone(_hit_condition_matches('', 1))
+        self.assertIsNone(_hit_condition_matches(None, 1))
+
+
+class LogMessageTests(unittest.TestCase):
+    def test_interpolation(self):
+        text = _interpolate_log_message(
+            'i is {i}', lambda expression: ('7', True))
+        self.assertEqual(text, 'i is 7')
+
+    def test_unknown_expression_keeps_the_placeholder(self):
+        text = _interpolate_log_message(
+            'i is {i}', lambda expression: ('', False))
+        self.assertEqual(text, 'i is {i}')
+
+    def test_text_without_placeholders(self):
+        self.assertEqual(
+            _interpolate_log_message('plain', lambda e: ('', False)),
+            'plain')
+
+
+class TruthinessTests(unittest.TestCase):
+    def test_values(self):
+        self.assertFalse(_is_truthy('0'))
+        self.assertFalse(_is_truthy('false'))
+        self.assertFalse(_is_truthy(''))
+        self.assertTrue(_is_truthy('1'))
+        self.assertTrue(_is_truthy('41'))
+
+
+class DapStdioIntegrationTests(_DapSessionTestCase):
+    """Exercise the real adapter process, not just its helpers."""
 
     def test_launch_breakpoint_locals_and_exit(self):
         self.start()
@@ -424,6 +568,127 @@ class DapStdioIntegrationTests(unittest.TestCase):
                     m.get('command') == 'disconnect', timeout=15)
         self.process.wait(timeout=15)
         self.assertEqual(self.process.returncode, 0)
+
+
+class DapFeatureIntegrationTests(_DapSessionTestCase):
+    """Conditional breakpoints, logpoints, watches, and restart."""
+
+    PROGRAM = ('func main() -> void:\n'
+               '    let x = 41\n'
+               '    mut i = 0\n'
+               '    mut total = 0\n'
+               '    while i < 3:\n'
+               '        total = total + i\n'
+               '        i = i + 1\n'
+               '    print_i32(total)\n')
+
+    def test_logpoint_runs_without_stopping(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6, 'logMessage': 'i is {i}'}])
+        self.configuration_done()
+        self.terminated_event()
+        console = self.outputs('console')
+        self.assertIn('i is 0', console)
+        self.assertIn('i is 1', console)
+        self.assertIn('i is 2', console)
+        self.assertIn('3', self.outputs('stdout'))
+        self.assertFalse([m for m in self.received
+                          if m.get('event') == 'stopped'])
+
+    def test_conditional_breakpoint_skips_the_stop(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6, 'condition': 'x > 100'}])
+        self.configuration_done()
+        self.terminated_event()
+        self.assertFalse([m for m in self.received
+                          if m.get('event') == 'stopped'])
+        self.assertIn('3', self.outputs('stdout'))
+
+    def test_hit_condition_stops_on_the_second_hit(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6, 'hitCondition': '2'}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        locals_ref = next(scope['variablesReference']
+                          for scope in response['body']['scopes']
+                          if scope['name'] == 'Locals')
+        self.send('variables', {'variablesReference': locals_ref})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        values = {v['name']: v['value']
+                  for v in response['body']['variables']}
+        self.assertEqual(values.get('i'), '1')
+
+    def test_function_breakpoint_stops_in_main(self):
+        self.initialize()
+        self.launch()
+        self.send('setFunctionBreakpoints', {'breakpoints': [{'name': 'main'}]})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setFunctionBreakpoints')
+        self.assertTrue(response['success'], response)
+        self.assertTrue(response['body']['breakpoints'][0]['verified'],
+                        response)
+        self.configuration_done()
+        self.stopped_event()
+        self.send('stackTrace', {'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stackTrace')
+        self.assertEqual(response['body']['stackFrames'][0]['name'], 'main')
+
+    def test_watch_expression_appears_in_the_watch_scope(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('setExpression', {'expression': 'total', 'value': 'total',
+                                    'context': 'watch', 'frameId': 0})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setExpression')
+        self.assertTrue(response['success'], response)
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        watch = [scope for scope in response['body']['scopes']
+                 if scope['name'] == 'Watch']
+        self.assertTrue(watch, response)
+        self.send('variables',
+                  {'variablesReference': watch[0]['variablesReference']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        values = {v['name']: v['value'] for v in response['body']['variables']}
+        self.assertIn('total', values)
+
+    def test_restart_rebuilds_and_stops_again(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('restart', {})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'restart', timeout=90)
+        self.assertTrue(response['success'], response)
+        self.stopped_event()
+        self.send('stackTrace', {'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stackTrace')
+        self.assertEqual(response['body']['stackFrames'][0]['line'], 6)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,32 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.34.0 - 2026-10-21
+
+- Breakpoint depth. The debug adapter now supports conditional breakpoints,
+  hit counts, log points, and function breakpoints. Conditions and log
+  messages are written in Vanta terms (`hp > 0`, `len(items) == 3`); the
+  adapter maps them onto the generated names and evaluates them in the frame
+  that was hit, because GDB cannot evaluate a Vanta condition before the
+  program runs. A log point prints its message and lets the program continue,
+  so a session never stops at that line.
+- Watch expressions. The **Watch** scope lists the expressions the editor
+  asked for and re-evaluates them every time the program stops. Expressions
+  that are not in scope show `<not available>` instead of failing the
+  session.
+- Restart. The `restart` request rebuilds the program from the current
+  source, reloads the symbols, re-creates the breakpoints, and runs it again,
+  so an edit can be tried without ending the session.
+- Better hit reporting. Stopped events carry `hitBreakpointIds`, and Vanta
+  names are shown for module functions (`geometry.area`).
+- Docs and tests. `docs/DEBUGGER.md` documents the new breakpoint kinds,
+  watch expressions, and restart. 729 tests total, including unit tests for
+  the expression translation, the hit-condition forms, and the log-message
+  interpolation, plus stdio sessions that exercise log points, conditions,
+  hit counts, function breakpoints, watch expressions, and restart against a
+  real GDB. Editable variables, data and exception breakpoints, attach and
+  remote debugging, reverse debugging, LLDB, and MSVC/PDB remain future work.
+
 ## v0.33.0 - 2026-10-21
 
 - Native debugger. `vanta dap` is a Debug Adapter Protocol server backed by

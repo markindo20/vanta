@@ -167,7 +167,7 @@ that can import `compiler`. It passes the workspace as the server's working
 directory so relative imports and Python module discovery behave like the
 editor's project.
 
-## Debugger (v0.33.0)
+## Debugger (v0.33.0, depth in v0.34.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -193,6 +193,23 @@ map. User variables are emitted with a `v_` prefix; the adapter strips it for
 the **Locals** and **Arguments** scopes and hides compiler temporaries.
 Generated wrapper frames are attributed to the temporary generated `main.cpp`
 so they are visibly distinct from Vanta frames.
+
+Conditional breakpoints, hit counts, and log points are evaluated by the
+adapter, not by GDB. GDB cannot evaluate a condition before the program is
+running, and it only knows the generated names, so `hp > 0` would be
+meaningless to it. The adapter instead keeps the DAP request next to the GDB
+breakpoint number, translates the expression to the generated names
+(`_translate_vanta_expression` rewrites bare identifiers to `v_<name>` and
+rewrites `len(x)` to the field the code generator inlines), and evaluates it
+in the stopped frame with `-data-evaluate-expression`. A hit that should not
+stop is answered with `-exec-continue` and no `stopped` event, which is how a
+log point behaves. Function breakpoints are resolved to the generated symbol
+(`vanta_user::fn_<name>`, or `fn_vanta_m_<module>__<name>` for an imported
+module) and inserted as ordinary GDB breakpoints, so they report the Vanta
+file and line of the function's first statement. Watch expressions are kept
+in a list and re-evaluated for the **Watch** scope on every stop. Restart
+rebuilds the program, reloads it with `-file-exec-and-symbols`, re-creates the
+breakpoints, and runs it again.
 
 DAP stdio lifecycle is intentionally blunt: after `serve()` cleans up GDB and
 the temporary build, `run_stdio()` flushes and exits with `os._exit(0)`. A
@@ -292,11 +309,12 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 710 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 729 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
-source-mapped breakpoints directly, and another runs a complete stdio DAP
-session through launch, stop, locals, continue, and disconnect.
+source-mapped breakpoints directly, another runs a complete stdio DAP session
+through launch, stop, locals, continue, and disconnect, and a third group
+covers the breakpoint kinds, watch expressions, and restart.
 Integration tests compile and run
 real binaries and skip automatically when no C++17 compiler is present. The
 SDL2 tests build, link, and run the SDL examples headless
