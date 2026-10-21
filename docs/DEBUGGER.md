@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.36.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.37.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -22,15 +22,16 @@ it:
 - watch expressions in a **Watch** scope
 - editing mutable locals
 - data breakpoints that stop when a value changes
-- a registers view and raw memory reads
+- a registers view, a disassembly view, and raw memory reads
 - valid breakpoint lines, and jumping to a line ("run to cursor")
 - exception breakpoints
+- attaching to a program that is already running
 - restart, which rebuilds the program and runs it again
 - clean exit, terminate, and disconnect
 
 ## Requirements
 
-- Vanta 0.36.0 or newer (`vanta --version`)
+- Vanta 0.37.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -51,7 +52,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.7.0.vsix
+code --install-extension vanta-language-0.8.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -89,7 +90,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.7.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.8.0.vsix`.
 
 ## Breakpoints
 
@@ -147,6 +148,42 @@ reached through `extern` can raise one. The **Exception Breakpoints** section
 of the debugger offers two filters: exceptions thrown and exceptions caught.
 Both are GDB catchpoints.
 
+## Attaching to a running program
+
+A session can attach to a program that is already running, which is how a game
+is debugged: start the game, then attach to it.
+
+Build the program with debug information first, and start that build:
+
+```powershell
+vanta build game.vnt --debug -o build/game-debug.exe
+.\build\game-debug.exe
+```
+
+Then start an attach session. The executable has to be the one that is
+running, because the breakpoints and the stack are resolved from its debug
+information. The Vanta source is optional; when it is given, the adapter
+still knows which lines can hold a breakpoint.
+
+```json
+{
+  "type": "vanta",
+  "request": "attach",
+  "name": "Attach to Vanta Program",
+  "executable": "${workspaceFolder}/build/game-debug.exe",
+  "processId": 12345,
+  "program": "${workspaceFolder}/game.vnt"
+}
+```
+
+The process id is the one the program prints or that the task manager shows.
+An attached session never starts the program: it only watches it. Stopping the
+session detaches and leaves the program running.
+
+On Windows, a program that never waits can refuse the attach with "Access is
+denied"; a program that sleeps between frames attaches fine. This is a
+limitation of the Windows debugger, not of the adapter.
+
 ## Editing values
 
 A local can be edited from the **Variables** view, but only when Vanta allows
@@ -174,12 +211,13 @@ address, and the session reports it as a data breakpoint. The address belongs
 to the stack frame it was taken in, so a watch is dropped when the frame is
 gone; re-create it after a restart.
 
-## Registers and memory
+## Registers, disassembly, and memory
 
 The **Variables** view can be switched to the registers view, which lists the
 processor registers with their current values. The adapter also answers the
 DAP `readMemory` request, so an editor that shows raw memory can read it at
-any address the program reports.
+any address the program reports, and it answers the `disassemble` request, so
+an editor can show the machine code of the current instruction.
 
 ## Restart
 
@@ -287,7 +325,9 @@ vanta build game.vnt --debug -o build/game-debug.exe
 - "Run to cursor" moves the program counter, which GDB does not fully
   support. It works inside the running function, and the values of the
   variables may be inconsistent afterwards.
-- No attach, remote debugging, or reverse debugging.
+- No remote debugging or reverse debugging.
+- An attached session cannot restart the program; stop it and start a new
+  session.
 - No LLDB or MSVC/PDB backend. GDB/MI2 is the only transport.
 - Multi-threaded programs expose GDB threads and report when a thread starts
   or exits, but the first milestone focuses on the main thread and

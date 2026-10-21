@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.37.0 - 2026-10-21
+
+- Attach to a running program. A debug session can attach to a program that
+  is already running, which is how a game is debugged: build it with
+  `vanta build --debug`, start it, and attach to the process. The attach
+  request names the executable that is running, because the breakpoints and
+  the stack are resolved from its debug information. An attached session
+  never starts the program, and stopping the session leaves it running. On
+  Windows, a program that never waits can refuse the attach; one that sleeps
+  between frames attaches fine.
+- Per-thread stepping. A step now acts on the thread the editor asked for,
+  instead of on whichever thread GDB happened to have selected.
+- Disassembly. The adapter answers the disassembly request, so an editor can
+  show the machine code of the current instruction.
+- Hover values. The adapter now answers the evaluate request that editors
+  send while hovering a variable.
+- A failing adapter says so. An error that escapes the request handlers is
+  printed on stderr instead of ending the session silently.
+- Docs and tests. `docs/DEBUGGER.md` documents attaching, per-thread
+  stepping, and the disassembly view. 751 tests total, including a stdio
+  session that attaches to a running program, watches it, and detaches.
+  Remote debugging, reverse debugging, LLDB, and MSVC/PDB remain future work.
+
 ## v0.36.0 - 2026-10-21
 
 - Breakpoint lines. The adapter knows which lines of a Vanta file hold a

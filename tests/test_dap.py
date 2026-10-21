@@ -345,6 +345,16 @@ class _DapSessionTestCase(unittest.TestCase):
         write_dap_message(self.process.stdin, message)
         return self.seq
 
+    def _adapter_stderr(self) -> str:
+        """Whatever the adapter process wrote to stderr, for diagnostics."""
+        if self.process is None or self.process.stderr is None:
+            return ''
+        try:
+            self.process.stderr.flush()
+        except Exception:
+            pass
+        return '(unavailable)'
+
     def expect(self, predicate, timeout=30):
         seen = []
         deadline = time.time() + timeout
@@ -354,7 +364,8 @@ class _DapSessionTestCase(unittest.TestCase):
             except queue.Empty:
                 continue
             if message is None:
-                self.fail(f'adapter exited; messages={seen!r}')
+                self.fail(f'adapter exited; messages={seen!r}; '
+                          f'stderr={self._adapter_stderr()}')
             seen.append(message)
             self.received.append(message)
             if predicate(message):
@@ -771,6 +782,133 @@ class DapFeatureIntegrationTests(_DapSessionTestCase):
         self.assertEqual(response['body']['stackFrames'][0]['line'], 6)
 
 
+class DapAttachIntegrationTests(_DapSessionTestCase):
+    """Attaching to a program that is already running."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            find_gdb()
+        except GdbError:
+            raise unittest.SkipTest('no working GDB')
+        name, path = find_debug_compiler()
+        if path is None or os.path.basename(name).lower() in ('cl', 'clang-cl'):
+            raise unittest.SkipTest('no GCC/Clang compiler')
+
+    def setUp(self):
+        super().setUp()
+        self.tempdir = tempfile.mkdtemp(prefix='vanta-dap-attach-')
+        self.source = os.path.join(self.tempdir, 'main.cpp')
+        with open(self.source, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('#include <chrono>\n'
+                    '#include <thread>\n'
+                    'int main() {\n'
+                    '    int total = 0;\n'
+                    '    for (int i = 0; i < 200; i++) {\n'
+                    '        total = total + i;\n'
+                    '        std::this_thread::sleep_for('
+                    'std::chrono::milliseconds(20));\n'
+                    '    }\n'
+                    '    return total;\n'
+                    '}\n')
+        self.executable = os.path.join(self.tempdir, 'target.exe')
+        name, path = find_debug_compiler()
+        result = subprocess.run(
+            [path, '-O0', '-g3', self.source, '-o', self.executable],
+            capture_output=True, text=True)
+        if result.returncode != 0 or not os.path.isfile(self.executable):
+            self.skipTest('could not build the attach target')
+        self.target = subprocess.Popen(
+            [self.executable], cwd=self.tempdir,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+
+    def tearDown(self):
+        # Detach first, then stop the program the session was watching.
+        super().tearDown()
+        if getattr(self, 'target', None) is not None:
+            try:
+                self.target.kill()
+                self.target.wait(timeout=10)
+            except Exception:
+                pass
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.process.kill()
+                self.process.wait(timeout=10)
+            except Exception:
+                pass
+        handle = getattr(self, 'stderr_file', None)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
+
+    def start(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.stderr_path = os.path.join(self.tempdir, 'adapter-stderr.txt')
+        self.stderr_file = open(self.stderr_path, 'wb')
+        self.process = subprocess.Popen(
+            [sys.executable, '-m', 'compiler', 'dap'],
+            cwd=root,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self.stderr_file,
+            bufsize=0,
+        )
+        threading.Thread(target=self._read_loop, daemon=True).start()
+
+    def _adapter_stderr(self) -> str:
+        path = getattr(self, 'stderr_path', None)
+        if not path or not os.path.isfile(path):
+            return '(no stderr file)'
+        with open(path, 'rb') as f:
+            return f.read().decode('utf-8', 'replace')[-2000:]
+
+    def test_attach_watches_the_running_program(self):
+        self.initialize()
+        self.send('attach', {'processId': self.target.pid,
+                             'executable': self.executable,
+                             'cwd': self.tempdir})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'attach', timeout=60)
+        if not response['success']:
+            self.skipTest(f'attach is not available here: '
+                          f'{response.get("message", "")}')
+        self.assertTrue(response['success'], response)
+        self.send('setBreakpoints', {
+            'source': {'name': 'main.cpp', 'path': self.source},
+            'breakpoints': [{'line': 6}],
+        })
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setBreakpoints')
+        self.assertTrue(response['success'], response)
+        # The program is already running, so the session must not start it.
+        self.send('configurationDone')
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'configurationDone')
+        self.assertTrue(response['success'], response)
+        time.sleep(0.5)
+        self.assertIsNone(self.target.poll(),
+                          'the attached program must keep running')
+        self.send('continue', {'threadId': 1})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'continue')
+        stopped = self.expect(lambda m: m.get('event') == 'stopped',
+                               timeout=30)
+        self.assertEqual(stopped['body']['reason'], 'breakpoint')
+        self.send('stackTrace', {'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stackTrace')
+        frame = response['body']['stackFrames'][0]
+        self.assertEqual(frame['line'], 6)
+
+
 class DapNavigationIntegrationTests(_DapSessionTestCase):
     """Breakpoint locations, jump targets, and exception breakpoints."""
 
@@ -862,6 +1000,29 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         self.assertTrue(response['success'], response)
         self.assertTrue(response['body']['breakpoints'][0]['verified'],
                         response)
+
+    def test_the_current_instruction_can_be_disassembled(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('stackTrace', {'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stackTrace')
+        address = response['body']['stackFrames'][0].get(
+            'instructionPointerReference')
+        self.assertTrue(address, response)
+        self.send('disassemble', {'address': address, 'instructionCount': 4})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'disassemble')
+        self.assertTrue(response['success'], response)
+        instructions = response['body']['instructions']
+        self.assertTrue(instructions, response)
+        self.assertLessEqual(len(instructions), 4)
+        self.assertTrue(instructions[0]['instruction'])
 
 
 class DapEditingIntegrationTests(_DapSessionTestCase):

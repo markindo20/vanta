@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.36.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.37.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -22,8 +22,9 @@ The server and debug adapter are part of the compiler package, so an installed
 - **Native debugging** through a `vanta` debug configuration: line,
   function, conditional, hit-count, log-point, data, and exception
   breakpoints, stack traces, locals and arguments, watch expressions, editing
-  mutable locals, registers and memory, run-to-cursor, continue/step/pause,
-  `stopOnEntry`, program output, restart, and clean termination.
+  mutable locals, registers, disassembly and memory, run-to-cursor,
+  continue/step/pause, `stopOnEntry`, program output, attaching to a running
+  program, restart, and clean termination.
 - Syntax highlighting and language configuration for `.vnt` files.
 
 The server uses full-document text sync. That keeps the first version small and
@@ -61,11 +62,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.7.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.8.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.7.0.vsix
+code --install-extension vanta-language-0.8.0.vsix
 ```
 
 ### Build from source
@@ -74,7 +75,7 @@ code --install-extension vanta-language-0.7.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.7.0.vsix
+code --install-extension vanta-language-0.8.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -154,9 +155,10 @@ generated names.
 
 A local can be edited from the **Variables** view, but only when Vanta allows
 it: only a binding declared with `mut` may be written, and an immutable
-binding is refused with a clear message. The **Registers** view and raw
-memory reads are available as well, and the adapter tells the editor which
-lines can hold a breakpoint, so it can grey out the ones that cannot.
+binding is refused with a clear message. The **Registers** view, the
+disassembly view, and raw memory reads are available as well, and the
+adapter tells the editor which lines can hold a breakpoint, so it can grey
+out the ones that cannot.
 
 A debug session needs GDB plus a GCC or Clang toolchain. MSVC builds normal
 programs but emits PDB files, which this debugger does not read. Set
@@ -200,11 +202,10 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   declaration and local-variable information.
 - There is no rename, code action, formatting, workspace symbol, or semantic
   tokens support yet.
-- The debugger is intentionally a first milestone: no exception breakpoints,
-  attach, or remote debugging; no reverse debugging; no LLDB or MSVC/PDB
-  support. Breakpoint conditions, hit counts, and log points are evaluated by
-  the adapter, so the program pauses briefly at every hit. Debug sessions
-  always use an unoptimized build.
+- The debugger is intentionally a first milestone: no remote debugging; no
+  reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
+  counts, and log points are evaluated by the adapter, so the program pauses
+  briefly at every hit. Debug sessions always use an unoptimized build.
 
 ## Troubleshooting
 

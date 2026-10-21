@@ -24,13 +24,21 @@ import shutil
 import subprocess
 import sys
 import threading
+import traceback
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from . import VERSION
-from .driver import DebugBuildError, build_debug, find_debug_compiler
+from .driver import (
+    DebugBuildError,
+    build_debug,
+    find_debug_compiler,
+    mutable_locals,
+    source_lines,
+    _frontend_only,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +584,8 @@ class DapAdapter:
         self._launch_args: dict = {}
         self._build: Optional[dict] = None
         self._source: Optional[str] = None
+        self._attached = False
+        self._source_map: dict = {}
         self._gdb: Optional[GdbMi] = None
         self._configuration_done = False
         self._stop_on_entry = False
@@ -721,7 +731,7 @@ class DapAdapter:
             'supportsConditionalBreakpoints': True,
             'supportsHitConditionalBreakpoints': True,
             'supportsLogPoints': True,
-            'supportsEvaluateForHovers': False,
+            'supportsEvaluateForHovers': True,
             'supportsSetVariable': True,
             'supportsRestartFrame': False,
             'supportsGotoTargetsRequest': True,
@@ -733,7 +743,7 @@ class DapAdapter:
             'supportsExceptionInfoRequest': False,
             'supportsDataBreakpoints': True,
             'supportsReadMemoryRequest': True,
-            'supportsDisassembleRequest': False,
+            'supportsDisassembleRequest': True,
             'supportsCancelRequest': False,
             'supportsBreakpointLocationsRequest': True,
             'supportsClipboardContext': False,
@@ -861,6 +871,122 @@ class DapAdapter:
         self._delete_function_breakpoints()
         out = [self._insert_function_breakpoint(bp) for bp in requested]
         self.response(request, {'breakpoints': out})
+
+    def _request_attach(self, request, args):
+        """Attach to a program that is already running.
+
+        The session needs the executable that is running, because the
+        breakpoints and the stack are resolved from its debug information.
+        The Vanta source is optional; when it is given the adapter still
+        knows which lines can hold a breakpoint.
+        """
+        arguments = dict(args or {})
+        self._launch_args.update(arguments)
+        pid = _int_or_none(arguments.get('processId'))
+        if not pid:
+            self.error(request, 'attach requires a processId', show_user=True)
+            return
+        executable = arguments.get('executable')
+        if not executable:
+            self.error(request, 'attach requires the executable that is '
+                                'running', show_user=True)
+            return
+        executable = _path_from_dap(executable)
+        if not executable or not os.path.isfile(executable):
+            self.error(request, f'executable not found: {executable}',
+                       show_user=True)
+            return
+        source = _path_from_dap(arguments.get('program'))
+        if source and not os.path.isfile(source):
+            source = None
+        self._source = source
+        cwd = _path_from_dap(arguments.get('cwd')) or \
+            os.path.dirname(executable) or os.getcwd()
+        gdb_path = arguments.get('gdbPath') or \
+            self._launch_args.get('miDebuggerPath')
+        try:
+            gdb_path = find_gdb(gdb_path)
+            gdb = GdbMi(gdb_path, executable, cwd=cwd)
+        except Exception as exc:
+            self.error(request, str(exc), show_user=True)
+            return
+        self._gdb = gdb
+        try:
+            self._initialize_gdb(cwd)
+            gdb.run_command(f'-target-attach {pid}')
+        except Exception as exc:
+            self._shutdown(cleanup=True)
+            self.error(request,
+                       f'could not attach to process {pid}: {exc}. On Windows a '
+                       f'program that never waits can refuse the attach; a '
+                       f'program that sleeps between frames attaches fine.',
+                       show_user=True)
+            return
+        self._attached = True
+        self._source_map = self._frontend_source_map(source)
+        self.output('console', f'Attached to process {pid}\n')
+        self.response(request)
+
+    def _frontend_source_map(self, source):
+        """The program structure of a source file, without compiling it."""
+        if not source:
+            return {}
+        try:
+            program, _tc = _frontend_only(source)
+        except Exception:
+            return {}
+        return {
+            'source_lines': source_lines(program),
+            'mutable_locals': mutable_locals(program),
+        }
+
+    def _request_disassemble(self, request, args):
+        """The machine code of an address range."""
+        if self._gdb is None:
+            self.error(request, 'debugger has not been launched')
+            return
+        address = str(args.get('address') or '').strip()
+        offset = _int_or_none(args.get('instructionOffset')) or 0
+        count = _int_or_none(args.get('instructionCount')) or 0
+        if not address:
+            self.error(request, 'disassemble requires an address')
+            return
+        try:
+            start = int(address, 16)
+        except ValueError:
+            self.error(request, f'not an address: {address}')
+            return
+        if count <= 0:
+            count = 32
+        # GDB disassembles an address range, so the window is generous and
+        # the result is cut to the requested instructions.
+        end = start + 16 * (count + offset + 1)
+        try:
+            record = self._gdb.command(
+                f'-data-disassemble -s {address} -e {end:#x} -- 0')
+        except Exception as exc:
+            self.error(request, exc)
+            return
+        lines = []
+        for item in record.results.get('asm_insns', []) or []:
+            if not isinstance(item, dict):
+                continue
+            instruction = str(item.get('inst', ''))
+            if not instruction:
+                continue
+            entry = {
+                'address': str(item.get('address', '')),
+                'instruction': instruction,
+            }
+            symbol = item.get('func-name')
+            if symbol:
+                entry['symbol'] = str(symbol)
+            lines.append(entry)
+        if offset:
+            lines = lines[offset:offset + count]
+        else:
+            lines = lines[:count]
+        self.response(request, {'instructions': lines})
 
     def _request_setExceptionBreakpoints(self, request, args):
         """Stop when a C++ exception is thrown or caught.
@@ -1143,6 +1269,10 @@ class DapAdapter:
             except Exception as exc:
                 self.output('console', f'could not set entry breakpoint: {exc}\n')
         self._configuration_done = True
+        if self._attached:
+            # The program is already running; the session only watches it.
+            self.response(request)
+            return
         try:
             self._gdb.run_command('-exec-run')
         except Exception as exc:
@@ -1273,25 +1403,28 @@ class DapAdapter:
         self.response(request, {'variables': variables})
 
     def _request_continue(self, request, args):
-        self._resume(request, '-exec-continue')
+        self._resume(request, '-exec-continue', args)
 
     def _request_next(self, request, args):
-        self._resume(request, '-exec-next')
+        self._resume(request, '-exec-next', args)
 
     def _request_stepIn(self, request, args):
         granularity = args.get('granularity', 'statement')
         if granularity == 'instruction':
-            self._resume(request, '-exec-step-instruction')
+            self._resume(request, '-exec-step-instruction', args)
         else:
-            self._resume(request, '-exec-step')
+            self._resume(request, '-exec-step', args)
 
     def _request_stepOut(self, request, args):
-        self._resume(request, '-exec-finish')
+        self._resume(request, '-exec-finish', args)
 
     def _request_pause(self, request, args):
         if self._gdb is None:
             self.error(request, 'debugger has not been launched')
             return
+        thread_id = _int_or_none(args.get('threadId'))
+        if thread_id is not None:
+            self._select_thread(thread_id)
         try:
             self._gdb.run_command('-exec-interrupt')
         except Exception as exc:
@@ -1341,6 +1474,10 @@ class DapAdapter:
         """Rebuild the program and run it again in the same session."""
         if self._gdb is None or self._build is None or not self._source:
             self.error(request, 'debugger has not been launched')
+            return
+        if self._attached:
+            self.error(request, 'an attached session cannot restart the '
+                                'program; stop it and launch a new session')
             return
         self._stop_inferior()
         try:
@@ -1621,15 +1758,30 @@ class DapAdapter:
         self._watch_expressions.append({'expression': expression,
                                         'frameId': frame_id})
 
+    def _program_tables(self) -> dict:
+        """The source map and the mutable locals of the program.
+
+        A launched session gets them from the debug build; an attached
+        session gets them from the frontend alone.
+        """
+        if self._build:
+            return {
+                'source_lines': self._build.get('source_lines') or {},
+                'mutable_locals': self._build.get('mutable_locals') or {},
+            }
+        return {
+            'source_lines': self._source_map.get('source_lines') or {},
+            'mutable_locals': self._source_map.get('mutable_locals') or {},
+        }
+
     def _source_lines(self) -> dict:
         """The lines of every source file that hold a statement."""
-        table = (self._build or {}).get('source_lines') or {}
-        return table.get('files', {})
+        return self._program_tables()['source_lines'].get('files', {})
 
     def _function_lines(self, function: str) -> dict:
         """The lines of one function, per source file."""
-        table = (self._build or {}).get('source_lines') or {}
-        return table.get('functions', {}).get(function, {})
+        tables = self._program_tables()['source_lines']
+        return tables.get('functions', {}).get(function, {})
 
     def _current_function(self) -> str:
         """The internal name of the function the current frame is in."""
@@ -1676,7 +1828,7 @@ class DapAdapter:
         if level >= len(frames):
             return set()
         key = _internal_function_name(frames[level].get('func') or '')
-        table = self._build.get('mutable_locals') or {}
+        table = self._program_tables()['mutable_locals']
         return set(table.get(key, ()))
 
     def _variable_type(self, thread_id, level, kind, name) -> str:
@@ -1723,10 +1875,16 @@ class DapAdapter:
                 rewrite, part)
         return ''.join(parts)
 
-    def _resume(self, request, command):
+    def _resume(self, request, command, args=None):
         if self._gdb is None:
             self.error(request, 'debugger has not been launched')
             return
+        arguments = args or {}
+        thread_id = _int_or_none(arguments.get('threadId'))
+        if thread_id is not None:
+            # Stepping acts on the selected thread, so make it the current
+            # one before GDB runs the command.
+            self._select_thread(thread_id)
         try:
             self._gdb.run_command(command)
         except Exception as exc:
@@ -2278,8 +2436,14 @@ def _is_gdb_console_text(text: str) -> bool:
 def run_stdio() -> int:
     """Run the Vanta debug adapter on stdin/stdout."""
     adapter = DapAdapter()
+    status = 0
     try:
         adapter.serve()
+    except BaseException:
+        # A failure that escapes the request handlers would otherwise be
+        # silent, because the process exits through os._exit below.
+        traceback.print_exc(file=sys.stderr)
+        status = 1
     finally:
         # DAP's stdin reader is a daemon thread blocked in readline() unless
         # the client closed the pipe.  Letting interpreter shutdown fight
@@ -2290,5 +2454,5 @@ def run_stdio() -> int:
             sys.stderr.flush()
         except Exception:
             pass
-        os._exit(0)
-    return 0
+        os._exit(status)
+    return status

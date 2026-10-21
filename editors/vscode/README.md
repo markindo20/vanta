@@ -20,7 +20,8 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
   hit-count, log-point, data, and exception breakpoints, stack traces, locals
   and arguments, watch expressions, editing mutable locals, registers and
   memory, run-to-cursor, continue/pause/step, `stopOnEntry`, program output,
-  restart, and clean termination. Requires GDB and a GCC/Clang toolchain.
+  attaching to a running program, restart, and clean termination. Requires
+  GDB and a GCC/Clang toolchain.
 - Syntax highlighting and language configuration, including `#` comments.
 
 ## Requirements
@@ -49,10 +50,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.7.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.8.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.7.0.vsix
+code --install-extension vanta-language-0.8.0.vsix
 ```
 
 ### Build it yourself
@@ -63,7 +64,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.7.0.vsix
+code --install-extension vanta-language-0.8.0.vsix
 ```
 
 ### Run from source
@@ -127,7 +128,8 @@ starts the debug adapter. Breakpoints, stack frames, locals, arguments,
 stepping, and program output work in the Debug view. Function breakpoints,
 conditional breakpoints, hit counts, log points, data breakpoints, watch
 expressions, editing mutable locals, registers, memory reads, run-to-cursor,
-and restart are supported as well; conditions and watch expressions are
+disassembly, attaching to a running program, and restart are supported as
+well; conditions and watch expressions are
 written in Vanta terms (`hp > 0`, `len(items) == 3`), and only a binding
 declared with `mut` can be edited. Set `vanta.debug.gdbPath` when GDB is not on `PATH`. See
 [`docs/DEBUGGER.md`](https://github.com/markindo20/vanta/blob/master/docs/DEBUGGER.md)
