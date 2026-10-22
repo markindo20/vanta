@@ -1127,12 +1127,29 @@ class DapAdapter:
         kind = info['kind']
         self._select_frame(thread_id, level)
         mutable = self._mutable_names_for_frame(thread_id, level)
-        if name not in mutable:
-            self.error(request,
-                       f'{name!r} is immutable in Vanta; only bindings declared '
-                       f'with mut can be edited')
-            return
-        vanta_type = self._variable_type(thread_id, level, kind, name)
+        if kind == 'struct':
+            # A field of a struct: the binding that holds the struct decides
+            # whether the write is allowed, exactly like `p.hp = 1` does in
+            # the source.
+            container = str(info.get('expr') or '')
+            root = container.split('.')[0]
+            root_name = root[2:] if root.startswith('v_') else root
+            if root_name not in mutable:
+                self.error(request,
+                           f'{root_name!r} is immutable in Vanta; only bindings '
+                           f'declared with mut can be edited')
+                return
+            target = f'{container}.v_{name}'
+            vanta_type = self._struct_field_type(str(info.get('type') or ''),
+                                                 name)
+        else:
+            if name not in mutable:
+                self.error(request,
+                           f'{name!r} is immutable in Vanta; only bindings '
+                           f'declared with mut can be edited')
+                return
+            target = f'v_{name}'
+            vanta_type = self._variable_type(thread_id, level, kind, name)
         problem = _value_type_problem(value, vanta_type)
         if problem:
             self.error(request, problem)
@@ -1140,13 +1157,21 @@ class DapAdapter:
         expression = self._translate_value(value)
         try:
             self._gdb.command('-interpreter-exec console ' +
-                              _mi_quote(f'set var v_{name} = {expression}'))
+                              _mi_quote(f'set var {target} = {expression}'))
         except Exception as exc:
             self.error(request, f'could not set {name}: {exc}')
             return
-        new_value, ok = self._evaluate_expression(name)
+        new_value, ok = self._evaluate_expression(target)
         self.response(request, {'value': new_value if ok else value,
                                 'variablesReference': 0})
+
+    def _struct_field_type(self, type_name: str, field: str) -> str:
+        """The Vanta type of one field of a struct."""
+        layouts = self._program_tables()['layouts']
+        for name, field_type in layouts.get('structs', {}).get(type_name, []):
+            if name == field:
+                return field_type
+        return ''
 
     def _request_setDataBreakpoints(self, request, args):
         """Break when a watched local changes."""

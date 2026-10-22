@@ -1211,6 +1211,71 @@ class DapConditionIntegrationTests(_DapSessionTestCase):
         self.assertEqual(values.get('counter'), '2')
 
 
+class DapFieldEditingIntegrationTests(_DapSessionTestCase):
+    """A field of a mutable struct can be edited."""
+
+    PROGRAM = ('struct Player:\n'
+               '    hp: i32\n'
+               '    name: str\n'
+               '\n'
+               'func main() -> void:\n'
+               '    mut p = Player(hp: 41, name: "hero")\n'
+               '    let frozen = Player(hp: 1, name: "ice")\n'
+               '    print_i32(p.hp)\n')
+
+    def locals(self):
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        reference = next(scope['variablesReference']
+                         for scope in response['body']['scopes']
+                         if scope['name'] == 'Locals')
+        self.send('variables', {'variablesReference': reference})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        return {v['name']: v for v in response['body']['variables']}
+
+    def test_a_field_of_a_mutable_struct_can_be_edited(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 9}])
+        self.configuration_done()
+        self.stopped_event()
+        variables = self.locals()
+        player = variables['p']
+        self.send('setVariable', {'variablesReference': player['variablesReference'],
+                                  'name': 'hp', 'value': '99'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setVariable')
+        self.assertTrue(response['success'], response)
+        self.send('variables',
+                  {'variablesReference': player['variablesReference']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        fields = {v['name']: v for v in response['body']['variables']}
+        self.assertEqual(fields['hp']['value'], '99')
+
+    def test_a_field_of_an_immutable_struct_is_refused(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 9}])
+        self.configuration_done()
+        self.stopped_event()
+        variables = self.locals()
+        frozen = variables['frozen']
+        self.send('setVariable', {'variablesReference': frozen['variablesReference'],
+                                  'name': 'hp', 'value': '99'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setVariable')
+        self.assertFalse(response['success'], response)
+        self.assertIn('immutable', response.get('message', ''))
+
+
 class DapEditingIntegrationTests(_DapSessionTestCase):
     """Editing variables, watching memory, and reading machine state."""
 

@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.40.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.41.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -63,11 +63,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.11.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.12.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.11.0.vsix
+code --install-extension vanta-language-0.12.0.vsix
 ```
 
 ### Build from source
@@ -76,7 +76,7 @@ code --install-extension vanta-language-0.11.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.11.0.vsix
+code --install-extension vanta-language-0.12.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -156,7 +156,8 @@ generated names.
 
 A local can be edited from the **Variables** view, but only when Vanta allows
 it: only a binding declared with `mut` may be written, and an immutable
-binding is refused with a clear message. The **Registers** view, the
+binding is refused with a clear message. A field of a struct follows the
+binding that holds it. The **Registers** view, the
 disassembly view, and raw memory reads are available as well, and the
 adapter tells the editor which lines can hold a breakpoint, so it can grey
 out the ones that cannot.

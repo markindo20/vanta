@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.40.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.41.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -32,7 +32,7 @@ it:
 
 ## Requirements
 
-- Vanta 0.40.0 or newer (`vanta --version`)
+- Vanta 0.41.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -56,7 +56,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.11.0.vsix
+code --install-extension vanta-language-0.12.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -94,7 +94,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.11.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.12.0.vsix`.
 
 ## Breakpoints
 
@@ -241,6 +241,10 @@ Values are written in Vanta terms: `7`, `1.5`, `true`, `"text"`, or an
 expression over the locals in scope. A value that cannot fit the variable is
 refused too, so a string is never written into an `i32` by accident.
 
+A field of a struct follows the same rule. A field of a `mut` struct can be
+edited, exactly like `p.hp = 99` in the source, and a field of a `let` struct
+is refused, because the struct itself cannot change.
+
 ## Data breakpoints
 
 Right-click a local and choose **Break on Value Change** to stop the program
@@ -381,8 +385,9 @@ vanta build game.vnt --debug -o build/game-debug.exe
 
 - Breakpoint conditions, hit counts, and log points are evaluated by the
   adapter, not by GDB, so the program pauses briefly at every hit.
-- Only locals declared with `mut` can be edited. Module constants and
-  immutable bindings are refused on purpose.
+- Only locals declared with `mut` can be edited, and a field of a struct
+  follows the binding that holds it. Module constants and immutable
+  bindings are refused on purpose.
 - A struct expands into its fields, but a list shows its length rather
   than its items, and an enum with a payload is shown as a number.
 - Data breakpoints watch one address, so they stop on a write to that

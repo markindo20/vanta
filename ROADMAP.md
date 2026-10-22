@@ -5,10 +5,23 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.40.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.41.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.41.0
+
+Debugger editing, part two, landed. A field of a struct can be changed from
+the Variables view, and it follows the same rule as the source: a field of a
+`mut` struct can be edited, a field of a `let` struct is refused. The VS Code
+extension offers a configuration snippet for each kind of session: a local
+launch, an attach to a running program, and a launch that debugs a program on
+another machine. 762 tests total, including stdio sessions that edit the
+field of a mutable struct and that refuse the field of an immutable one.
+
+The next debugger milestone is deliberately separate again: reverse debugging
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.40.0
 
@@ -179,7 +192,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.41.0)
+## Next: language (candidate v0.42.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become

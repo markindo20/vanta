@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.40.0)
+# Vanta - a game-oriented systems language (v0.41.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -120,7 +120,7 @@ the generated C++. On C++ compilation failure the generated source is saved to
 
 ### Editor support
 
-v0.40.0 ships a language server and a native debugger:
+v0.41.0 ships a language server and a native debugger:
 
 ```powershell
 vanta lsp
@@ -226,7 +226,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (760 tests) |
+| `tests/` | `unittest` suite (762 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 

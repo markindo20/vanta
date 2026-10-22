@@ -21,8 +21,8 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
   and arguments with structs that expand into their fields, watch
   expressions, editing mutable locals, registers and
   memory, run-to-cursor, continue/pause/step, `stopOnEntry`, program output,
-  attaching to a running program, remote debugging, restart, and clean
-  termination. Requires GDB and a GCC/Clang toolchain.
+  attaching to a running program, remote debugging, editing a struct field,
+  restart, and clean termination. Requires GDB and a GCC/Clang toolchain.
 - Syntax highlighting and language configuration, including `#` comments.
 
 ## Requirements
@@ -51,10 +51,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.11.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.12.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.11.0.vsix
+code --install-extension vanta-language-0.12.0.vsix
 ```
 
 ### Build it yourself
@@ -65,7 +65,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.11.0.vsix
+code --install-extension vanta-language-0.12.0.vsix
 ```
 
 ### Run from source

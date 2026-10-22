@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.41.0 - 2026-10-22
+
+- Editing a struct field. A field of a struct can be changed from the
+  Variables view, and it follows the same rule as the source: a field of a
+  `mut` struct can be edited, exactly like `p.hp = 99` in the program, and a
+  field of a `let` struct is refused.
+- Editor snippets. The VS Code extension offers a configuration snippet for
+  each kind of session: a local launch, an attach to a running program, and
+  a launch that debugs a program on another machine.
+- Docs and tests. `docs/DEBUGGER.md` documents editing a field. 762 tests
+  total, including stdio sessions that edit the field of a mutable struct and
+  that refuse the field of an immutable one. Reverse debugging and MSVC/PDB
+  support remain future work.
+
 ## v0.40.0 - 2026-10-21
 
 - Remote debugging. A launch configuration may name the machine that runs the

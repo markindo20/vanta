@@ -169,7 +169,7 @@ editor's project.
 
 ## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0,
 navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0,
-speed in v0.39.0, reach in v0.40.0)
+speed in v0.39.0, reach in v0.40.0, editing in v0.41.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -218,7 +218,9 @@ Editing a variable follows Vanta's own rule: only a binding declared with
 function (`mutable_locals()` in `driver.py` walks the function bodies), and
 the adapter refuses an edit to an immutable binding - GDB would allow it,
 because the generated C++ variable is not `const`. A value that cannot fit
-the variable's type is refused as well.
+the variable's type is refused as well. A field of a struct follows the
+binding that holds the struct, so a field of a `mut` struct can be edited
+and a field of a `let` struct cannot.
 
 Data breakpoints are GDB watchpoints on the address of a local. The address
 is only handed out to clients that advertise `supportsDataBreakpoints`,
@@ -351,7 +353,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 760 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 762 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
