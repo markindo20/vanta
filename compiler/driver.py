@@ -11,6 +11,7 @@ from .lexer import LexError
 from .parser import ParseError
 from .loader import load_program, LoadError, STDLIB_DIR
 from .type_checker import TypeChecker, CheckError
+from .formatter import FormatError, format_source
 from .codegen_cpp import CodeGen
 from .ast_nodes import ExternDecl, FuncDecl
 from . import ast_nodes as A
@@ -794,6 +795,33 @@ def cmd_check(args):
     return 0
 
 
+def cmd_fmt(args):
+    try:
+        with open(args.source, 'r', encoding='utf-8-sig') as f:
+            source = f.read()
+    except OSError as e:
+        sys.stderr.write(f"error: cannot read '{args.source}': {e}\n")
+        return 1
+    try:
+        formatted = format_source(source, args.source)
+    except FormatError as e:
+        sys.stderr.write(f"error: {args.source}: {e}\n")
+        return 1
+    if args.check:
+        if formatted != source:
+            print(f"{args.source} is not formatted")
+            return 1
+        print(f"{args.source} is formatted")
+        return 0
+    if formatted == source:
+        print(f"{args.source} is already formatted")
+        return 0
+    with open(args.source, 'w', encoding='utf-8', newline='') as f:
+        f.write(formatted)
+    print(f"formatted {args.source}")
+    return 0
+
+
 def _sdl_lib_found(lib, compiler_path):
     """Best-effort check for an SDL development library (games only)."""
     if compiler_path and os.name == 'nt':
@@ -987,7 +1015,8 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'debug', 'lsp', 'dap')
+_COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug',
+             'lsp', 'dap')
 
 
 def _normalize_argv(argv):
@@ -1117,6 +1146,11 @@ def main(argv):
     p_check = sub.add_parser('check', help='type-check a source file')
     p_check.add_argument('source')
 
+    p_fmt = sub.add_parser('fmt', help='format a source file in place')
+    p_fmt.add_argument('source')
+    p_fmt.add_argument('--check', action='store_true',
+                        help='report whether the file is formatted')
+
     sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
 
     sub.add_parser('lsp', help='run the Vanta language server on stdin/stdout')
@@ -1183,6 +1217,8 @@ def main(argv):
         return cmd_new(args)
     if args.cmd == 'check':
         return cmd_check(args)
+    if args.cmd == 'fmt':
+        return cmd_fmt(args)
     if args.cmd == 'doctor':
         return cmd_doctor(args)
     if args.cmd == 'lsp':

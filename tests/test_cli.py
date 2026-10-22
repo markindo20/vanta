@@ -18,6 +18,7 @@ from compiler.driver import (
     _starter_source,
     cmd_check,
     cmd_doctor,
+    cmd_fmt,
     cmd_new,
     find_cxx_compiler,
 )
@@ -50,6 +51,53 @@ class CliTests(unittest.TestCase):
             with open(target, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(source)
             _frontend_only(target)
+
+    def test_fmt_rewrites_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'game.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n  return\n')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cmd_fmt(SimpleNamespace(source=path, check=False))
+            self.assertEqual(code, 0)
+            with open(path, encoding='utf-8') as f:
+                self.assertEqual(f.read(),
+                                 'func main() -> void:\n    return\n')
+
+    def test_fmt_check_reports_an_unformatted_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'game.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n  return\n')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cmd_fmt(SimpleNamespace(source=path, check=True))
+            self.assertEqual(code, 1)
+            self.assertIn('is not formatted', out.getvalue())
+
+    def test_fmt_check_passes_on_a_formatted_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'game.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n    return\n')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cmd_fmt(SimpleNamespace(source=path, check=True))
+            self.assertEqual(code, 0)
+            self.assertIn('is formatted', out.getvalue())
+
+    def test_fmt_refuses_a_file_that_does_not_parse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'bad.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n    let x: i32 = \n')
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = cmd_fmt(SimpleNamespace(source=path, check=False))
+            self.assertEqual(code, 1)
+            self.assertIn('bad.vnt', err.getvalue())
 
     def test_check_shows_source_context(self):
         with tempfile.TemporaryDirectory() as tmp:

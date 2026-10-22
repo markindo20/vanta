@@ -29,6 +29,7 @@ from urllib.request import url2pathname
 
 from . import VERSION
 from . import ast_nodes as A
+from .formatter import FormatError, format_source
 from .lexer import LexError, Lexer
 from .loader import LoadError, STDLIB_DIR, load_program
 from .tokens import KEYWORDS, TT
@@ -2388,6 +2389,7 @@ class LanguageServer:
                     'renameProvider': {'prepareProvider': True},
                     'codeActionProvider': {'codeActionKinds': ['quickfix']},
                     'workspaceSymbolProvider': True,
+                    'documentFormattingProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2433,6 +2435,8 @@ class LanguageServer:
             self._response(msg_id, self._code_actions(params))
         elif method == 'workspace/symbol':
             self._response(msg_id, self._workspace_symbols(params))
+        elif method == 'textDocument/formatting':
+            self._response(msg_id, self._formatting(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
@@ -3742,6 +3746,32 @@ class LanguageServer:
             tokens.append((token.line - 1, start, length, token_type, 0))
         tokens.extend(_comment_tokens(text, lines))
         return tokens
+
+    # -- formatting --------------------------------------------------------
+
+    def _formatting(self, params: dict) -> list[dict]:
+        """Format the whole document and return the edit that does it."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        try:
+            formatted = format_source(doc.text, doc.path or '<untitled>')
+        except FormatError:
+            return []
+        if formatted == doc.text:
+            return []
+        lines = _lines(doc.text)
+        last = len(lines) - 1
+        if last >= 0 and lines[last] == '':
+            last -= 1
+        end_character = len(lines[last]) if last >= 0 else 0
+        return [{
+            'range': {
+                'start': {'line': 0, 'character': 0},
+                'end': {'line': max(0, last), 'character': end_character},
+            },
+            'newText': formatted,
+        }]
 
     # -- document symbols --------------------------------------------------
 

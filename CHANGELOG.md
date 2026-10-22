@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.55.0 - 2026-10-22
+
+- A source formatter. `vanta fmt <file>` rewrites a file in place, and
+  `vanta fmt --check <file>` reports whether it is already formatted
+  without touching it. The editor gets the same thing: the server answers
+  `textDocument/formatting`, so **Format Document** and format-on-save work.
+- The formatter normalizes the whitespace around a program and never the
+  program itself: every logical line is indented with four spaces per block
+  level, a line that continues an expression keeps its alignment relative to
+  the line that opened it, comments keep their text and their place, trailing
+  whitespace is removed, runs of blank lines collapse to one, and the file
+  ends with exactly one newline.
+- Only the indentation changes, so the block structure the parser sees is
+  the same before and after. A file that does not parse is refused rather
+  than reformatted, because the formatter cannot know what was meant, and
+  formatting is idempotent: formatting a formatted file changes nothing.
+- Tests: 855 in total. New tests cover the formatter's rules, its refusal to
+  touch a file that does not parse, its idempotence, the CLI command, and
+  the editor request.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the formatter. The VS Code
+  extension is 0.26.0.
+
 ## v0.54.0 - 2026-10-22
 
 - Semantic highlighting. The server answers `textDocument/semanticTokens/full`,

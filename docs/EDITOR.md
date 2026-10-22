@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.54.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.55.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -37,6 +37,9 @@ The server and debug adapter are part of the compiler package, so an installed
   a struct, an enum, a constant, a parameter, a local, a struct field, an
   enum member, or a module alias - so a local and a field with the same name
   no longer look alike.
+- **Format Document** rewrites the file with the canonical indentation:
+  four spaces per block level, comments kept in place, and one blank line
+  between blocks.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -163,6 +166,31 @@ The tokens are computed from the buffer as it is on screen, so an unsaved
 file is highlighted the way it is written, and a file that does not parse yet
 is still highlighted as far as it goes.
 
+## Formatting
+
+**Format Document** in the editor rewrites the file with the canonical
+indentation, and the same formatter is available on the command line:
+
+```powershell
+vanta fmt game.vnt            # rewrite the file in place
+vanta fmt --check game.vnt     # report whether it is already formatted
+```
+
+The formatter normalizes the whitespace around a program and never the
+program itself:
+
+- every logical line is indented with four spaces per block level,
+- a line that continues an expression keeps its alignment relative to the
+  line that opened it,
+- a comment keeps its text and its place in the file,
+- trailing whitespace is removed, runs of blank lines collapse to one, and
+  the file ends with exactly one newline.
+
+Only the indentation of a line changes, so the block structure the parser
+sees is the same before and after, and formatting a formatted file changes
+nothing. A file that does not parse is refused rather than reformatted:
+the formatter cannot know what the author meant.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -193,11 +221,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.25.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.26.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.25.0.vsix
+code --install-extension vanta-language-0.26.0.vsix
 ```
 
 ### Build from source
@@ -206,7 +234,7 @@ code --install-extension vanta-language-0.25.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.25.0.vsix
+code --install-extension vanta-language-0.26.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -318,7 +346,8 @@ vanta lsp
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
 rename (with prepare support), quick fixes, workspace symbols, semantic tokens,
-and document symbols. It does not require a workspace root to start.
+formatting, and document symbols. It does not require a workspace root to
+start.
 
 For debugging, any DAP client can launch:
 
@@ -353,6 +382,9 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - Semantic highlighting marks the kinds of names it can resolve. A name that
   resolves to nothing is left to the lexical colouring, and a file that does
   not parse is highlighted as far as it goes.
+- The formatter refuses a file that does not parse, and it does not rewrite
+  the text inside a line: only the indentation, the blank lines, and the
+  trailing whitespace change.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

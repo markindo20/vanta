@@ -110,12 +110,18 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 8. `formats.py` — parses `print_fmt`/`write_fmt` format literals. Shared by the
    type checker (which counts placeholders and checks argument types) and the
    code generator (which turns them into printf conversions).
-9. `driver.py` — orchestrates the frontend and native compilation, detects
+9. `formatter.py` — the source formatter. It re-indents a file to four
+   spaces per block level, keeps comments and continued expressions where
+   they are, and tidies blank lines and trailing whitespace. It changes no
+   text inside a line, so the program it reads is the program it writes.
+10. `driver.py` — orchestrates the frontend and native compilation, detects
    `clang++`/`g++`/`cl` (honouring `$CXX`), and implements `check`/`build`/`run`.
    A bare source path is the same as `run`, and known extern block names
    (`SDL2`, `SDL2_ttf`, `SDL2_image`) add their link flags automatically.
-   `new` writes a playable starter, and `build --bundle` walks the Windows
-   executable's PE imports with `objdump` to copy non-system DLLs beside it.
+   `new` writes a playable starter, `fmt` formats a source file in place
+   (and `--check` reports whether one is already formatted), and
+   `build --bundle` walks the Windows executable's PE imports with
+   `objdump` to copy non-system DLLs beside it.
    `--include-dir`/`--lib-dir`/`--link` (repeatable, on `build` and `run`) pass
    `-I`/`-L`/`-l` - or the MSVC `/I`/`/LIBPATH:`/`<lib>.lib` equivalents -
    through to the C++ compiler. Generated code is built with FP contraction
@@ -124,14 +130,14 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    and the debug adapter's `build_debug()` path enable source markers; with
    GCC/Clang they force `-O0 -g3 -fno-omit-frame-pointer`. The debug adapter
    rejects MSVC because GDB cannot read PDB debug information.
-10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
+11. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   and document symbols. The
+   formatting, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
-11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
+12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
    `dap` subcommand runs it on stdin/stdout; it builds the program with Vanta
    source markers, drives GDB, translates breakpoints/frames/scopes/step
    requests, and forwards target output as DAP output events.
@@ -241,6 +247,19 @@ the lexer's decoded values, so a string's escapes and a number's leading
 zeros are counted correctly. Builtins, which nothing in the project declares,
 are marked as library code. Overlapping tokens are dropped, keeping the
 resolved identifier over the lexical one.
+
+`compiler/formatter.py` is the source formatter (`vanta fmt`, and
+`textDocument/formatting`). It lexes the file and groups the tokens into
+logical lines - the lexer emits a newline only outside brackets, so a
+statement that spans several physical lines is one logical line - and reads
+the block depth of each from the indent and dedent tokens. Each logical line
+is then re-indented to four spaces per level. A continuation line keeps the
+offset it had from the line that opened it, a comment keeps its text and
+its place, trailing whitespace goes, runs of blank lines collapse to one,
+and the file ends with exactly one newline. Because only the indentation
+changes, the block structure the parser sees is the same before and after,
+which is what makes the formatter safe to run on a whole file. A file that
+does not parse is refused: the formatter cannot know what the author meant.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -444,7 +463,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 834 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 855 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

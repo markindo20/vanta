@@ -121,6 +121,7 @@ class LspTests(unittest.TestCase):
         self.assertEqual(caps['codeActionProvider'],
                          {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['workspaceSymbolProvider'])
+        self.assertTrue(caps['documentFormattingProvider'])
         self.assertEqual(caps['semanticTokensProvider']['full'], True)
         self.assertIn('function', caps['semanticTokensProvider']['legend']
                       ['tokenTypes'])
@@ -1308,6 +1309,31 @@ func main() -> i32:
         self.assertTrue(tokens)
         kinds = {kind for _line, _char, _length, kind, _mods in tokens}
         self.assertIn('variable', kinds)
+
+    def test_formatting_rewrites_the_document(self):
+        path = self.write('main.vnt', 'func main() -> void:\n'
+                          '  return\n')
+        uri = self.open(path)
+        self.assertTrue(self.server.handle_message({
+            'jsonrpc': '2.0', 'id': 1, 'method': 'textDocument/formatting',
+            'params': {'textDocument': {'uri': uri},
+                       'options': {'tabSize': 4, 'insertSpaces': True}},
+        }))
+        edits = self.server.outbox[-1]['result']
+        self.assertEqual(len(edits), 1)
+        self.assertEqual(edits[0]['newText'],
+                         'func main() -> void:\n    return\n')
+        self.assertEqual(edits[0]['range']['start'],
+                         {'line': 0, 'character': 0})
+
+    def test_formatting_an_already_formatted_document_returns_no_edits(self):
+        path = self.write('main.vnt', 'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        self.request('textDocument/formatting', {
+            'textDocument': {'uri': uri},
+            'options': {'tabSize': 4, 'insertSpaces': True},
+        })
+        self.assertEqual(self.server.outbox[-1]['result'], [])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')
