@@ -212,6 +212,25 @@ class CodeGen:
             name = os.path.abspath(name).replace('\\', '/')
             self.lines.append(f'#line {line} {_escape_cpp_string(name)}')
 
+    def _entry_line(self, fd):
+        """Attribute the native entry point to the Vanta source.
+
+        GDB takes the program's current source file from its entry point, so
+        pointing it at the Vanta file makes `break 3` and `list` work on the
+        Vanta source from the very first prompt.  The entry point itself is
+        still generated code; only the file it is reported in changes.
+        """
+        if not self.debug:
+            return
+        pos = getattr(fd, 'pos', None)
+        file = getattr(pos, 'file', None)
+        line = getattr(pos, 'line', None) or 1
+        if not file:
+            self._generated_line()
+            return
+        path = os.path.abspath(file).replace('\\', '/')
+        self.lines.append(f'#line {line} {_escape_cpp_string(path)}')
+
     def _ctype(self, t) -> str:
         """C++ spelling of a Vanta type, resolving function-type aliases."""
         if isinstance(t, FuncType):
@@ -518,8 +537,11 @@ class CodeGen:
         self.emit('')
         main = next((f for f in funcs if f.name == 'main'), None)
         if main is not None:
-            self._generated_line()
+            self._entry_line(main)
             self.emit('int main(int argc, char** argv) {')
+            # Only the entry point itself belongs to the Vanta file; the
+            # body is generated plumbing again.
+            self._generated_line()
             self.indent += 1
             self.emit('vanta::set_args(argc, argv);')
             self.emit('vanta_user::fn_main();')

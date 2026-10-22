@@ -946,7 +946,7 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'lsp', 'dap')
+_COMMANDS = ('new', 'check', 'doctor', 'build', 'run', 'debug', 'lsp', 'dap')
 
 
 def _normalize_argv(argv):
@@ -955,6 +955,48 @@ def _normalize_argv(argv):
     if argv and argv[0] not in _COMMANDS and not argv[0].startswith('-'):
         return ['run'] + argv
     return argv
+
+
+def cmd_debug(args):
+    """Build a program with Vanta source locations and debug it with GDB."""
+    source = args.source
+    if not os.path.isfile(source):
+        sys.stderr.write(f'error: no such file: {source}\n')
+        return 1
+    try:
+        from .dap import find_gdb
+        gdb_path = find_gdb(args.gdb)
+    except Exception as exc:
+        sys.stderr.write(f'error: {exc}\n')
+        return 1
+    stem = os.path.splitext(os.path.basename(source))[0]
+    filename = stem + '-debug' + ('.exe' if os.name == 'nt' else '')
+    out_dir = args.build_dir or 'build'
+    out_path = os.path.join(out_dir, filename)
+    try:
+        build = build_debug(source, output=out_path,
+                            include_dirs=args.include_dir,
+                            lib_dirs=args.lib_dir, link=args.link)
+    except DebugBuildError as exc:
+        if exc.output:
+            sys.stderr.write(exc.output.rstrip() + '\n')
+        sys.stderr.write(f'error: {exc.message}\n')
+        return 1
+    except Exception as exc:
+        sys.stderr.write(f'error: debug build failed: {exc}\n')
+        return 1
+    command = [gdb_path, '--quiet', build['exe']]
+    for item in args.exec:
+        command += ['-ex', item]
+    if args.prog_args:
+        command += ['-ex', 'set args ' + ' '.join(args.prog_args)]
+    env = build.get('env') or dict(os.environ)
+    try:
+        proc = subprocess.run(command, env=env)
+    except OSError as exc:
+        sys.stderr.write(f'error: could not start GDB: {exc}\n')
+        return 1
+    return proc.returncode
 
 
 def main(argv):
@@ -1006,6 +1048,23 @@ def main(argv):
     p_run.add_argument('prog_args', nargs='*',
                        help='arguments passed through to the program')
 
+    p_debug = sub.add_parser(
+        'debug', help='build with Vanta source locations and debug with GDB')
+    p_debug.add_argument('source')
+    p_debug.add_argument('--gdb', help='the GDB executable to use')
+    p_debug.add_argument('--build-dir',
+                          help='where to put the executable (default build)')
+    p_debug.add_argument('--exec', action='append', default=[],
+                          help='run a GDB command and continue (repeatable)')
+    p_debug.add_argument('--include-dir', action='append', default=[],
+                          help='add include directory for C++ compilation')
+    p_debug.add_argument('--lib-dir', action='append', default=[],
+                          help='add library directory for linking')
+    p_debug.add_argument('--link', action='append', default=[],
+                          help='link against library (e.g. SDL2)')
+    p_debug.add_argument('prog_args', nargs='*',
+                         help='arguments passed through to the program')
+
     args = ap.parse_args(argv)
     if args.cmd == 'new':
         return cmd_new(args)
@@ -1023,6 +1082,8 @@ def main(argv):
         return cmd_build(args)
     if args.cmd == 'run':
         return cmd_run(args)
+    if args.cmd == 'debug':
+        return cmd_debug(args)
     return 1
 
 

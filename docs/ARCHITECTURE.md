@@ -169,7 +169,8 @@ editor's project.
 
 ## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0,
 navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0,
-speed in v0.39.0, reach in v0.40.0, editing in v0.41.0)
+speed in v0.39.0, reach in v0.40.0, editing in v0.41.0,
+terminal in v0.42.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -194,7 +195,11 @@ breakpoints and reports frames in Vanta terms without a post-processing source
 map. User variables are emitted with a `v_` prefix; the adapter strips it for
 the **Locals** and **Arguments** scopes and hides compiler temporaries.
 Generated wrapper frames are attributed to the temporary generated `main.cpp`
-so they are visibly distinct from Vanta frames.
+so they are visibly distinct from Vanta frames. The native entry point is
+the one exception: it is attributed to the Vanta file, because GDB takes
+the program's current source file from the entry point, and a debugger
+prompt that starts in the generated C++ would make `break 3` and `list`
+point at the wrong file.
 
 Conditional breakpoints, hit counts, and log points are evaluated by the
 adapter, not by GDB. GDB cannot evaluate a condition before the program is
@@ -353,7 +358,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 762 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 763 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

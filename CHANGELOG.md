@@ -2,6 +2,26 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.42.0 - 2026-10-22
+
+- Debugging from the terminal. `vanta debug game.vnt` builds the program with
+  Vanta source locations and starts GDB on it. GDB opens on the Vanta
+  program: `break 3` sets a breakpoint on the third line of the Vanta file,
+  `list` shows the Vanta source, and the backtrace names the Vanta
+  functions. The command takes `--exec` for GDB commands, `--gdb`,
+  `--build-dir`, the usual include and link options, and passes the rest to
+  the program.
+- The entry point belongs to the Vanta file. GDB takes the program's current
+  source file from its entry point, so the native entry point is now
+  attributed to the Vanta file. A debugger prompt no longer starts in the
+  generated C++, which is what made `break 3` and `list` point at the wrong
+  file. The rest of the generated wrapper stays attributed to the generated
+  file, so it is still visibly distinct from Vanta frames.
+- Docs and tests. `docs/DEBUGGER.md` documents the terminal workflow. 763
+  tests total, including a session that drives `vanta debug` and checks that
+  a breakpoint lands on the Vanta file. Reverse debugging and MSVC/PDB
+  support remain future work.
+
 ## v0.41.0 - 2026-10-22
 
 - Editing a struct field. A field of a struct can be changed from the

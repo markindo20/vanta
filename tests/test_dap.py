@@ -1211,6 +1211,37 @@ class DapConditionIntegrationTests(_DapSessionTestCase):
         self.assertEqual(values.get('counter'), '2')
 
 
+class CommandLineDebugTests(unittest.TestCase):
+    """`vanta debug` builds a source-mapped program and drives GDB."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            find_gdb()
+        except GdbError:
+            raise unittest.SkipTest('no working GDB')
+        if not _debug_toolchain_available():
+            raise unittest.SkipTest('no GCC/Clang compiler')
+
+    def test_a_breakpoint_lands_on_the_vanta_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, 'main.vnt')
+            with open(source, 'w', encoding='utf-8', newline='\n') as f:
+                f.write('func main() -> void:\n'
+                        '    let x = 41\n'
+                        '    let y = x + 1\n'
+                        '    print_i32(y)\n')
+            result = subprocess.run(
+                [sys.executable, '-m', 'compiler', 'debug', source,
+                 '--build-dir', tmp,
+                 '--exec', 'break 3', '--exec', 'info break'],
+                capture_output=True, text=True,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('main.vnt', result.stdout)
+            self.assertIn('line 3', result.stdout)
+
+
 class DapFieldEditingIntegrationTests(_DapSessionTestCase):
     """A field of a mutable struct can be edited."""
 
