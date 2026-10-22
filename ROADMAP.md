@@ -5,10 +5,22 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.39.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.40.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.40.0
+
+Debugger reach landed. A launch configuration may name the machine that runs
+the program, and the debugger drives it over the GDB remote protocol, which
+is how a build for a console or a board is debugged. The program is still
+built locally, because that is where the debug information comes from. 761
+tests total, including unit tests for the remote target and a stdio session
+that reports a remote machine that cannot be reached.
+
+The next debugger milestone is deliberately separate again: reverse debugging
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.39.0
 
@@ -167,7 +179,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.40.0)
+## Next: language (candidate v0.41.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -217,8 +229,8 @@ public declarations. `examples/modules_demo/` is the worked example.
   per-thread stepping, and the disassembly view. Debugger data shipped in
   v0.38.0: structs expand into their fields, enums show their member.
   Debugger speed shipped in v0.39.0: faster conditions, field watches, and
-  an LLDB fallback. The next debugger work is remote debugging, reverse
-  debugging, and MSVC/PDB support.
+  an LLDB fallback. Debugger reach shipped in v0.40.0: remote debugging. The
+  next debugger work is reverse debugging and MSVC/PDB support.
 - Watch the `ubuntu-latest` runner migration to Ubuntu 26 (GitHub announced
   the change for the 2026-10-19 window): if the Linux job's SDL package
   install or tests change behaviour, pin the label or adapt the setup,

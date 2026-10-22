@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.39.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.40.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -32,7 +32,7 @@ it:
 
 ## Requirements
 
-- Vanta 0.39.0 or newer (`vanta --version`)
+- Vanta 0.40.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -56,7 +56,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.10.0.vsix
+code --install-extension vanta-language-0.11.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -94,7 +94,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.10.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.11.0.vsix`.
 
 ## Breakpoints
 
@@ -194,6 +194,33 @@ session detaches and leaves the program running.
 On Windows, a program that never waits can refuse the attach with "Access is
 denied"; a program that sleeps between frames attaches fine. This is a
 limitation of the Windows debugger, not of the adapter.
+
+## Debugging a program on another machine
+
+A session can drive a program that runs somewhere else, over the GDB remote
+protocol. This is how a build for a console or a board is debugged: the
+program runs on the target, and the debugger on the desktop talks to it.
+
+The target machine runs a GDB server (`gdbserver` on a board, or the
+equivalent on a console), and the launch configuration names it:
+
+```json
+{
+  "type": "vanta",
+  "request": "launch",
+  "name": "Debug Vanta Program Remotely",
+  "program": "${workspaceFolder}/game.vnt",
+  "remote": {
+    "host": "10.0.0.2",
+    "port": 1234
+  }
+}
+```
+
+The debugger still builds the program locally, because the debug information
+comes from the build; the target runs the same program. The connection is made
+when the session starts, the breakpoints are set on the remote program, and
+the session continues it. `"remote": "10.0.0.2:1234"` is accepted as well.
 
 ## Editing values
 
@@ -363,7 +390,7 @@ vanta build game.vnt --debug -o build/game-debug.exe
 - "Run to cursor" moves the program counter, which GDB does not fully
   support. It works inside the running function, and the values of the
   variables may be inconsistent afterwards.
-- No remote debugging or reverse debugging.
+- No reverse debugging.
 - An attached session cannot restart the program; stop it and start a new
   session.
 - No LLDB or MSVC/PDB backend. GDB/MI2 is the only transport.

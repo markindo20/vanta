@@ -599,6 +599,7 @@ class DapAdapter:
         self._build: Optional[dict] = None
         self._source: Optional[str] = None
         self._attached = False
+        self._remote: Optional[tuple] = None
         self._source_map: dict = {}
         self._gdb: Optional[GdbMi] = None
         self._configuration_done = False
@@ -794,6 +795,7 @@ class DapAdapter:
             return
         self._stop_on_entry = bool(self._launch_args.get('stopOnEntry'))
         self._source = source
+        self._remote = _remote_target(self._launch_args.get('remote'))
 
         self.output('console', f'Building {os.path.basename(source)}...\n')
         try:
@@ -1266,6 +1268,16 @@ class DapAdapter:
         if self._gdb is None:
             self.error(request, 'debugger has not been launched')
             return
+        if self._remote:
+            # The program runs on another machine; GDB drives it over the
+            # connection, and the breakpoints are set once it is there.
+            host, port = self._remote
+            try:
+                self._gdb.command(f'-target remote {host}:{port}')
+            except Exception as exc:
+                self.error(request, f'could not connect to {host}:{port}: {exc}',
+                           show_user=True)
+                return
         # Breakpoints may have arrived before launch in exotic clients.
         for source, bps in list(self._breakpoints.values()):
             try:
@@ -1291,7 +1303,12 @@ class DapAdapter:
             self.response(request)
             return
         try:
-            self._gdb.run_command('-exec-run')
+            if self._remote:
+                # The remote program is already running and stopped at its
+                # entry point.
+                self._gdb.run_command('-exec-continue')
+            else:
+                self._gdb.run_command('-exec-run')
         except Exception as exc:
             self.error(request, f'could not start the program: {exc}',
                        show_user=True)
@@ -2488,6 +2505,32 @@ def _interpolate_log_message(message: str, evaluate) -> str:
         out.append(char)
         index += 1
     return ''.join(out)
+
+
+def _remote_target(value):
+    """Read the remote debugging target out of the launch arguments.
+
+    The launch configuration may name the machine that runs the program:
+    ``{"remote": {"host": "10.0.0.2", "port": 1234}}`` or the shorter
+    ``{"remote": "10.0.0.2:1234"}``.
+    """
+    if not value:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        host, _, port = text.rpartition(':')
+        if not host or not port.isdigit():
+            return None
+        return host, int(port)
+    if isinstance(value, dict):
+        host = str(value.get('host') or '').strip()
+        port = _int_or_none(value.get('port'))
+        if not host or port is None:
+            return None
+        return host, port
+    return None
 
 
 def _strip_pointer(value: str) -> str:

@@ -2,6 +2,19 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.40.0 - 2026-10-21
+
+- Remote debugging. A launch configuration may name the machine that runs the
+  program, and the debugger drives it over the GDB remote protocol. The
+  program is still built locally, because that is where the debug information
+  comes from; the connection is made when the session starts, the
+  breakpoints are set on the remote program, and the session continues it.
+  This is how a build for a console or a board is debugged.
+- Docs and tests. `docs/DEBUGGER.md` documents remote debugging. 760 tests
+  total, including unit tests for the remote target and a stdio session that
+  reports a remote machine that cannot be reached. Reverse debugging and
+  MSVC/PDB support remain future work.
+
 ## v0.39.0 - 2026-10-21
 
 - Faster conditions. A breakpoint condition is evaluated in the frame that

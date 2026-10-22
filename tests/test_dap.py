@@ -1139,6 +1139,44 @@ class DapDataIntegrationTests(_DapSessionTestCase):
                         response)
 
 
+class RemoteTargetTests(unittest.TestCase):
+    def test_a_host_and_port_pair(self):
+        from compiler.dap import _remote_target
+        self.assertEqual(_remote_target({'host': '10.0.0.2', 'port': 1234}),
+                         ('10.0.0.2', 1234))
+
+    def test_a_host_and_port_string(self):
+        from compiler.dap import _remote_target
+        self.assertEqual(_remote_target('10.0.0.2:1234'), ('10.0.0.2', 1234))
+
+    def test_nothing_usable(self):
+        from compiler.dap import _remote_target
+        self.assertIsNone(_remote_target(None))
+        self.assertIsNone(_remote_target(''))
+        self.assertIsNone(_remote_target('nonsense'))
+        self.assertIsNone(_remote_target({'host': '10.0.0.2'}))
+
+
+class DapRemoteIntegrationTests(_DapSessionTestCase):
+    """A remote target that is not there is reported clearly."""
+
+    def test_a_remote_target_that_cannot_be_reached_is_reported(self):
+        self.initialize()
+        self.send('launch', {'program': self.source,
+                             'cwd': self.tempdir,
+                             'remote': {'host': '127.0.0.1', 'port': 1}})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'launch', timeout=90)
+        self.assertTrue(response['success'], response)
+        self.send('configurationDone')
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'configurationDone', timeout=90)
+        self.assertFalse(response['success'], response)
+        self.assertIn('127.0.0.1', response.get('message', ''))
+
+
 class DapConditionIntegrationTests(_DapSessionTestCase):
     """A condition that only becomes true later still stops the program."""
 
