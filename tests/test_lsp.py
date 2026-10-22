@@ -121,6 +121,7 @@ class LspTests(unittest.TestCase):
         self.assertEqual(caps['codeActionProvider'],
                          {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['workspaceSymbolProvider'])
+        self.assertTrue(caps['documentHighlightProvider'])
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
@@ -1503,6 +1504,51 @@ struct Holder:
             'item': items[0],
         })[0]['result']
         self.assertEqual(supertypes, [])
+
+    def test_document_highlight_marks_a_local_and_its_uses(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let total: i32 = 0
+    if total > 0:
+        return total
+    return total
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 2, 'character': 8},
+        })[0]['result']
+        lines = sorted({h['range']['start']['line'] for h in result})
+        self.assertEqual(lines, [1, 2, 3, 4])
+
+    def test_document_highlight_does_not_mix_shadowing_names(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let x: i32 = 1
+    if x > 0:
+        let x: i32 = 2
+        return x
+    return x
+''')
+        uri = self.open(path)
+        inner_pos = (4, 15)  # the second 'x'
+        result = self.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': uri},
+            'position': {'line': inner_pos[0], 'character': inner_pos[1]},
+        })[0]['result']
+        lines = [h['range']['start']['line'] for h in result]
+        self.assertEqual(sorted(lines), [3, 4])
+
+    def test_document_highlight_falls_back_to_text_for_unknown_word(self):
+        path = self.write('main.vnt', 'func main() -> void:\n'
+                          '    return nope or NOPE\n')
+        uri = self.open(path)
+        result = self.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 11},
+        })[0]['result']
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['range']['start']['line'], 1)
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

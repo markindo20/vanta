@@ -496,7 +496,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 862 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 865 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

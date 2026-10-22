@@ -5,19 +5,23 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.59.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.60.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.60.0
+
+Document highlighting landed. The editor highlights every occurrence of the
+symbol under the cursor, scope-aware, with a declaration/ref distinction,
+and falls back to textual matches for unknown names. 865 tests total.
+
+The next editor work is Go to Implementation.
 
 ## Landed in v0.59.0
 
 A type hierarchy landed. The editor can show which structs hold a type and
 which types a struct holds, across modules. 862 tests total.
-
-The next editor work is document highlighting.
-
-## Landed in v0.58.0
 
 A call hierarchy landed. The editor can show who calls a function and what
 a function calls, using the same scope-aware resolver that powers

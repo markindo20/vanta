@@ -2512,6 +2512,7 @@ class LanguageServer:
                     'workspaceSymbolProvider': True,
                     'documentFormattingProvider': True,
                     'inlayHintProvider': True,
+                    'documentHighlightProvider': True,
                     'codeLensProvider': {'resolveProvider': False},
                     'callHierarchyProvider': True,
                     'typeHierarchyProvider': True,
@@ -2580,6 +2581,10 @@ class LanguageServer:
             self._response(msg_id, self._type_hierarchy_subtypes(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
+        elif method == 'textDocument/documentHighlight':
+            self._response(msg_id, self._document_highlight(params))
+        elif method == 'textDocument/documentHighlight':
+            self._response(msg_id, self._document_highlight(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -4341,6 +4346,70 @@ class LanguageServer:
                         'character': start + _utf16_len(ref.name)},
             },
         }
+
+    # -- document highlight -------------------------------------------------
+
+    def _document_highlight(self, params: dict) -> list[dict]:
+        """Highlight every occurrence of the symbol under the cursor."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        project = self._project(doc)
+        for uri, other in self.documents.items():
+            if other.path and uri != doc.uri:
+                try:
+                    project._load(other.path, [])
+                except Exception:
+                    pass
+        lines = _lines(doc.text)
+        pos = params.get('position') or {}
+        line = max(0, min(int(pos.get('line', 0)), len(lines) - 1))
+        char = max(0, int(pos.get('character', 0)))
+        line_text = lines[line]
+        word, _, _ = _word_at(line_text, char)
+        if not word:
+            return []
+        # Resolve the symbol under the cursor; if it exists, take the
+        # occurrences the reference walker found in this document.
+        target = self._reference_target(params)
+        if target is not None:
+            symbol = target['symbol']
+            highlights: list[dict] = []
+            seen: set[tuple[int, int]] = set()
+            # Walk this document with the same index so we get its refs.
+            module = doc_path = project.current if (
+                project.current.path == doc.path or project.current is not None) else project.current
+            walker = _ReferenceWalker(module, project)
+            for ref in walker.refs:
+                if ref.symbol != symbol:
+                    continue
+                key = (ref.line, ref.col)
+                if key in seen:
+                    continue
+                seen.add(key)
+                range_ = self._ref_range(target, ref)
+                highlights.append({
+                    'range': range_,
+                    'kind': 1 if ref.declaration else 2,
+                })
+            if highlights:
+                return highlights
+        # Fall back to highlighting every occurrence of the word as text.
+        highlights = []
+        for line_number, text in enumerate(lines):
+            for match in re.finditer(r'\b' + re.escape(word) + r'\b',
+                                    text):
+                start = _py_to_lsp_char(text, match.start())
+                end = _py_to_lsp_char(text, match.end())
+                highlights.append({
+                    'range': {
+                        'start': {'line': line_number,
+                                  'character': start},
+                        'end': {'line': line_number, 'character': end},
+                    },
+                    'kind': 1,
+                })
+        return highlights
 
     # -- document symbols --------------------------------------------------
 
