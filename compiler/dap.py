@@ -2087,6 +2087,8 @@ class DapAdapter:
             elif field_type == 'str' or field_type.startswith('List<'):
                 entry['value'] = self._display_value(path, field_type,
                                                      entry['value'])
+            elif field_type in ('f32', 'f64'):
+                entry['value'] = _format_float(entry['value'])
             reference = self._memory_reference(path, display=field)
             if reference:
                 entry['memoryReference'] = reference
@@ -2166,6 +2168,8 @@ class DapAdapter:
             elif type_name in ('str',) or type_name.startswith('List<'):
                 entry['value'] = self._display_value(f'v_{display}', type_name,
                                                      str(value))
+            elif type_name in ('f32', 'f64'):
+                entry['value'] = _format_float(entry['value'])
             reference = self._memory_reference(f'v_{display}', display)
             if reference:
                 entry['memoryReference'] = reference
@@ -2578,6 +2582,15 @@ def _remote_target(value):
             return None
         return host, port
     return None
+
+
+def _format_float(value: str) -> str:
+    """Show a float the way Vanta's print_f32 and print_f64 do."""
+    text = str(value).strip()
+    try:
+        return f'{float(text):.6f}'
+    except ValueError:
+        return text
 
 
 def _strip_pointer(value: str) -> str:

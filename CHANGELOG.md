@@ -2,6 +2,19 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.44.0 - 2026-10-22
+
+- Program arguments reach the program. `vanta run game.vnt -- --level 2`
+  passes `--level 2` to the program instead of failing, and `vanta debug`
+  hands the same arguments to GDB, quoted the way GDB expects, so
+  `show args` in a session shows them.
+- Floats read like Vanta. A `f32` or `f64` in the Variables view is shown
+  with the same six decimals `print_f32` and `print_f64` use, instead of the
+  raw binary value.
+- Docs and tests. 768 tests total, including tests for the argument
+  handling and the float formatting. Reverse debugging and MSVC/PDB support
+  remain future work.
+
 ## v0.43.0 - 2026-10-22
 
 - A Globals scope. The program's constants are listed in their own scope,

@@ -5,10 +5,21 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.43.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.44.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.44.0
+
+Debugger polish landed. The program's own arguments reach the program:
+`vanta run game.vnt -- --level 2` passes them on instead of failing, and
+`vanta debug` hands them to GDB the way GDB expects. A `f32` or `f64` in the
+Variables view is shown with the same six decimals `print_f32` uses. 768
+tests total, including tests for both.
+
+The next debugger milestone is deliberately separate again: reverse debugging
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.43.0
 
@@ -215,7 +226,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.44.0)
+## Next: language (candidate v0.45.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become

@@ -981,6 +981,14 @@ def _normalize_argv(argv):
     return argv
 
 
+def _gdb_quote(value: str) -> str:
+    """Quote a program argument the way GDB's `set args` expects."""
+    text = str(value)
+    if not text or any(ch in text for ch in ' \t"'):
+        return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    return text
+
+
 def cmd_debug(args):
     """Build a program with Vanta source locations and debug it with GDB."""
     source = args.source
@@ -1010,10 +1018,13 @@ def cmd_debug(args):
         sys.stderr.write(f'error: debug build failed: {exc}\n')
         return 1
     command = [gdb_path, '--quiet', build['exe']]
+    if args.prog_args:
+        # The program's own arguments go to GDB before the commands, so a
+        # `show args` in the session sees them.
+        command += ['-ex', 'set args ' + ' '.join(
+            _gdb_quote(item) for item in args.prog_args)]
     for item in args.exec:
         command += ['-ex', item]
-    if args.prog_args:
-        command += ['-ex', 'set args ' + ' '.join(args.prog_args)]
     env = build.get('env') or dict(os.environ)
     try:
         proc = subprocess.run(command, env=env)
@@ -1023,8 +1034,24 @@ def cmd_debug(args):
     return proc.returncode
 
 
+def _split_program_args(argv):
+    """Split the program's own arguments off at the first ``--``.
+
+    ``vanta run game.vnt -- --level 2`` passes ``--level 2`` to the program
+    and not to the compiler.
+    """
+    argv = list(argv)
+    if '--' in argv:
+        index = argv.index('--')
+        return argv[:index], argv[index + 1:]
+    return argv, []
+
+
 def main(argv):
     argv = _normalize_argv(argv)
+    program_args = []
+    if argv and argv[0] in ('run', 'debug'):
+        argv, program_args = _split_program_args(argv)
     ap = argparse.ArgumentParser(
         prog='vanta', description='Vanta language compiler',
         epilog='A bare source file runs it: vanta game.vnt')
@@ -1089,7 +1116,15 @@ def main(argv):
     p_debug.add_argument('prog_args', nargs='*',
                          help='arguments passed through to the program')
 
-    args = ap.parse_args(argv)
+    if argv and argv[0] in ('run', 'debug'):
+        # Anything the compiler does not know belongs to the program.
+        args, extra = ap.parse_known_args(argv)
+        if extra:
+            args.prog_args = list(args.prog_args) + extra
+    else:
+        args = ap.parse_args(argv)
+    if program_args:
+        args.prog_args = list(args.prog_args) + program_args
     if args.cmd == 'new':
         return cmd_new(args)
     if args.cmd == 'check':

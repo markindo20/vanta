@@ -1139,6 +1139,51 @@ class DapDataIntegrationTests(_DapSessionTestCase):
                         response)
 
 
+class FloatValueTests(unittest.TestCase):
+    def test_floats_read_like_vanta(self):
+        from compiler.dap import _format_float
+        self.assertEqual(_format_float('9.81000042'), '9.810000')
+        self.assertEqual(_format_float('1.5'), '1.500000')
+        self.assertEqual(_format_float('-0.25'), '-0.250000')
+
+    def test_a_value_that_is_not_a_number_is_kept(self):
+        from compiler.dap import _format_float
+        self.assertEqual(_format_float('{...}'), '{...}')
+        self.assertEqual(_format_float('0x1'), '0x1')
+
+
+class CommandLineArgumentTests(unittest.TestCase):
+    """The program's own arguments reach the program."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='vanta-args-')
+        self.source = os.path.join(self.tmp, 'main.vnt')
+        with open(self.source, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('func main() -> void:\n    print_i32(7)\n')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_dashed_argument_reaches_the_program(self):
+        result = subprocess.run(
+            [sys.executable, '-m', 'compiler', 'run', self.source,
+             '--', '--level', '2'],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('7', result.stdout)
+
+    def test_the_debugger_receives_the_program_arguments(self):
+        result = subprocess.run(
+            [sys.executable, '-m', 'compiler', 'debug', self.source,
+             '--build-dir', self.tmp, '--exec', 'show args',
+             '--', '--level', '2'],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--level', result.stdout)
+
+
 class RemoteTargetTests(unittest.TestCase):
     def test_a_host_and_port_pair(self):
         from compiler.dap import _remote_target
