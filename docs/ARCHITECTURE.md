@@ -126,7 +126,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    rejects MSVC because GDB cannot read PDB debug information.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
-   diagnostics, completion, hover, definition, and document symbols. The
+   diagnostics, completion, signature help, hover, definition, and document
+   symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -159,6 +160,16 @@ line scan otherwise; the scan also infers common constructor and
 `arena.list::<T>()` types. Builtin completions are generated from the type
 checker's registered function and builtin-struct tables, with a small explicit
 method table for runtime-backed types.
+
+Signature help (v0.50.0) scans the buffer forward to the cursor, tracking `#`
+comments and `"..."` strings, and keeps a stack of open parentheses so the
+innermost call wins. The callee's dotted path is resolved through the same
+project index as completion. Parameter labels are parsed from the declaration
+detail the index already stores (`func f(a: i32) -> i32`), so user functions,
+imported functions, builtins, function values, and the explicit method table
+share one format; struct constructors use their fields and enum payload
+members their types. The active parameter is the count of top-level commas
+between the opening parenthesis and the cursor.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -362,7 +373,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 796 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 807 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

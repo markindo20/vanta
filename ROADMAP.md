@@ -5,10 +5,18 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.49.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.50.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.50.0
+
+Signature help landed. An open call lists its parameters and highlights the one
+under the cursor, for local and imported functions, builtin functions, function
+values, builtin methods, struct constructors, and enum payload members. Nested
+and multi-line calls pick the innermost open call, and commas inside strings,
+comments, or nested brackets leave the highlight alone. 807 tests total.
 
 ## Landed in v0.49.0
 
@@ -279,7 +287,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.50.0)
+## Next: language (candidate v0.51.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become

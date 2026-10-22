@@ -1,2 +1,2 @@
 """Vanta compiler frontend (Python)."""
-VERSION = "0.49.0"
+VERSION = "0.50.0"

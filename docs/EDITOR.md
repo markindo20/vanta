@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.49.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.50.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -13,6 +13,10 @@ The server and debug adapter are part of the compiler package, so an installed
 - **Completion** for keywords, builtins, declarations, parameters, local
   variables, module aliases, enum members, struct fields, and the common
   builtin methods on `List`, `Arena`, `StrBuilder`, `Vec2`, `Vec3`, and `Quat`.
+- **Signature help** in an open call: the parameters are listed and the one
+  being typed is highlighted. It works for local and imported functions,
+  builtin functions, function values, builtin methods, struct constructors,
+  and enum payload members, including calls that span lines.
 - **Hover** signatures and types for functions, constants, types, parameters,
   locals, enum members, struct fields, and imported declarations.
 - **Go to definition** for functions, constants, types, parameters, locals,
@@ -65,11 +69,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.20.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.21.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.20.0.vsix
+code --install-extension vanta-language-0.21.0.vsix
 ```
 
 ### Build from source
@@ -78,7 +82,7 @@ code --install-extension vanta-language-0.20.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.20.0.vsix
+code --install-extension vanta-language-0.21.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -188,8 +192,8 @@ vanta lsp
 ```
 
 The server advertises UTF-16 positions, open/close document sync, full
-document changes, completion, hover, definition, and document symbols. It does
-not require a workspace root to start.
+document changes, completion, signature help, hover, definition, and document
+symbols. It does not require a workspace root to start.
 
 For debugging, any DAP client can launch:
 

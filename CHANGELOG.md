@@ -2,6 +2,30 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.50.0 - 2026-10-22
+
+- Signature help. An open call now lists its parameters and highlights the one
+  being typed. The server answers `textDocument/signatureHelp` and asks the
+  client to open it on `(` and again on every `,`.
+- It covers local and imported functions (`add(`, `math.add(`), builtin
+  functions, function values held in parameters or locals, builtin methods
+  (`xs.push(`), user struct constructors (`Enemy(`), and enum payload members
+  (`Shape.label(`). Nested calls show the innermost signature, calls that span
+  lines work, and a comma inside a string, a `#` comment, or nested brackets
+  does not move the highlight.
+- The scan reads the buffer left to right with the lexer's rules for comments
+  and strings, so it keeps working while a line is half typed. Callees are
+  resolved through the existing project index, which means an unsaved imported
+  file offers the same signatures completion already uses. A `func` declaration
+  line does not offer its own signature.
+- Tests: 807 in total. New tests cover the capability, a user function with the
+  first and second parameter active, a call split across lines, nested calls,
+  commas in strings and comments, struct construction, builtin functions and
+  methods, imported functions, enum payloads, function-typed values, a
+  declaration line, and a position outside any call.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP, and this
+  file describe signature help. The VS Code extension is 0.21.0.
+
 ## v0.49.0 - 2026-10-22
 
 - A distribution GDB is found. The probe looked for an upper-case `GDB` in

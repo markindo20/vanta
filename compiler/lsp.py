@@ -882,6 +882,192 @@ def _split_top(text: str, sep: str = ',') -> list[str]:
     return [p for p in parts if p]
 
 
+_SIGNATURE_RE = re.compile(
+    r'^(?:(?:system|extern)\s+)?(?:func\s+)?'
+    r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?'
+    r'\s*(?:<[^<>()]*>)?\s*\((?P<params>.*)\)'
+    r'(?:\s*->\s*(?P<ret>.+))?$')
+
+
+def _parse_signature(detail: str) -> Optional[dict]:
+    """Split a detail such as ``func f(a: i32) -> i32`` into parameters."""
+    text = detail.strip()
+    match = _SIGNATURE_RE.match(text)
+    if match is None:
+        return None
+    return {
+        'label': text,
+        'params': _split_top(match.group('params')),
+        'ret': (match.group('ret') or '').strip(),
+    }
+
+
+_FUNC_TYPE_RE = re.compile(
+    r'^func\((?P<params>.*)\)(?:\s*->\s*(?P<ret>.+))?$')
+
+
+def _signature_from_function_type(type_text: str) -> Optional[dict]:
+    """Build a signature from a value's ``func(...) -> ...`` type."""
+    text = type_text.strip()
+    match = _FUNC_TYPE_RE.match(text)
+    if match is None:
+        return None
+    return {
+        'label': text,
+        'params': _split_top(match.group('params')),
+        'ret': (match.group('ret') or '').strip(),
+    }
+
+
+def _offset_at(text: str, line: int, char: int) -> int:
+    """Convert a 0-based LSP position into a Python string offset."""
+    line, py_char = _position_to_py(text, line, char)
+    offset = 0
+    for _ in range(line):
+        newline = text.find('\n', offset)
+        if newline < 0:
+            return len(text)
+        offset = newline + 1
+    return min(offset + py_char, len(text))
+
+
+def _skip_comment(text: str, index: int, limit: int) -> int:
+    newline = text.find('\n', index)
+    if newline < 0 or newline >= limit:
+        return limit
+    return newline + 1
+
+
+def _skip_string(text: str, index: int, limit: int) -> int:
+    """``index`` is the opening quote; return the index just past the string."""
+    index += 1
+    while index < limit and text[index] != '"':
+        if text[index] == '\\':
+            index += 1
+        index += 1
+    return index + 1
+
+
+_DECL_HEAD_RE = re.compile(
+    r'\b(?:func|system)\s+[A-Za-z_]\w*(?:<[^<>]*>)?$')
+
+
+def _in_declaration(text: str, open_index: int) -> bool:
+    """True when the paren opens a ``func``/``system`` declaration."""
+    line_start = text.rfind('\n', 0, open_index) + 1
+    return _DECL_HEAD_RE.search(text[line_start:open_index].rstrip()) \
+        is not None
+
+
+def _callee_path(text: str, open_index: int) -> Optional[list[str]]:
+    """Return the dotted name written immediately before an opening paren."""
+    i = open_index - 1
+    while i >= 0 and text[i] in ' \t':
+        i -= 1
+    end = i + 1
+    while i >= 0 and (text[i].isalnum() or text[i] == '_'):
+        i -= 1
+    name = text[i + 1:end]
+    if not name or not (name[0].isalpha() or name[0] == '_'):
+        return None
+    parts = [name]
+    while i >= 0 and text[i] == '.':
+        j = i - 1
+        while j >= 0 and text[j] in ' \t':
+            j -= 1
+        part_end = j + 1
+        while j >= 0 and (text[j].isalnum() or text[j] == '_'):
+            j -= 1
+        part = text[j + 1:part_end]
+        if not part or not (part[0].isalpha() or part[0] == '_'):
+            break
+        parts.insert(0, part)
+        i = j
+    return parts
+
+
+def _call_context(text: str, offset: int) \
+        -> Optional[tuple[int, Optional[list[str]]]]:
+    """Find the innermost call left open at ``offset``.
+
+    The scan runs forward so that parentheses inside comments and strings are
+    ignored, and so that nested calls pop in the right order.
+    """
+    stack: list[int] = []
+    names: list[Optional[list[str]]] = []
+    limit = max(0, min(offset, len(text)))
+    i = 0
+    while i < limit:
+        ch = text[i]
+        if ch == '#':
+            i = _skip_comment(text, i, limit)
+            continue
+        if ch == '"':
+            i = _skip_string(text, i, limit)
+            continue
+        if ch == '(':
+            stack.append(i)
+            names.append(_callee_path(text, i))
+        elif ch == ')' and stack:
+            stack.pop()
+            names.pop()
+        i += 1
+    if not stack:
+        return None
+    return stack[-1], names[-1]
+
+
+def _active_parameter(text: str, open_index: int, offset: int) -> int:
+    """Count top-level commas between an opening paren and the cursor."""
+    depth = 0
+    active = 0
+    limit = max(open_index + 1, min(offset, len(text)))
+    i = open_index + 1
+    while i < limit:
+        ch = text[i]
+        if ch == '#':
+            i = _skip_comment(text, i, limit)
+            continue
+        if ch == '"':
+            i = _skip_string(text, i, limit)
+            continue
+        if ch in '([{':
+            depth += 1
+        elif ch in ')]}':
+            depth = max(0, depth - 1)
+        elif ch == ',' and depth == 0:
+            active += 1
+        i += 1
+    return active
+
+
+def _struct_signature(decl: DeclInfo) -> dict:
+    params = [f'{f.name}: {f.type_name}' for f in decl.fields]
+    generics = f'<{", ".join(decl.type_params)}>' if decl.type_params else ''
+    return {
+        'label': f'{decl.name}{generics}(' + ', '.join(params) + ')',
+        'params': params,
+        'ret': decl.name,
+    }
+
+
+def _member_signature(decl: DeclInfo, member: str) -> Optional[dict]:
+    if decl.kind != 'enum':
+        return None
+    for m in decl.members:
+        if m.name != member:
+            continue
+        payload = _split_top(m.payload)
+        if not payload:
+            return None
+        return {
+            'label': f'{decl.name}.{m.name}(' + ', '.join(payload) + ')',
+            'params': payload,
+            'ret': decl.name,
+        }
+    return None
+
+
 def _walk_collect(node: Any, kinds: tuple[type, ...]) -> list[Any]:
     found: list[Any] = []
     _walk(node, lambda n: found.append(n) if isinstance(n, kinds) else None)
@@ -1171,6 +1357,10 @@ class LanguageServer:
                         'triggerCharacters': ['.', ':', '<'],
                         'resolveProvider': False,
                     },
+                    'signatureHelpProvider': {
+                        'triggerCharacters': ['(', ','],
+                        'retriggerCharacters': [','],
+                    },
                     'hoverProvider': True,
                     'definitionProvider': True,
                     'documentSymbolProvider': True,
@@ -1192,6 +1382,8 @@ class LanguageServer:
             self._document_event(method, params)
         elif method == 'textDocument/completion':
             self._response(msg_id, self._completion(params))
+        elif method == 'textDocument/signatureHelp':
+            self._response(msg_id, self._signature_help(params))
         elif method == 'textDocument/hover':
             self._response(msg_id, self._hover(params))
         elif method == 'textDocument/definition':
@@ -1473,6 +1665,88 @@ class LanguageServer:
                                    sort=f'1_{name.lower()}'))
             return items
         return []
+
+    # -- signature help ----------------------------------------------------
+
+    def _signature_help(self, params: dict) -> Optional[dict]:
+        doc = self._doc(params)
+        if doc is None:
+            return None
+        pos = params.get('position') or {}
+        line = pos.get('line', 0)
+        char = pos.get('character', 0)
+        offset = _offset_at(doc.text, line, char)
+        context = _call_context(doc.text, offset)
+        if context is None:
+            return None
+        open_index, path = context
+        if not path or _in_declaration(doc.text, open_index):
+            return None
+        project = self._project(doc)
+        locals_ = project.local_symbols(line, char)
+        signature = self._resolve_signature(project, locals_, path)
+        if signature is None:
+            return None
+        parameters = [{'label': p} for p in signature['params']]
+        active = _active_parameter(doc.text, open_index, offset)
+        if parameters:
+            active = min(active, len(parameters) - 1)
+        else:
+            active = 0
+        return {
+            'signatures': [{
+                'label': signature['label'],
+                'parameters': parameters,
+                'activeParameter': active,
+            }],
+            'activeSignature': 0,
+            'activeParameter': active,
+        }
+
+    def _resolve_signature(self, project: _ProjectIndex,
+                           locals_: dict[str, LocalInfo],
+                           path: list[str]) -> Optional[dict]:
+        if len(path) == 1:
+            name = path[0]
+            decl = project.decl_by_name(name)
+            if decl is not None:
+                if decl.kind in ('func', 'extern_func'):
+                    return _parse_signature(decl.detail)
+                if decl.kind == 'struct':
+                    return _struct_signature(decl)
+            builtin = _builtin_funcs().get(name)
+            if builtin is not None:
+                return _parse_signature(builtin)
+            local = locals_.get(name)
+            if local is not None:
+                return _signature_from_function_type(local.type_name)
+            return None
+
+        obj, member = path[:-1], path[-1]
+        local_type = None
+        if len(obj) == 1 and obj[0] in locals_:
+            local_type = locals_[obj[0]].type_name
+        decl = project.resolve_object(obj, local_type)
+        if decl is not None:
+            signature = _member_signature(decl, member)
+            if signature is not None:
+                return signature
+        if len(obj) == 1:
+            module = project.module_for_alias(obj[0])
+            if module is not None:
+                for d in module.public_decls():
+                    if d.name != member:
+                        continue
+                    if d.kind in ('func', 'extern_func'):
+                        return _parse_signature(d.detail)
+                    if d.kind == 'struct':
+                        return _struct_signature(d)
+        base = _base_type_name(local_type) if local_type else ''
+        if base:
+            for method in _BUILTIN_METHODS.get(base, []):
+                if method[0] == member:
+                    return _parse_signature(method[2])
+        return None
 
     # -- hover / definition ------------------------------------------------
 

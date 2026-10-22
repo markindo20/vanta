@@ -79,6 +79,10 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['documentSymbolProvider'])
         self.assertEqual(caps['textDocumentSync']['change'], 1)
         self.assertIn('.', caps['completionProvider']['triggerCharacters'])
+        self.assertEqual(
+            caps['signatureHelpProvider']['triggerCharacters'], ['(', ','])
+        self.assertEqual(
+            caps['signatureHelpProvider']['retriggerCharacters'], [','])
         self.assertEqual(result['serverInfo']['name'], 'vanta-lsp')
 
     def test_did_open_publishes_diagnostic_and_change_clears_it(self):
@@ -214,6 +218,175 @@ func main() -> void:
         labels = self.completion_labels(uri, 2, len('    math.'))
         self.assertIn('add', labels)
         self.assertEqual(labels['add']['kind'], 3)
+
+    def signature(self, uri, line, character):
+        return self.request('textDocument/signatureHelp', {
+            'textDocument': {'uri': uri},
+            'position': {'line': line, 'character': character},
+        })[0]['result']
+
+    def test_signature_help_for_user_function(self):
+        path = self.write('main.vnt', '''\
+func add(a: i32, b: i32) -> i32:
+    return a + b
+
+func main() -> void:
+    let total: i32 = add(1, 2)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 4, len('    let total: i32 = add('))
+        signature = result['signatures'][0]
+        self.assertEqual(signature['label'],
+                         'func add(a: i32, b: i32) -> i32')
+        self.assertEqual([p['label'] for p in signature['parameters']],
+                         ['a: i32', 'b: i32'])
+        self.assertEqual(signature['activeParameter'], 0)
+        self.assertEqual(result['activeParameter'], 0)
+
+        result = self.signature(uri, 4, len('    let total: i32 = add(1,'))
+        self.assertEqual(result['signatures'][0]['activeParameter'], 1)
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_across_lines(self):
+        path = self.write('main.vnt', '''\
+func add(a: i32, b: i32) -> i32:
+    return a + b
+
+func main() -> void:
+    let total: i32 = add(
+        1,
+        2)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 6, len('        '))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func add(a: i32, b: i32) -> i32')
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_picks_innermost_call(self):
+        path = self.write('main.vnt', '''\
+func add(a: i32, b: i32) -> i32:
+    return a + b
+
+func main() -> void:
+    print_i32(add(1, 2))
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 4, len('    print_i32(add(1,'))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func add(a: i32, b: i32) -> i32')
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_ignores_commas_in_strings_and_comments(self):
+        path = self.write('main.vnt', '''\
+func tag(name: str, count: i32) -> void:
+    return
+
+func main() -> void:
+    tag("a,b", 2)  # tag(9, 8
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 4, len('    tag("a,b", '))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func tag(name: str, count: i32) -> void')
+        self.assertEqual(result['activeParameter'], 1)
+        line = '    tag("a,b", 2)  # tag(9, 8'
+        self.assertIsNone(self.signature(uri, 4, len(line)))
+
+    def test_signature_help_for_struct_constructor(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+    name: str
+
+func main() -> void:
+    let e: Enemy = Enemy(hp: 3, name: "orc")
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 5,
+                                len('    let e: Enemy = Enemy(hp: 3,'))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'Enemy(hp: i32, name: str)')
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_for_builtin_function_and_method(self):
+        path = self.write('main.vnt', '''\
+func take(xs: List<i32>) -> void:
+    xs.push(2)
+
+func main() -> void:
+    print_i32(1)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 1, len('    xs.push('))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func push(value: T) -> void')
+        result = self.signature(uri, 4, len('    print_i32('))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func print_i32(v: i32) -> void')
+
+    def test_signature_help_for_imported_function(self):
+        self.write('math.vnt', '''\
+module math
+pub func add(a: i32, b: i32) -> i32:
+    return a + b
+''')
+        path = self.write('main.vnt', '''\
+import "math.vnt" as math
+func main() -> void:
+    math.add(1, 2)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 2, len('    math.add(1,'))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func add(a: i32, b: i32) -> i32')
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_for_enum_payload(self):
+        path = self.write('main.vnt', '''\
+enum Shape:
+    circle(f64)
+    label(str, i32)
+
+func main() -> void:
+    let s: Shape = Shape.label("x", 2)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 5,
+                                len('    let s: Shape = Shape.label("x",'))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'Shape.label(str, i32)')
+        self.assertEqual([p['label'] for p in
+                          result['signatures'][0]['parameters']],
+                         ['str', 'i32'])
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_signature_help_returns_null_without_a_call(self):
+        path = self.write('main.vnt',
+                          'func main() -> void:\n    let x: i32 = 1\n')
+        uri = self.open(path)
+        self.assertIsNone(
+            self.signature(uri, 1, len('    let x: i32 = 1')))
+
+    def test_signature_help_skips_declarations(self):
+        path = self.write('main.vnt', '''\
+func add(a: i32, b: i32) -> i32:
+    return a + b
+''')
+        uri = self.open(path)
+        self.assertIsNone(
+            self.signature(uri, 0, len('func add(a: i32,')))
+
+    def test_signature_help_for_function_value(self):
+        path = self.write('main.vnt', '''\
+func apply(cb: func(i32, i32) -> i32, a: i32) -> i32:
+    return cb(a, a)
+''')
+        uri = self.open(path)
+        result = self.signature(uri, 1, len('    return cb('))
+        self.assertEqual(result['signatures'][0]['label'],
+                         'func(i32, i32) -> i32')
+        self.assertEqual(result['activeParameter'], 0)
 
     def test_hover_function_and_local(self):
         path = self.write('main.vnt', '''\

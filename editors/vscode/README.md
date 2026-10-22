@@ -10,6 +10,8 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
 - **Completion** for keywords, builtins, declarations, locals, module aliases,
   enum members, struct fields, and builtin methods on `List`, `Arena`,
   `StrBuilder`, `Vec2`, `Vec3`, and `Quat`.
+- **Signature help** in an open call for functions, builtin methods, struct
+  constructors, and enum payloads.
 - **Hover** signatures and types for functions, declarations, locals, and
   members.
 - **Go to definition** for functions, constants, types, parameters, locals,
@@ -51,10 +53,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.20.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.21.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.20.0.vsix
+code --install-extension vanta-language-0.21.0.vsix
 ```
 
 ### Build it yourself
@@ -65,7 +67,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.20.0.vsix
+code --install-extension vanta-language-0.21.0.vsix
 ```
 
 ### Run from source
