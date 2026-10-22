@@ -7,13 +7,14 @@ the very common case where the user is in the middle of typing and the buffer
 does not parse yet.
 
 Only the pieces of LSP that the VS Code client needs are implemented:
-document sync, diagnostics, completion, hover, go-to-definition, and document
-symbols.  The server speaks JSON-RPC over stdin/stdout with the usual
-``Content-Length`` framing.
+document sync, diagnostics, completion, hover, go-to-definition, references,
+rename, quick fixes, and document symbols.  The server speaks JSON-RPC over
+stdin/stdout with the usual ``Content-Length`` framing.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -30,7 +31,6 @@ from .lexer import LexError, Lexer
 from .loader import LoadError, STDLIB_DIR, load_program
 from .tokens import KEYWORDS
 from .parser import ParseError, Parser
-from .tokens import KEYWORDS
 from .type_checker import CheckError, TypeChecker
 from .typesys import PRIM_TYPES
 
@@ -191,6 +191,15 @@ def _word_at(line_text: str, char: int) -> tuple[str, int, int]:
         _py_to_lsp_char(line_text, end)
 
 
+def _ranges_overlap(first: dict, second: dict) -> bool:
+    def key(value: Optional[dict]) -> tuple[int, int]:
+        value = value or {}
+        return (int(value.get('line', 0)), int(value.get('character', 0)))
+
+    return (key(first.get('start')) <= key(second.get('end'))
+            and key(second.get('start')) <= key(first.get('end')))
+
+
 def _object_before_dot(line_text: str, word_start: int) -> Optional[list[str]]:
     """Return the dotted object path immediately before a member word."""
     prefix = line_text[:word_start]
@@ -210,9 +219,10 @@ def _find_name_pos(source_lines: list[str], pos: A.Pos, name: str) \
         return pos.line, pos.col
     line = source_lines[pos.line - 1]
     start = max(0, pos.col - 1)
-    idx = line.find(name, start)
-    if idx < 0:
-        idx = line.find(name)
+    match = re.search(r'\b' + re.escape(name) + r'\b', line[start:])
+    if match is not None:
+        return pos.line, start + match.start() + 1
+    idx = line.find(name)
     if idx < 0:
         return pos.line, pos.col
     return pos.line, idx + 1
@@ -2069,6 +2079,7 @@ class LanguageServer:
                     'definitionProvider': True,
                     'referencesProvider': True,
                     'renameProvider': {'prepareProvider': True},
+                    'codeActionProvider': {'codeActionKinds': ['quickfix']},
                     'documentSymbolProvider': True,
                 },
                 'serverInfo': {
@@ -2100,6 +2111,8 @@ class LanguageServer:
             self._response(msg_id, self._prepare_rename(params))
         elif method == 'textDocument/rename':
             self._response(msg_id, self._rename(params))
+        elif method == 'textDocument/codeAction':
+            self._response(msg_id, self._code_actions(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -2763,6 +2776,412 @@ class LanguageServer:
             edits.sort(key=lambda e: (
                 e['range']['start']['line'], e['range']['start']['character']))
         return {'changes': changes}
+
+    # -- code actions ------------------------------------------------------
+
+    def _code_actions(self, params: dict) -> list[dict]:
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        context = params.get('context') or {}
+        requested = params.get('range') or {}
+        only = context.get('only')
+        if isinstance(only, list) and only and 'quickfix' not in only:
+            return []
+        diagnostics = self._range_diagnostics(doc, requested)
+        supplied = context.get('diagnostics')
+        if isinstance(supplied, list) and supplied:
+            # A client only sends the diagnostics that overlap the requested
+            # range, and a missing member is reported on the dot rather than
+            # on the word, so the server's own list stays authoritative and
+            # the client's list only fills in what the server cannot see.
+            extra = [diagnostic for diagnostic in supplied
+                     if isinstance(diagnostic, dict)
+                     and self._diagnostic_near(diagnostic, requested)]
+            diagnostics = self._merge_diagnostics(diagnostics, extra)
+        project = self._project(doc)
+        actions: list[dict] = []
+        seen: set[str] = set()
+        for diagnostic in diagnostics:
+            if not isinstance(diagnostic, dict):
+                continue
+            for action in self._quick_fixes(diagnostic, doc, project):
+                key = action['title'] + json.dumps(action['edit'],
+                                                   sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                actions.append(action)
+        return actions
+
+    def _range_diagnostics(self, doc: Document,
+                           requested: dict) -> list[dict]:
+        if doc.path is None:
+            return []
+        path = os.path.abspath(doc.path)
+        diagnostics = self._diagnostics(path).get(path, [])
+        if not requested:
+            return diagnostics
+        overlapping = [diagnostic for diagnostic in diagnostics
+                       if _ranges_overlap(diagnostic.get('range') or {},
+                                          requested)]
+        if overlapping:
+            return overlapping
+        # A missing member is reported on the dot while the cursor sits on
+        # the identifier, so fall back to every diagnostic on the same line.
+        start = requested.get('start') or {}
+        line = int(start.get('line', 0))
+        return [diagnostic for diagnostic in diagnostics
+                if int(((diagnostic.get('range') or {}).get('start') or {})
+                       .get('line', -1)) == line]
+
+    def _diagnostic_near(self, diagnostic: dict, requested: dict) -> bool:
+        """True when a diagnostic is close enough to the requested range."""
+        range_ = diagnostic.get('range') or {}
+        if not requested:
+            return True
+        if _ranges_overlap(range_, requested):
+            return True
+        start = requested.get('start') or {}
+        line = int(start.get('line', 0))
+        other = range_.get('start') or {}
+        return int(other.get('line', -1)) == line
+
+    def _merge_diagnostics(self, own: list[dict],
+                           supplied: list[dict]) -> list[dict]:
+        """Combine the server's diagnostics with the ones a client sent."""
+        merged = list(own)
+        seen = {(str(d.get('message') or ''),
+                 json.dumps(d.get('range') or {}, sort_keys=True))
+                for d in own}
+        for diagnostic in supplied:
+            if not isinstance(diagnostic, dict):
+                continue
+            key = (str(diagnostic.get('message') or ''),
+                   json.dumps(diagnostic.get('range') or {}, sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(diagnostic)
+        return merged
+
+    def _quick_fixes(self, diagnostic: dict, doc: Document,
+                     project: _ProjectIndex) -> list[dict]:
+        message = str(diagnostic.get('message') or '')
+        match = re.fullmatch(r"unknown name '([^']+)'", message)
+        if match is not None:
+            return self._name_fixes(diagnostic, doc, project,
+                                    match.group(1))
+        match = re.fullmatch(r"type \S+ has no field '([^']+)'", message)
+        if match is not None:
+            return self._member_fixes(diagnostic, doc, project,
+                                      match.group(1), 'field')
+        match = re.fullmatch(r"enum '[^']+' has no member '([^']+)'",
+                             message)
+        if match is not None:
+            return self._member_fixes(diagnostic, doc, project,
+                                      match.group(1), 'enum')
+        match = re.fullmatch(r"unknown field '([^']+)'", message)
+        if match is not None:
+            return self._label_fixes(diagnostic, doc, project,
+                                     match.group(1))
+        if message == 'invalid assignment target':
+            return self._mutability_fixes(diagnostic, doc, project)
+        return []
+
+    def _name_fixes(self, diagnostic: dict, doc: Document,
+                    project: _ProjectIndex, name: str) -> list[dict]:
+        range_ = diagnostic.get('range') or {}
+        start = range_.get('start') or {}
+        end = range_.get('end') or {}
+        line = int(start.get('line', 0))
+        char = int(start.get('character', 0))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        index = _lsp_to_py_char(line_text, char)
+        stop = _lsp_to_py_char(line_text, int(end.get('character', 0)))
+        if line_text[index:stop] != name:
+            # A client may send a stale range; find the name on the line.
+            index = self._find_word(line_text, name, index)
+            if index is None:
+                return []
+        range_ = self._word_range(line_text, line, index, name)
+        return self._suggest(doc, diagnostic, range_, name,
+                             self._visible_names(project, line, char))
+
+    def _find_word(self, line_text: str, word: str,
+                   start: int) -> Optional[int]:
+        """The index of the first whole-word occurrence at or after start."""
+        for match in re.finditer(r'\b' + re.escape(word) + r'\b', line_text):
+            if match.start() >= start:
+                return match.start()
+        return None
+
+    def _visible_names(self, project: _ProjectIndex, line: int,
+                       char: int) -> set[str]:
+        names = set(project.local_symbols(line, char))
+        for decl in project.visible_decls():
+            names.add(decl.name)
+        for imp in project.current.imports:
+            if imp.alias:
+                names.add(imp.alias)
+            elif imp.target is not None:
+                names.update(d.name for d in imp.target.public_decls())
+        names.update(_builtin_funcs())
+        names.update(_builtin_type_names())
+        return names
+
+    def _member_fixes(self, diagnostic: dict, doc: Document,
+                      project: _ProjectIndex, word: str,
+                      kind: str) -> list[dict]:
+        range_ = diagnostic.get('range') or {}
+        start = range_.get('start') or {}
+        end = range_.get('end') or {}
+        line = int(start.get('line', 0))
+        char = int(start.get('character', 0))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        # Diagnostics for a missing member sit on the dot; walk to the
+        # identifier that follows it.
+        index = _lsp_to_py_char(line_text,
+                                int(end.get('character', 0)))
+        while index < len(line_text) and not (
+                line_text[index].isalnum() or line_text[index] == '_'):
+            index += 1
+        start_index = index
+        while index < len(line_text) and (
+                line_text[index].isalnum() or line_text[index] == '_'):
+            index += 1
+        if line_text[start_index:index] != word:
+            return []
+        message = str(diagnostic.get('message') or '')
+        decl = self._receiver_decl(project, line_text, start_index, line,
+                                    char)
+        if decl is not None:
+            if kind == 'enum':
+                candidates = {member.name for member in decl.members}
+            else:
+                candidates = {field_info.name for field_info in decl.fields}
+        else:
+            if kind == 'enum':
+                match = re.search(r"enum '([^']+)'", message)
+                candidates = self._enum_members(
+                    project, match.group(1) if match is not None else '')
+            else:
+                match = re.search(r'type (\S+) has no field', message)
+                candidates = self._struct_fields(
+                    project, match.group(1) if match is not None else '')
+        range_ = self._word_range(line_text, line, start_index, word)
+        return self._suggest(doc, diagnostic, range_, word, candidates)
+
+    def _receiver_decl(self, project: _ProjectIndex, line_text: str,
+                       dot: int, line: int, char: int) -> Optional[DeclInfo]:
+        """Resolve the type of the receiver in front of a missing member."""
+        path = _object_before_dot(line_text, dot)
+        if path is None:
+            return None
+        if len(path) == 1:
+            name = path[0]
+            info = project.local_symbols(line, char).get(name)
+            if info is not None and info.type_name:
+                decl = self._type_decl(project, info.type_name)
+                if decl is not None:
+                    return decl
+            return project.type_by_name(name)
+        module = project.alias_module(path[0])
+        if module is not None:
+            return project.type_in_module(module, path[-1])
+        return project.type_by_name(path[-1])
+
+    def _type_decl(self, project: _ProjectIndex,
+                   type_name: str) -> Optional[DeclInfo]:
+        name = _base_type_name(type_name)
+        decl = project.type_by_name(name)
+        if decl is not None:
+            return decl
+        if '.' in name:
+            qualifier, _dot, tail = name.rpartition('.')
+            module = project.alias_module(qualifier)
+            if module is not None:
+                return project.type_in_module(module, tail)
+        return None
+
+    def _label_fixes(self, diagnostic: dict, doc: Document,
+                     project: _ProjectIndex, word: str) -> list[dict]:
+        range_ = diagnostic.get('range') or {}
+        start = range_.get('start') or {}
+        start_line = int(start.get('line', 0))
+        start_char = int(start.get('character', 0))
+        lines = _lines(doc.text)
+        callee_line = _line_at(lines, start_line)
+        callee_start = _lsp_to_py_char(callee_line, start_char)
+        label = None
+        for offset in range(0, 8):
+            line = start_line + offset
+            if line >= len(lines):
+                break
+            text = _line_at(lines, line)
+            begin = callee_start if offset == 0 else 0
+            match = re.search(r'\b' + re.escape(word) + r'\s*:',
+                              text[begin:])
+            if match is not None:
+                label = (line, begin + match.start(), text)
+                break
+        if label is None:
+            return []
+        line, index, line_text = label
+        candidates = self._constructor_fields(
+            project, self._callee_path(callee_line, start_char))
+        range_ = self._word_range(line_text, line, index, word)
+        return self._suggest(doc, diagnostic, range_, word, candidates)
+
+    def _callee_path(self, line_text: str, char: int) -> Optional[list[str]]:
+        """The dotted constructor path a diagnostic points at."""
+        index = _lsp_to_py_char(line_text, char)
+        if index < len(line_text) and line_text[index] == '.':
+            # A qualified constructor is reported on its dot.
+            start = index + 1
+            end = start
+            while end < len(line_text) and (
+                    line_text[end].isalnum() or line_text[end] == '_'):
+                end += 1
+            name = line_text[start:end]
+            head = _object_before_dot(line_text, start)
+            if head is None:
+                return [name] if name else None
+            return head + [name]
+        match = re.match(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*',
+                         line_text[index:])
+        if match is None:
+            return None
+        return match.group(0).split('.')
+
+    def _mutability_fixes(self, diagnostic: dict, doc: Document,
+                          project: _ProjectIndex) -> list[dict]:
+        range_ = diagnostic.get('range') or {}
+        start = range_.get('start') or {}
+        line = int(start.get('line', 0))
+        char = int(start.get('character', 0))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        word, _word_start, _word_end = _word_at(line_text, char)
+        if not word:
+            return []
+        info = project.local_symbols(line, char).get(word)
+        # Parameters cannot be changed, and loop variables have no keyword;
+        # only an immutable `let` local gets this fix.
+        if info is None or info.kind != 'var' or info.mutable:
+            return []
+        declaration = _line_at(lines, info.name_line - 1)
+        keyword = re.search(r'\b(let|mut)\s+' + re.escape(word) + r'\b',
+                            declaration)
+        if keyword is None or keyword.group(1) != 'let':
+            return []
+        edit_range = {
+            'start': {'line': info.name_line - 1,
+                      'character': _py_to_lsp_char(
+                          declaration, keyword.start(1))},
+            'end': {'line': info.name_line - 1,
+                    'character': _py_to_lsp_char(
+                        declaration, keyword.end(1))},
+        }
+        return [self._action(f"Make '{word}' mutable", doc.uri, edit_range,
+                             'mut', diagnostic, preferred=True)]
+
+    def _constructor_fields(self, project: _ProjectIndex,
+                            path: Optional[list[str]]) -> set[str]:
+        if not path:
+            return self._all_field_names(project)
+        decl = None
+        if len(path) == 1:
+            decl = project.type_by_name(path[0])
+        else:
+            module = project.alias_module(path[0])
+            if module is not None:
+                decl = project.type_in_module(module, path[-1])
+            if decl is None:
+                decl = project.type_by_name(path[-1])
+        if decl is not None and decl.kind == 'struct':
+            return {field_info.name for field_info in decl.fields}
+        return self._all_field_names(project)
+
+    def _struct_fields(self, project: _ProjectIndex, name: str) -> set[str]:
+        builtin = _BUILTIN_FIELDS.get(name)
+        if builtin is not None:
+            return {field_name for field_name, _type in builtin}
+        decl = project.type_by_name(name)
+        if decl is None and '.' in name:
+            qualifier, _dot, tail = name.rpartition('.')
+            module = project.alias_module(qualifier)
+            if module is not None:
+                decl = project.type_in_module(module, tail)
+        if decl is not None and decl.kind == 'struct':
+            return {field_info.name for field_info in decl.fields}
+        return self._all_field_names(project)
+
+    def _enum_members(self, project: _ProjectIndex, name: str) -> set[str]:
+        decl = project.type_by_name(name)
+        if decl is not None and decl.kind == 'enum':
+            return {member.name for member in decl.members}
+        return self._all_member_names(project)
+
+    def _all_field_names(self, project: _ProjectIndex) -> set[str]:
+        names: set[str] = set()
+        modules = list(project.cache.values()) + [project.current]
+        for module in modules:
+            for decl in module.decls:
+                if decl.kind == 'struct':
+                    names.update(field_info.name
+                                 for field_info in decl.fields)
+        for fields_ in _BUILTIN_FIELDS.values():
+            names.update(field_name for field_name, _type in fields_)
+        return names
+
+    def _all_member_names(self, project: _ProjectIndex) -> set[str]:
+        names: set[str] = set()
+        modules = list(project.cache.values()) + [project.current]
+        for module in modules:
+            for decl in module.decls:
+                if decl.kind == 'enum':
+                    names.update(member.name for member in decl.members)
+        return names
+
+    def _suggest(self, doc: Document, diagnostic: dict, range_: dict,
+                 word: str, candidates: set[str]) -> list[dict]:
+        actions: list[dict] = []
+        options = [name for name in sorted(candidates) if name != word]
+        for position, candidate in enumerate(difflib.get_close_matches(
+                word, options, n=3, cutoff=0.6)):
+            actions.append(self._action(
+                f"Change '{word}' to '{candidate}'", doc.uri, range_,
+                candidate, diagnostic, preferred=position == 0))
+        return actions
+
+    def _word_range(self, line_text: str, line: int, start: int,
+                    word: str) -> dict:
+        return {
+            'start': {'line': line,
+                      'character': _py_to_lsp_char(line_text, start)},
+            'end': {'line': line,
+                    'character': _py_to_lsp_char(line_text,
+                                                 start + len(word))},
+        }
+
+    def _action(self, title: str, uri: str, range_: dict, new_text: str,
+                diagnostic: Optional[dict],
+                preferred: bool = False) -> dict:
+        action = {
+            'title': title,
+            'kind': 'quickfix',
+            'edit': {'changes': {uri: [
+                {'range': range_, 'newText': new_text},
+            ]}},
+        }
+        if diagnostic is not None:
+            action['diagnostics'] = [diagnostic]
+        if preferred:
+            action['isPreferred'] = True
+        return action
 
     # -- document symbols --------------------------------------------------
 

@@ -19,6 +19,10 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
 - **Find All References** and **Rename Symbol**, scope-aware and across the
   files the language server can load. Rename brings constructor labels, match
   patterns, module aliases, and type annotations along.
+- **Quick fixes** under the light bulb: unknown names suggest the closest
+  visible name, missing struct fields and enum members suggest the nearest
+  member of that type, and an assignment to an immutable local offers
+  `let` to `mut`.
 - **Document symbols** / outline view for functions, structs, enums, fields,
   and enum members.
 - **Debugging** with the `vanta` debugger type: line, function, conditional,
@@ -56,10 +60,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.22.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.23.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.22.0.vsix
+code --install-extension vanta-language-0.23.0.vsix
 ```
 
 ### Build it yourself
@@ -70,7 +74,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.22.0.vsix
+code --install-extension vanta-language-0.23.0.vsix
 ```
 
 ### Run from source

@@ -71,6 +71,15 @@ class LspTests(unittest.TestCase):
         })[0]
         return {item['label']: item for item in response['result']}
 
+    def code_actions(self, uri, line, character, diagnostics=None):
+        response = self.request('textDocument/codeAction', {
+            'textDocument': {'uri': uri},
+            'range': {'start': {'line': line, 'character': character},
+                      'end': {'line': line, 'character': character}},
+            'context': {'diagnostics': diagnostics or []},
+        })[0]
+        return response['result']
+
     def test_initialize_capabilities(self):
         result = self.request('initialize', {}, 1)[0]['result']
         caps = result['capabilities']
@@ -78,6 +87,8 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['definitionProvider'])
         self.assertTrue(caps['referencesProvider'])
         self.assertEqual(caps['renameProvider'], {'prepareProvider': True})
+        self.assertEqual(caps['codeActionProvider'],
+                         {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['documentSymbolProvider'])
         self.assertEqual(caps['textDocumentSync']['change'], 1)
         self.assertIn('.', caps['completionProvider']['triggerCharacters'])
@@ -867,6 +878,225 @@ func total(o: g.Outer) -> i32:
             {(loc['uri'], loc['range']['start']['line'],
               loc['range']['start']['character']) for loc in result},
             {(game_uri, 3, 4), (uri, 6, 23), (uri, 8, 17)})
+
+    def test_code_actions_suggest_unknown_name(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let value: i32 = 1
+    return valeu
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 2, 12)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'valeu' to 'value'")
+        self.assertTrue(actions[0]['isPreferred'])
+        self.assertEqual(actions[0]['kind'], 'quickfix')
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['newText'], 'value')
+        self.assertEqual(edit['range'], {
+            'start': {'line': 2, 'character': 11},
+            'end': {'line': 2, 'character': 16},
+        })
+        self.assertEqual(actions[0]['diagnostics'][0]['message'],
+                         "unknown name 'valeu'")
+
+        # A client that sends its diagnostics gets the same result without
+        # the server recomputing them.
+        supplied = self.code_actions(uri, 2, 12,
+                                     actions[0]['diagnostics'])
+        self.assertEqual([a['title'] for a in supplied],
+                         [a['title'] for a in actions])
+
+    def test_code_actions_suggest_struct_field(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+func main() -> i32:
+    let e: Enemy = Enemy(hp: 1)
+    return e.hpp
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 5, 14)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'hpp' to 'hp'")
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['newText'], 'hp')
+        self.assertEqual(edit['range']['start'], {'line': 5, 'character': 13})
+        self.assertEqual(edit['range']['end'], {'line': 5, 'character': 16})
+
+    def test_code_actions_suggest_constructor_field(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+func main() -> i32:
+    let e: Enemy = Enemy(hpp: 1)
+    return e.hp
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 4, 25)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'hpp' to 'hp'")
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['newText'], 'hp')
+        self.assertEqual(edit['range']['start'], {'line': 4, 'character': 25})
+        self.assertEqual(edit['range']['end'], {'line': 4, 'character': 28})
+
+    def test_code_actions_suggest_enum_member(self):
+        path = self.write('main.vnt', '''\
+enum Color:
+    red
+    blue
+
+func main() -> i32:
+    let c: Color = Color.reed
+    return 0
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 5, 25)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'reed' to 'red'")
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['newText'], 'red')
+        self.assertEqual(edit['range']['start'], {'line': 5, 'character': 25})
+
+    def test_code_actions_make_let_mutable(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let x: i32 = 1
+    x = 2
+    return x
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 2, 4)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]['title'], "Make 'x' mutable")
+        self.assertTrue(actions[0]['isPreferred'])
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['newText'], 'mut')
+        self.assertEqual(edit['range'], {
+            'start': {'line': 1, 'character': 4},
+            'end': {'line': 1, 'character': 7},
+        })
+
+        # Parameters have no declaration keyword to rewrite.
+        param_path = self.write('param.vnt', '''\
+func f(x: i32) -> i32:
+    x = 2
+    return x
+''')
+        param_uri = self.open(param_path)
+        self.assertEqual(self.code_actions(param_uri, 1, 4), [])
+
+    def test_code_actions_use_server_diagnostics_for_stale_client_one(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+func main() -> i32:
+    let e: Enemy = Enemy(hp: 1)
+    return e.hpp
+''')
+        uri = self.open(path)
+        stale = [{
+            'range': {'start': {'line': 0, 'character': 0},
+                      'end': {'line': 0, 'character': 0}},
+            'severity': 1,
+            'message': "unknown name 'nope'",
+        }]
+        actions = self.code_actions(uri, 5, 14, stale)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'hpp' to 'hp'")
+        edit = actions[0]['edit']['changes'][uri][0]
+        self.assertEqual(edit['range']['start'], {'line': 5, 'character': 13})
+
+    def test_code_actions_work_through_a_module_alias(self):
+        game_path = self.write('game.vnt', '''\
+module game
+
+pub struct Enemy:
+    hp: i32
+''')
+        label_path = self.write('label.vnt', '''\
+module label
+
+import "game.vnt" as g
+
+func main() -> i32:
+    let e: g.Enemy = g.Enemy(hpp: 1)
+    return e.hp
+''')
+        field_path = self.write('field.vnt', '''\
+module field
+
+import "game.vnt" as g
+
+func main() -> i32:
+    let e: g.Enemy = g.Enemy(hp: 1)
+    return e.hpp
+''')
+        self.open(game_path)
+        label_uri = self.open(label_path)
+        actions = self.code_actions(label_uri, 5, 29)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'hpp' to 'hp'")
+        edit = actions[0]['edit']['changes'][label_uri][0]
+        self.assertEqual(edit['newText'], 'hp')
+        self.assertEqual(edit['range']['start'], {'line': 5, 'character': 29})
+        self.assertEqual(edit['range']['end'], {'line': 5, 'character': 32})
+
+        field_uri = self.open(field_path)
+        actions = self.code_actions(field_uri, 6, 13)
+        self.assertTrue(actions)
+        self.assertEqual(actions[0]['title'], "Change 'hpp' to 'hp'")
+        edit = actions[0]['edit']['changes'][field_uri][0]
+        self.assertEqual(edit['newText'], 'hp')
+        self.assertEqual(edit['range']['start'], {'line': 6, 'character': 13})
+        self.assertEqual(edit['range']['end'], {'line': 6, 'character': 16})
+
+    def test_code_actions_use_the_receiver_type_for_field_suggestions(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+    armor: i32
+
+struct Potion:
+    heal: i32
+    mana: i32
+
+func main() -> i32:
+    let e: Enemy = Enemy(hp: 1, armor: 2)
+    let p: Potion = Potion(heal: 1, mana: 2)
+    return e.hel
+''')
+        uri = self.open(path)
+        actions = self.code_actions(uri, 10, 16)
+        self.assertEqual(actions, [])
+
+    def test_code_actions_honour_the_requested_kind(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let value: i32 = 1
+    return valeu
+''')
+        uri = self.open(path)
+        response = self.request('textDocument/codeAction', {
+            'textDocument': {'uri': uri},
+            'range': {'start': {'line': 2, 'character': 11},
+                      'end': {'line': 2, 'character': 16}},
+            'context': {'diagnostics': [], 'only': ['refactor']},
+        })[0]
+        self.assertEqual(response['result'], [])
+
+    def test_code_actions_ignore_unrelated_diagnostics(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let x: i32 = 1
+    return "no"
+''')
+        uri = self.open(path)
+        self.assertEqual(self.code_actions(uri, 2, 13), [])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

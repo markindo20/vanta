@@ -2,6 +2,37 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.52.0 - 2026-10-22
+
+- Quick fixes. The server answers `textDocument/codeAction` with `quickfix`
+  actions for the diagnostics it already publishes, so VS Code's light bulb
+  (and `Ctrl+.`) can repair the problem under the cursor.
+- Unknown names suggest the closest visible name: locals, parameters,
+  declarations, imported symbols, module aliases, builtins, and type names
+  (`valeu` becomes `value`). A missing struct field or enum member suggests the
+  nearest member of that type, both on a member access (`e.hpp`) and on a
+  constructor label (`Enemy(hpp: 1)` becomes `Enemy(hp: 1)`, `Color.reed`
+  becomes `Color.red`).
+- An assignment to an immutable local offers `let` to `mut` at the declaration,
+  including a write through a field (`e.hp = 5`), where the root binding is what
+  must become mutable. Parameters and loop variables are left alone because
+  there is no `let` to rewrite.
+- Actions replace only the identifier (or the `let` keyword). The server
+  computes the range from the buffer, because a missing member is reported on
+  the dot and an unknown constructor label is reported on the callee. The best
+  match is marked `isPreferred`, and up to three suggestions are offered.
+- The server recomputes the diagnostics it needs from the buffer and also uses
+  the ones the client sends in the request context, so a client that sends no
+  context still works. A request that asks for another kind than `quickfix`
+  gets nothing back.
+- Tests: 827 in total. New tests cover the capability, each fix, a client that
+  supplies its diagnostics, a stale client diagnostic, a module alias, the
+  receiver type used for field suggestions, the requested action kind,
+  parameter refusal, and an unrelated diagnostic that produces no action.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe quick fixes. The VS Code
+  extension is 0.23.0.
+
 ## v0.51.0 - 2026-10-22
 
 - References and rename. The server answers `textDocument/references`,

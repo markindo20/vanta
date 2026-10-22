@@ -5,10 +5,22 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.51.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.52.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.52.0
+
+Quick fixes landed. The server answers `textDocument/codeAction` for the
+diagnostics it publishes: an unknown name suggests the closest visible name, a
+missing struct field or enum member suggests the nearest member of that type
+(on member access and constructor labels), and assigning to an immutable local
+offers `let` to `mut` at the declaration. Edits replace only the identifier, and
+the client may send its diagnostics in the request context or let the server
+recompute them. 827 tests total.
+
+The next editor work is formatting, workspace symbols, and semantic tokens.
 
 ## Landed in v0.51.0
 
@@ -19,9 +31,6 @@ bring constructor labels along, enum members bring `match` patterns along, and
 module aliases rewrite their `as` name and every qualified use. Builtins,
 keywords, and unresolved names are refused instead of guessed. 817 tests
 total.
-
-The next editor milestone is quick fixes: code actions for the diagnostics the
-server already publishes.
 
 ## Landed in v0.50.0
 
@@ -300,7 +309,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.51.0)
+## Next: language (candidate)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
@@ -340,6 +349,8 @@ public declarations. `examples/modules_demo/` is the worked example.
   formulas are follow-ups.
 - Editor support is shipped in v0.32.0: `vanta lsp` plus the VS Code client
   provide diagnostics, completion, hover, definition, and document symbols.
+  Signature help landed in v0.50.0, references and rename in v0.51.0, and quick
+  fixes in v0.52.0.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and

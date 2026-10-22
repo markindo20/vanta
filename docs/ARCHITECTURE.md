@@ -127,7 +127,7 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
-   rename (prepare and edit), and document symbols. The
+   rename (prepare and edit), quick fixes, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -188,6 +188,30 @@ its bindings. Rename walks every module in the project index, dedupes by
 (uri, line, column), and returns a `changes` workspace edit with UTF-16 ranges.
 The declaration is recovered from the tolerant line scanner when the buffer
 does not parse, so rename still works mid-edit for the declaration itself.
+
+Quick fixes (v0.52.0) answer `textDocument/codeAction`. The server recomputes
+the file's diagnostics and keeps those overlapping the requested range (falling
+back to the same line, because a missing member is reported on the dot while the
+cursor sits on the identifier); the diagnostics a client sends in
+`context.diagnostics` are merged in for anything the server cannot see, and a
+request for a kind other than `quickfix` is refused. Each diagnostic message is
+parsed into one of five families. An unknown name gathers every visible name -
+locals and parameters from the tolerant local scan, declarations and unaliased
+imports, module aliases, builtin functions, and builtin type names - and ranks
+them with `difflib.get_close_matches` (three suggestions, cutoff 0.6); the best
+match is `isPreferred`. A missing struct field or enum member resolves the
+message's type name through the project index and ranks that type's members,
+replacing the word after the dot rather than the dot itself. When the receiver's
+type can be established from the source (a local's annotation, a type name, or
+an aliased module), that type's members are used instead, so a field of an
+unrelated struct is never offered. An unknown constructor label resolves the
+callee (including an alias-qualified `g.Enemy`) for its field list and scans
+forward for the label's colon. `invalid assignment target` looks up the root
+word as a local; when it is an immutable `let` local, the action rewrites that
+keyword to `mut`, which is what the type checker's storage-chain rule requires
+even for a field write such as `e.hp = 5`. Parameters and loop variables are
+skipped because they have no `let` keyword, and unrelated diagnostics produce
+no action.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -391,7 +415,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 817 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 827 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

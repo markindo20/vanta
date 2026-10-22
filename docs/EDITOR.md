@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.51.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.52.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -26,6 +26,10 @@ The server and debug adapter are part of the compiler package, so an installed
   binding, and a field or enum member with the same name as a local is kept
   apart. Rename edits every file the project index can load, including the
   declaring module of an imported symbol.
+- **Quick fixes** under the light bulb (or `Ctrl+.`): unknown names suggest the
+  closest visible name, missing struct fields and enum members suggest the
+  nearest member of that type on member access and constructor labels, and an
+  assignment to an immutable local offers `let` to `mut`.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -72,6 +76,30 @@ member access is renamed only when the receiver's type can be established from
 an annotation, parameter, constructor, loop element, or function return type;
 an unknown receiver is left alone rather than guessed.
 
+## Quick fixes
+
+When a diagnostic is under the cursor, the light bulb (or `Ctrl+.`) offers a
+repair. The server answers `textDocument/codeAction` with `quickfix` actions:
+
+- An unknown name gets the closest visible name, considering locals,
+  parameters, declarations, imported symbols, module aliases, builtins, and
+  type names. Typing `valeu` where `value` exists offers `value`.
+- A missing struct field or enum member gets the nearest member of that type.
+  The action works on a member access (`e.hpp` offers `hp`) and on a
+  constructor label (`Enemy(hpp: 1)` offers `Enemy(hp: 1)`). The member list
+  comes from the receiver's type, so a field of an unrelated struct is never
+  offered.
+- `invalid assignment target` on a write to an immutable `let` local offers
+  **Make 'x' mutable**, rewriting that declaration's `let` to `mut`. A write
+  through a field (`e.hp = 5`) changes the root binding, because the type
+  checker requires the root to be mutable.
+
+The best match is marked as preferred, and up to three suggestions are offered.
+Actions replace only the identifier, or the `let` keyword in the mutability
+fix, so the surrounding code is untouched. Parameters and loop variables have
+no declaration keyword to rewrite and are left alone, and a diagnostic outside
+these families produces no action.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -102,11 +130,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.22.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.23.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.22.0.vsix
+code --install-extension vanta-language-0.23.0.vsix
 ```
 
 ### Build from source
@@ -115,7 +143,7 @@ code --install-extension vanta-language-0.22.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.22.0.vsix
+code --install-extension vanta-language-0.23.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -226,8 +254,8 @@ vanta lsp
 
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
-rename (with prepare support), and document symbols. It does not require a
-workspace root to start.
+rename (with prepare support), quick fixes, and document symbols. It does not
+require a workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -252,8 +280,10 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   nor imported is not searched. A field or member use whose receiver type
   cannot be established is left untouched rather than risk a wrong edit, and
   builtins, keywords, and unresolved names are refused.
-- There is no code action, formatting, workspace symbol, or semantic tokens
-  support yet.
+- Quick fixes cover the five diagnostic families described above (unknown name,
+  missing field, missing enum member, unknown constructor label, and invalid
+  assignment target). There is no formatting, workspace symbol, semantic token,
+  or refactor code action support yet.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses
