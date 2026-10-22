@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.55.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.56.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -40,6 +40,8 @@ The server and debug adapter are part of the compiler package, so an installed
 - **Format Document** rewrites the file with the canonical indentation:
   four spaces per block level, comments kept in place, and one blank line
   between blocks.
+- **Inlay hints** show the inferred type of a local that has no type
+  annotation, right where it is written.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -191,6 +193,23 @@ sees is the same before and after, and formatting a formatted file changes
 nothing. A file that does not parse is refused rather than reformatted:
 the formatter cannot know what the author meant.
 
+## Inlay hints
+
+The editor shows the type of a local that has no type annotation, right
+next to the name:
+
+```vanta
+let x = add(1, 2)     # x: i32
+let e = Enemy(hp: 1)  # e: Enemy
+let h = e.hp          # h: i32
+```
+
+The type is inferred rather than spelled out, and it is the type the
+compiler will actually use: a call returns what its function returns, a
+constructor returns the struct it builds, and a field access returns the
+field's type. A local that already has an annotation gets no hint, because
+the type is already written down.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -221,11 +240,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.26.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.27.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.26.0.vsix
+code --install-extension vanta-language-0.27.0.vsix
 ```
 
 ### Build from source
@@ -234,7 +253,7 @@ code --install-extension vanta-language-0.26.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.26.0.vsix
+code --install-extension vanta-language-0.27.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -346,8 +365,8 @@ vanta lsp
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
 rename (with prepare support), quick fixes, workspace symbols, semantic tokens,
-formatting, and document symbols. It does not require a workspace root to
-start.
+formatting, inlay hints, and document symbols. It does not require a
+workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -385,6 +404,8 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - The formatter refuses a file that does not parse, and it does not rewrite
   the text inside a line: only the indentation, the blank lines, and the
   trailing whitespace change.
+- Inlay hints cover a local without a type annotation. A type the resolver
+  cannot establish is left out rather than guessed.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

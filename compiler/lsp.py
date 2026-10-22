@@ -1185,6 +1185,15 @@ def _split_top(text: str, sep: str = ',') -> list[str]:
 
 
 @dataclass
+class _Hint:
+    """An inferred type shown next to a local that has no annotation."""
+
+    line: int          # 1-based
+    col: int           # 1-based, Python characters
+    type_text: str
+
+
+@dataclass
 class _Ref:
     """One occurrence of a symbol, with a stable workspace symbol key."""
 
@@ -1241,6 +1250,7 @@ class _ReferenceWalker:
         self.path = module.path
         self.lines = _lines(module.source)
         self.refs: list[_Ref] = []
+        self.hints: list[_Hint] = []
         self._scopes: list[dict[str, tuple[str, tuple, str]]] = []
         self._aliases: dict[str, ImportInfo] = {
             imp.alias: imp for imp in module.imports
@@ -1360,6 +1370,11 @@ class _ReferenceWalker:
             type_text = (_type_expr_text(stmt.type_ann)
                          if stmt.type_ann is not None
                          else self._expr_type_text(stmt.value))
+            hint_text = (self._hint_type_text(stmt.value)
+                         if stmt.type_ann is None else '')
+            if hint_text:
+                self.hints.append(_Hint(pos[0], pos[1] + len(stmt.name),
+                                       hint_text))
             self._scopes[-1][stmt.name] = (type_text, symbol, 'variable')
         elif isinstance(stmt, A.AssignStmt):
             self._visit_expr(stmt.target)
@@ -1844,6 +1859,90 @@ class _ReferenceWalker:
                 return self._resolve_type_decl(
                     f'{func.obj.name}.{func.field}')
         return None
+
+    def _hint_type_text(self, expr: Any) -> str:
+        """The type of an expression, as text, for an inlay hint.
+
+        Unlike `_expr_type_text`, this keeps a primitive type: a function
+        returning `i32` shows `i32`, not nothing.
+        """
+        if expr is None:
+            return ''
+        if isinstance(expr, A.Name):
+            local = self._lookup(expr.name)
+            if local is not None:
+                return local[0]
+            decl = self._resolve_global(expr.name)
+            return self._decl_type_text(decl) if decl is not None else ''
+        if isinstance(expr, A.Call):
+            if (isinstance(expr.func, A.Member)
+                    and expr.func.field == 'alloc'
+                    and expr.type_args):
+                return f'ptr<{_type_expr_text(expr.type_args[0])}>'
+            return self._callee_type_text(expr.func)
+        if isinstance(expr, A.Member):
+            base = self._type_decl_of_expr(expr.obj)
+            if base is not None and base.kind == 'struct':
+                owner = self._module_for_path(base.path)
+                for f in base.fields:
+                    if f.name == expr.field:
+                        return self._qualify_type_text(f.type_name, owner)
+            return ''
+        if isinstance(expr, A.Index):
+            return self._element_type_text(self._hint_type_text(expr.obj))
+        if isinstance(expr, A.IntLit):
+            return 'i32'
+        if isinstance(expr, A.FloatLit):
+            return 'f32'
+        if isinstance(expr, A.BoolLit):
+            return 'bool'
+        if isinstance(expr, A.StringLit):
+            return 'str'
+        if isinstance(expr, A.ArrayLit) and expr.elements:
+            inner = self._hint_type_text(expr.elements[0])
+            return f'[{inner}, {len(expr.elements)}]' if inner else ''
+        if isinstance(expr, A.BinOp):
+            if expr.op in ('==', '!=', '<', '>', '<=', '>=', 'and', 'or'):
+                return 'bool'
+            return (self._hint_type_text(expr.left)
+                    or self._hint_type_text(expr.right))
+        if isinstance(expr, A.UnaryOp):
+            return self._hint_type_text(expr.operand)
+        return ''
+
+    def _decl_type_text(self, decl: DeclInfo) -> str:
+        """The type a declaration produces."""
+        if decl.kind in ('struct', 'enum'):
+            return decl.name
+        if decl.kind == 'const':
+            return ''
+        if decl.kind in ('func', 'system', 'extern_func'):
+            return _return_type_text(decl.detail)
+        return ''
+
+    def _callee_type_text(self, func: Any) -> str:
+        """The type a call produces, as text."""
+        if isinstance(func, A.Name):
+            decl = self._resolve_global(func.name)
+            if decl is not None:
+                if decl.kind in ('struct', 'enum'):
+                    return decl.name
+                if decl.kind in ('func', 'system', 'extern_func'):
+                    return _return_type_text(decl.detail)
+            return ''
+        if isinstance(func, A.Member) and isinstance(func.obj, A.Name):
+            if func.obj.name in self._aliases:
+                imp = self._aliases[func.obj.name]
+                if imp.target is not None:
+                    for decl in imp.target.public_decls():
+                        if decl.name != func.field:
+                            continue
+                        if decl.kind in ('struct', 'enum'):
+                            return f'{func.obj.name}.{decl.name}'
+                        if decl.kind in ('func', 'system', 'extern_func'):
+                            return _return_type_text(decl.detail)
+            return ''
+        return ''
 
     def _expr_type_text(self, expr: Any) -> str:
         if expr is None:
@@ -2390,6 +2489,7 @@ class LanguageServer:
                     'codeActionProvider': {'codeActionKinds': ['quickfix']},
                     'workspaceSymbolProvider': True,
                     'documentFormattingProvider': True,
+                    'inlayHintProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2437,6 +2537,8 @@ class LanguageServer:
             self._response(msg_id, self._workspace_symbols(params))
         elif method == 'textDocument/formatting':
             self._response(msg_id, self._formatting(params))
+        elif method == 'textDocument/inlayHint':
+            self._response(msg_id, self._inlay_hints(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
@@ -3772,6 +3874,38 @@ class LanguageServer:
             },
             'newText': formatted,
         }]
+
+    # -- inlay hints -------------------------------------------------------
+
+    def _inlay_hints(self, params: dict) -> list[dict]:
+        """Show the inferred type of a local that has no type annotation."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        project = self._project(doc)
+        module = project.current
+        if module.program is None:
+            return []
+        requested = params.get('range') or {}
+        start_line = int((requested.get('start') or {}).get('line', 0))
+        end_line = int((requested.get('end') or {}).get('line', 10 ** 9))
+        lines = _lines(module.source)
+        walker = _ReferenceWalker(module, project)
+        hints: list[dict] = []
+        for hint in walker.hints:
+            line = hint.line
+            if not start_line <= line <= end_line:
+                continue
+            line_text = _line_at(lines, line - 1)
+            index = _py_to_lsp_char(line_text, hint.col - 1)
+            hints.append({
+                'position': {'line': line - 1, 'character': index},
+                'label': f': {hint.type_text}',
+                'kind': 1,          # InlayHintKind.Type
+                'paddingLeft': False,
+                'paddingRight': False,
+            })
+        return hints
 
     # -- document symbols --------------------------------------------------
 

@@ -134,7 +134,7 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   formatting, and document symbols. The
+   formatting, inlay hints, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -247,6 +247,15 @@ the lexer's decoded values, so a string's escapes and a number's leading
 zeros are counted correctly. Builtins, which nothing in the project declares,
 are marked as library code. Overlapping tokens are dropped, keeping the
 resolved identifier over the lexical one.
+
+Inlay hints (v0.56.0) answer `textDocument/inlayHint`. The reference
+walker records a `_Hint` for every local that has no type annotation,
+carrying the type the walker's own inference produced. That inference
+(`_hint_type_text`) keeps a primitive type, so a function returning `i32`
+shows `i32` rather than nothing, and it resolves a constructor to the
+struct it builds and a field access to the field's type. The hint is
+placed after the name and labelled `: i32`; a local that already has an
+annotation gets none, because the type is already written down.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -463,7 +472,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 855 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 856 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

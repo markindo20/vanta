@@ -30,6 +30,7 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
   function, a struct, an enum, a constant, a parameter, a local, a struct
   field, an enum member, or a module alias.
 - **Format Document** rewrites the file with the canonical indentation.
+- **Inlay hints** show the inferred type of a local without an annotation.
 - **Document symbols** / outline view for functions, structs, enums, fields,
   and enum members.
 - **Debugging** with the `vanta` debugger type: line, function, conditional,
@@ -67,10 +68,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.26.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.27.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.26.0.vsix
+code --install-extension vanta-language-0.27.0.vsix
 ```
 
 ### Build it yourself
@@ -81,7 +82,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.26.0.vsix
+code --install-extension vanta-language-0.27.0.vsix
 ```
 
 ### Run from source

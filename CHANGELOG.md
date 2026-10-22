@@ -2,6 +2,24 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.56.0 - 2026-10-22
+
+- Inlay hints. The server answers `textDocument/inlayHint`, so the editor
+  shows the type of a local that has no type annotation right next to it.
+- The type is inferred, not spelled out: `let x = add(1, 2)` shows `i32`,
+  `let e = Enemy(hp: 1)` shows `Enemy`, `let h = e.hp` shows `i32`, and a
+  literal shows `str`, `f32`, or `bool`. A local that already has an
+  annotation gets no hint, because the type is already written down.
+- The inference reuses the same scope-aware resolver that powers references
+  and rename, so a local's type is the one the compiler will actually use,
+  including a type that comes from another module.
+- Tests: 856 in total. New tests cover the capability, the inferred types of
+  a call, a constructor, a field, and a literal, and the fact that an
+  annotated local gets no hint.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe inlay hints. The VS Code
+  extension is 0.27.0.
+
 ## v0.55.0 - 2026-10-22
 
 - A source formatter. `vanta fmt <file>` rewrites a file in place, and

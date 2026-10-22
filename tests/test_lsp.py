@@ -122,6 +122,7 @@ class LspTests(unittest.TestCase):
                          {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['workspaceSymbolProvider'])
         self.assertTrue(caps['documentFormattingProvider'])
+        self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['semanticTokensProvider']['full'], True)
         self.assertIn('function', caps['semanticTokensProvider']['legend']
                       ['tokenTypes'])
@@ -1334,6 +1335,34 @@ func main() -> i32:
             'options': {'tabSize': 4, 'insertSpaces': True},
         })
         self.assertEqual(self.server.outbox[-1]['result'], [])
+
+    def test_inlay_hints_show_inferred_types(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+func add(a: i32, b: i32) -> i32:
+    return a + b
+
+func main() -> i32:
+    let x = add(1, 2)
+    let e = Enemy(hp: 1)
+    let h = e.hp
+    let name = "hero"
+    let listed: List<i32> = [1, 2]
+    return x
+''')
+        uri = self.open(path)
+        hints = self.request('textDocument/inlayHint', {
+            'textDocument': {'uri': uri},
+            'range': {'start': {'line': 0, 'character': 0},
+                      'end': {'line': 20, 'character': 0}},
+        })[0]['result']
+        labels = {hint['label'] for hint in hints}
+        self.assertEqual(labels, {': i32', ': Enemy', ': str'})
+        lines = [hint['position']['line'] for hint in hints
+                 if hint['label'] == ': i32']
+        self.assertEqual(sorted(lines), [7, 9])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

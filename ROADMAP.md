@@ -5,10 +5,18 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.55.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.56.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.56.0
+
+Inlay hints landed. The editor shows the inferred type of a local that has
+no type annotation, using the same resolver that powers references and
+rename, so the type shown is the one the compiler will use. 856 tests total.
+
+The next editor work is a code lens.
 
 ## Landed in v0.55.0
 
@@ -18,7 +26,7 @@ Document** does the same thing through the language server. The formatter
 normalizes indentation, blank lines, and trailing whitespace, and leaves
 the program itself alone. 855 tests total.
 
-The next editor work is a code lens and inlay hints.
+The next editor work is a code lens.
 
 ## Landed in v0.54.0
 
@@ -375,7 +383,7 @@ public declarations. `examples/modules_demo/` is the worked example.
   provide diagnostics, completion, hover, definition, and document symbols.
   Signature help landed in v0.50.0, references and rename in v0.51.0, quick
   fixes in v0.52.0, workspace symbols in v0.53.0, semantic highlighting in
-  v0.54.0, and a source formatter in v0.55.0.
+  v0.54.0, a source formatter in v0.55.0, and inlay hints in v0.56.0.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and
