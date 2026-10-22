@@ -134,8 +134,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   formatting, inlay hints, code lenses, call hierarchy, and document symbols.
-   The
+   formatting, inlay hints, code lenses, call hierarchy, type hierarchy, and
+   document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -273,6 +273,13 @@ target by their caller, and `outgoingCalls` groups the uses inside the
 target by the function they name. The item's `data` field carries the
 global symbol, so the follow-up requests do not have to re-resolve the
 name.
+
+The type hierarchy (v0.59.0) answers `textDocument/prepareTypeHierarchy`
+and its two follow-up requests. Vanta has no inheritance, so the hierarchy
+is the one the language has: a struct that holds another by value. The
+server resolves each field's written type name to a declaration, across
+modules, and skips `ptr<T>`, `List<T>`, and array fields, because a
+reference does not embed the struct it names.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -489,7 +496,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 860 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 862 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

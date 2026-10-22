@@ -125,6 +125,7 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
         self.assertTrue(caps['callHierarchyProvider'])
+        self.assertTrue(caps['typeHierarchyProvider'])
         self.assertEqual(caps['semanticTokensProvider']['full'], True)
         self.assertIn('function', caps['semanticTokensProvider']['legend']
                       ['tokenTypes'])
@@ -1453,6 +1454,55 @@ func main() -> i32:
         self.assertEqual(len(outgoing), 1)
         self.assertEqual(outgoing[0]['to']['name'], 'helper')
         self.assertEqual(outgoing[0]['fromRanges'][0]['start']['line'], 4)
+
+    def test_type_hierarchy_shows_the_structs_a_type_is_held_by(self):
+        path = self.write('main.vnt', '''\
+struct Inner:
+    hp: i32
+
+struct Outer:
+    inner: Inner
+
+struct Holder:
+    p: ptr<Outer>
+''')
+        uri = self.open(path)
+        items = self.request('textDocument/prepareTypeHierarchy', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 8},
+        })[0]['result']
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['name'], 'Inner')
+        self.assertEqual(items[0]['kind'], 23)      # Struct
+
+        supertypes = self.request('typeHierarchy/supertypes', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual([entry['type']['name'] for entry in supertypes],
+                         ['Outer'])
+
+        subtypes = self.request('typeHierarchy/subtypes', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual(subtypes, [])
+
+    def test_type_hierarchy_ignores_a_pointer_field(self):
+        path = self.write('main.vnt', '''\
+struct Inner:
+    hp: i32
+
+struct Holder:
+    p: ptr<Inner>
+''')
+        uri = self.open(path)
+        items = self.request('textDocument/prepareTypeHierarchy', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 8},
+        })[0]['result']
+        supertypes = self.request('typeHierarchy/supertypes', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual(supertypes, [])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

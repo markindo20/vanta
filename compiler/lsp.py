@@ -2514,6 +2514,7 @@ class LanguageServer:
                     'inlayHintProvider': True,
                     'codeLensProvider': {'resolveProvider': False},
                     'callHierarchyProvider': True,
+                    'typeHierarchyProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2571,6 +2572,12 @@ class LanguageServer:
             self._response(msg_id, self._call_hierarchy_incoming(params))
         elif method == 'callHierarchy/outgoingCalls':
             self._response(msg_id, self._call_hierarchy_outgoing(params))
+        elif method == 'textDocument/prepareTypeHierarchy':
+            self._response(msg_id, self._type_hierarchy_prepare(params))
+        elif method == 'typeHierarchy/supertypes':
+            self._response(msg_id, self._type_hierarchy_supertypes(params))
+        elif method == 'typeHierarchy/subtypes':
+            self._response(msg_id, self._type_hierarchy_subtypes(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
@@ -3938,6 +3945,140 @@ class LanguageServer:
                 'paddingRight': False,
             })
         return hints
+
+    # -- type hierarchy ----------------------------------------------------
+
+    def _type_hierarchy_prepare(self, params: dict) -> list[dict]:
+        """The struct or enum under the cursor, as a type hierarchy item."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        pos = params.get('position') or {}
+        line = int(pos.get('line', 0))
+        char = int(pos.get('character', 0))
+        project = self._project(doc)
+        module = project.current
+        for decl in module.decls:
+            if decl.kind not in ('struct', 'enum'):
+                continue
+            range_ = self._decl_name_range(module, decl)
+            if range_ is None:
+                continue
+            if not (range_['start']['line'] <= line <= range_['end']['line']):
+                continue
+            if range_['start']['line'] == line and not (
+                    range_['start']['character'] <= char
+                    <= range_['end']['character']):
+                continue
+            return [self._type_item(project, decl)]
+        return []
+
+    def _type_hierarchy_supertypes(self, params: dict) -> list[dict]:
+        """The structs that hold this one by value."""
+        item = params.get('item') or {}
+        symbol = _symbol_from_item(item)
+        if symbol is None:
+            return []
+        project = self._project_for_item(item)
+        if project is None:
+            return []
+        result: list[dict] = []
+        for decl in self._types_containing(project, symbol):
+            result.append({'type': self._type_item(project, decl)})
+        result.sort(key=lambda entry: entry['type']['name'])
+        return result
+
+    def _type_hierarchy_subtypes(self, params: dict) -> list[dict]:
+        """The structs this one holds by value."""
+        item = params.get('item') or {}
+        symbol = _symbol_from_item(item)
+        if symbol is None:
+            return []
+        project = self._project_for_item(item)
+        if project is None:
+            return []
+        decl = self._decl_for_symbol(project, symbol)
+        if decl is None or decl.kind != 'struct':
+            return []
+        result: list[dict] = []
+        for field_info in decl.fields:
+            child = self._resolve_field_type(project, decl, field_info)
+            if child is None or child is decl:
+                continue
+            result.append({'type': self._type_item(project, child)})
+        result.sort(key=lambda entry: entry['type']['name'])
+        return result
+
+    def _types_containing(self, project: _ProjectIndex,
+                          symbol: tuple) -> list[DeclInfo]:
+        """The structs with a field of the given type."""
+        target = self._decl_for_symbol(project, symbol)
+        if target is None:
+            return []
+        holders: list[DeclInfo] = []
+        for module in self._project_modules(project):
+            for decl in module.decls:
+                if decl.kind != 'struct' or decl is target:
+                    continue
+                for field_info in decl.fields:
+                    child = self._resolve_field_type(project, decl,
+                                                     field_info)
+                    if child is target:
+                        holders.append(decl)
+                        break
+        return holders
+
+    def _project_modules(self, project: _ProjectIndex) -> list[ModuleInfo]:
+        modules = list(project.cache.values())
+        if project.current not in modules:
+            modules.append(project.current)
+        return modules
+
+    def _resolve_field_type(self, project: _ProjectIndex, owner: DeclInfo,
+                            field_info: FieldInfo) -> Optional[DeclInfo]:
+        """The struct a field holds, when it holds one by value."""
+        written = field_info.type_name
+        if not written or written.startswith('ptr<') \
+                or written.startswith('List<') or written.startswith('['):
+            return None
+        name = _base_type_name(written)
+        if '.' in name:
+            qualifier, _dot, tail = name.rpartition('.')
+            module = project.module_for_alias(qualifier)
+            if module is None:
+                return None
+            for decl in module.public_decls():
+                if decl.name == tail and decl.kind in ('struct', 'enum'):
+                    return decl
+            return None
+        for module in self._project_modules(project):
+            for decl in module.decls:
+                if decl.name == name and decl.kind in ('struct', 'enum'):
+                    return decl
+        return None
+
+    def _type_item(self, project: _ProjectIndex, decl: DeclInfo) -> dict:
+        module = project.cache.get(_norm_path(decl.path))
+        if module is None:
+            module = project.current
+        range_ = self._decl_name_range(module, decl) or {
+            'start': {'line': max(0, decl.line - 1), 'character': 0},
+            'end': {'line': max(0, decl.line - 1), 'character': 0},
+        }
+        try:
+            uri = path_to_uri(decl.path)
+        except (ValueError, OSError):
+            uri = ''
+        kind = S_STRUCT if decl.kind == 'struct' else S_ENUM
+        return {
+            'name': decl.name,
+            'kind': kind,
+            'detail': decl.detail,
+            'uri': uri,
+            'range': range_,
+            'selectionRange': range_,
+            'data': list(_global_symbol(decl)),
+        }
 
     # -- call hierarchy ----------------------------------------------------
 

@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.59.0 - 2026-10-22
+
+- A type hierarchy. The server answers `textDocument/prepareTypeHierarchy` and
+  the two follow-up requests, so the editor can show which structs hold a
+  type and which types a struct holds.
+- Vanta has no inheritance, so the hierarchy is the one the language
+  actually has: a struct that holds another by value. A `ptr<T>` field does
+  not count, because a pointer does not embed the struct.
+- The relation is resolved by name, across modules, so a struct in another
+  file is found.
+- Tests: 862 in total. New tests cover the capability, the structs that
+  hold a type, the types a struct holds, and a pointer field that is not a
+  holding.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the type hierarchy. The VS
+  Code extension is 0.30.0.
+
 ## v0.58.0 - 2026-10-22
 
 - A call hierarchy. The server answers `textDocument/prepareCallHierarchy` and

@@ -1,8 +1,8 @@
 {
   "name": "vanta-language",
   "displayName": "Vanta",
-  "description": "Vanta language support: diagnostics, completion, hover, definitions, references, rename, quick fixes, workspace symbols, semantic highlighting, formatting, inlay hints, code lenses, call hierarchy, document symbols, and native debugging.",
-  "version": "0.29.0",
+  "description": "Vanta language support: diagnostics, completion, hover, definitions, references, rename, quick fixes, workspace symbols, semantic highlighting, formatting, inlay hints, code lenses, call hierarchy, type hierarchy, document symbols, and native debugging.",
+  "version": "0.30.0",
   "publisher": "vanta",
   "license": "MIT",
   "repository": {
