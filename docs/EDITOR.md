@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.52.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.53.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -30,6 +30,9 @@ The server and debug adapter are part of the compiler package, so an installed
   closest visible name, missing struct fields and enum members suggest the
   nearest member of that type on member access and constructor labels, and an
   assignment to an immutable local offers `let` to `mut`.
+- **Go to Symbol in Workspace** with `Ctrl+T`: functions, structs, enums,
+  constants, struct fields, and enum members from every Vanta file in the
+  project.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -100,6 +103,33 @@ fix, so the surrounding code is untouched. Parameters and loop variables have
 no declaration keyword to rewrite and are left alone, and a diagnostic outside
 these families produces no action.
 
+## Workspace symbols
+
+`Ctrl+T` opens **Go to Symbol in Workspace**, which asks the server for
+`workspace/symbol`. The server walks every `.vnt` file under the workspace
+root and lists the declarations it finds: functions, structs, enums,
+constants, struct fields, and enum members. Each result carries its kind and
+the module or declaration that contains it.
+
+```vanta
+module game
+
+pub struct Enemy:
+    hp: i32
+```
+
+Searching `hp` lists the field with `Enemy` as its container; searching
+`enem` finds `Enemy` itself.
+
+Matching is forgiving. An exact name ranks first, then a prefix, then a
+case-insensitive substring, and finally a loose subsequence, so `dmg` still
+finds `damage`. The file list is cached for a few seconds and a file is
+re-parsed only when it changes, so typing in the picker stays fast. An unsaved
+buffer is searched as it is on screen, not as it is on disk.
+
+Without a workspace root the server searches the open documents and the
+modules they import.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -130,11 +160,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.23.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.24.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.23.0.vsix
+code --install-extension vanta-language-0.24.0.vsix
 ```
 
 ### Build from source
@@ -143,7 +173,7 @@ code --install-extension vanta-language-0.23.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.23.0.vsix
+code --install-extension vanta-language-0.24.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -254,8 +284,8 @@ vanta lsp
 
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
-rename (with prepare support), quick fixes, and document symbols. It does not
-require a workspace root to start.
+rename (with prepare support), quick fixes, workspace symbols, and document
+symbols. It does not require a workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -282,8 +312,11 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   builtins, keywords, and unresolved names are refused.
 - Quick fixes cover the five diagnostic families described above (unknown name,
   missing field, missing enum member, unknown constructor label, and invalid
-  assignment target). There is no formatting, workspace symbol, semantic token,
-  or refactor code action support yet.
+  assignment target). There is no formatting, semantic token, or refactor
+  code action support yet.
+- Workspace symbols cover the files under the workspace root and the imports
+  of the open documents. A file that is neither in the root nor imported is
+  not searched, and locals and parameters are not workspace symbols.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

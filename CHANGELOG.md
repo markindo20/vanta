@@ -2,6 +2,28 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.53.0 - 2026-10-22
+
+- Workspace symbols. The server answers `workspace/symbol`, so VS Code's
+  **Go to Symbol in Workspace** (Ctrl+T) searches the whole project.
+- The search covers every `.vnt` file under the workspace root, plus the
+  imported modules of the open documents when the editor did not send a
+  root. Functions, structs, enums, constants, struct fields, and enum members
+  are all symbols, each with its kind and the module or declaration that
+  contains it.
+- Matching is forgiving: an exact name comes first, then a prefix, then a
+  case-insensitive substring, then a loose subsequence so `dmg` still finds
+  `damage`. Results are capped and ranked, so the closest match is on top.
+- The file list is cached for a few seconds and each file is re-parsed only
+  when it changes, so typing in the symbol picker stays fast. An unsaved
+  buffer is searched as it is on screen, not as it is on disk.
+- Tests: 831 in total. New tests cover the capability, declarations across
+  two files, struct fields and enum members, prefix and substring matching,
+  an unsaved buffer, and a workspace without a root.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe workspace symbols. The VS
+  Code extension is 0.24.0.
+
 ## v0.52.0 - 2026-10-22
 
 - Quick fixes. The server answers `textDocument/codeAction` with `quickfix`

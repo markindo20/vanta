@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -200,6 +201,60 @@ def _ranges_overlap(first: dict, second: dict) -> bool:
             and key(second.get('start')) <= key(first.get('end')))
 
 
+def _decl_symbol_kind(kind: str) -> int:
+    """The LSP SymbolKind for a declaration kind."""
+    return {
+        'func': S_FUNCTION,
+        'struct': S_STRUCT,
+        'enum': S_ENUM,
+        'const': S_CONSTANT,
+    }.get(kind, S_VARIABLE)
+
+
+def _symbol_score(name: str, query: str) -> Optional[int]:
+    """Rank a symbol against a workspace-symbol query; None means no match.
+
+    The ranking mirrors what editors expect: an exact name first, then a
+    prefix, then a case-insensitive substring, and finally a loose
+    subsequence match so `dmg` still finds `damage`.
+    """
+    if not query:
+        return 0
+    lowered = name.lower()
+    needle = query.lower()
+    if lowered == needle:
+        return 0
+    if lowered.startswith(needle):
+        return 1
+    index = lowered.find(needle)
+    if index >= 0:
+        return 2
+    position = 0
+    for char in needle:
+        position = lowered.find(char, position)
+        if position < 0:
+            return None
+        position += 1
+    return 3
+
+
+def _walk_vanta_files(root: str, limit: int = 2000) -> list[str]:
+    """Every .vnt file under a directory, skipping noisy folders."""
+    skip = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'env',
+            'build', 'dist', 'target', '.mypy_cache', '.pytest_cache'}
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames
+                       if name not in skip and not name.startswith('.')]
+        for name in sorted(filenames):
+            if not name.endswith('.vnt'):
+                continue
+            found.append(os.path.join(dirpath, name))
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def _object_before_dot(line_text: str, word_start: int) -> Optional[list[str]]:
     """Return the dotted object path immediately before a member word."""
     prefix = line_text[:word_start]
@@ -357,7 +412,27 @@ class _ProjectIndex:
             for path, text in (sources or {}).items()
         }
         self.cache: dict[str, ModuleInfo] = {}
+        self.standalone: dict[str, ModuleInfo] = {}
         self.current = self._load(entry_path, [])
+
+    def parse_only(self, path: str) -> ModuleInfo:
+        """Parse one file's declarations without following its imports."""
+        text = self._source_for(path)
+        if text is None:
+            mod = ModuleInfo(path=path, source='')
+            self.standalone[_norm_path(path)] = mod
+            return mod
+        return self.parse_text(path, text)
+
+    def parse_text(self, path: str, text: str) -> ModuleInfo:
+        """Parse declarations from text, reusing the last result if it fits."""
+        key = _norm_path(path)
+        cached = self.standalone.get(key)
+        if cached is not None and cached.source == text:
+            return cached
+        mod = self._parse_module(path, text)
+        self.standalone[key] = mod
+        return mod
 
     def _source_for(self, path: str) -> Optional[str]:
         key = _norm_path(path)
@@ -2022,6 +2097,8 @@ class LanguageServer:
         self.shutdown_requested = False
         self.root_uri: Optional[str] = None
         self.root_path: Optional[str] = None
+        self._workspace_cache: dict[str, tuple] = {}
+        self._file_list_cache: dict[str, tuple[float, list[str]]] = {}
 
     # -- protocol ----------------------------------------------------------
 
@@ -2059,6 +2136,13 @@ class LanguageServer:
         if method == 'initialize':
             self.root_uri = params.get('rootUri')
             self.root_path = uri_to_path(self.root_uri) if self.root_uri else None
+            if self.root_path is None:
+                # A multi-root workspace sends the folders instead.
+                for folder in params.get('workspaceFolders') or []:
+                    path = uri_to_path(folder.get('uri') or '')
+                    if path:
+                        self.root_path = path
+                        break
             self._response(msg_id, {
                 'capabilities': {
                     'positionEncoding': 'utf-16',
@@ -2080,6 +2164,7 @@ class LanguageServer:
                     'referencesProvider': True,
                     'renameProvider': {'prepareProvider': True},
                     'codeActionProvider': {'codeActionKinds': ['quickfix']},
+                    'workspaceSymbolProvider': True,
                     'documentSymbolProvider': True,
                 },
                 'serverInfo': {
@@ -2113,6 +2198,8 @@ class LanguageServer:
             self._response(msg_id, self._rename(params))
         elif method == 'textDocument/codeAction':
             self._response(msg_id, self._code_actions(params))
+        elif method == 'workspace/symbol':
+            self._response(msg_id, self._workspace_symbols(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -3182,6 +3269,137 @@ class LanguageServer:
         if preferred:
             action['isPreferred'] = True
         return action
+
+    # -- workspace symbols --------------------------------------------------
+
+    def _workspace_symbols(self, params: dict) -> list[dict]:
+        query = str(params.get('query') or '')
+        scored: list[tuple[int, str, dict]] = []
+        for path, module in self._workspace_modules():
+            try:
+                uri = path_to_uri(path)
+            except (ValueError, OSError):
+                continue
+            container = module.module_name or os.path.basename(path)
+            for decl in module.decls:
+                entries = [(decl.name, _decl_symbol_kind(decl.kind),
+                            decl.name_line or decl.line,
+                            decl.name_col or decl.col, container)]
+                for field_info in decl.fields:
+                    entries.append((field_info.name, S_FIELD,
+                                    field_info.line, field_info.col,
+                                    decl.name))
+                for member in decl.members:
+                    entries.append((member.name, S_ENUM_MEMBER,
+                                    member.line, member.col, decl.name))
+                for name, kind, line, col, owner in entries:
+                    score = _symbol_score(name, query)
+                    if score is None:
+                        continue
+                    range_ = self._symbol_range(module, line, col, name)
+                    if range_ is None:
+                        continue
+                    scored.append((score, name, {
+                        'name': name,
+                        'kind': kind,
+                        'location': {'uri': uri, 'range': range_},
+                        'containerName': owner,
+                    }))
+        scored.sort(key=lambda item: (item[0], item[1]))
+        return [symbol for _score, _name, symbol in scored[:200]]
+
+    def _symbol_range(self, module: ModuleInfo, line: int, col: int,
+                      name: str) -> Optional[dict]:
+        lines = _lines(module.source)
+        if line < 1 or line > len(lines):
+            return None
+        line_text = lines[line - 1]
+        index = max(0, col - 1)
+        if line_text[index:index + len(name)] != name:
+            found = line_text.find(name)
+            if found < 0:
+                return None
+            index = found
+        start = _py_to_lsp_char(line_text, index)
+        return {
+            'start': {'line': line - 1, 'character': start},
+            'end': {'line': line - 1,
+                    'character': start + _utf16_len(name)},
+        }
+
+    def _workspace_modules(self) -> list[tuple[str, ModuleInfo]]:
+        """Parse every Vanta file the workspace can see."""
+        files = self._workspace_files()
+        sources = {d.path: d.text for d in self.documents.values()
+                   if d.path}
+        index = _ProjectIndex('<workspace>', sources)
+        modules: list[tuple[str, ModuleInfo]] = []
+        live: set[str] = set()
+        for path in files:
+            stamp = self._file_stamp(path, sources)
+            key = _norm_path(path)
+            live.add(key)
+            cached = self._workspace_cache.get(key)
+            if cached is not None and cached[0] == stamp:
+                modules.append((path, cached[1]))
+                continue
+            module = index.parse_only(path)
+            self._workspace_cache[key] = (stamp, module)
+            modules.append((path, module))
+        for key in [key for key in self._workspace_cache if key not in live]:
+            del self._workspace_cache[key]
+        return modules
+
+    def _file_stamp(self, path: str,
+                    sources: dict[str, str]) -> Optional[tuple]:
+        key = _norm_path(path)
+        for source_path, text in sources.items():
+            if _norm_path(source_path) == key:
+                return ('buffer', hash(text))
+        try:
+            info = os.stat(path)
+        except OSError:
+            return None
+        return ('file', info.st_mtime_ns, info.st_size)
+
+    def _workspace_files(self) -> list[str]:
+        """The Vanta files the workspace can reach."""
+        seen: set[str] = set()
+        files: list[str] = []
+        if self.root_path and os.path.isdir(self.root_path):
+            for path in self._walk_root(self.root_path):
+                key = _norm_path(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                files.append(path)
+        # The open documents and the modules they import are always searched,
+        # even when the editor sent no workspace root.
+        for doc in self.documents.values():
+            if not doc.path:
+                continue
+            project = self._project(doc)
+            for module in list(project.cache.values()) + [project.current]:
+                key = _norm_path(module.path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                files.append(module.path)
+        return files
+
+    def _walk_root(self, root: str) -> list[str]:
+        """The .vnt files under a root, cached for a few seconds.
+
+        The editor asks for workspace symbols on every keystroke, so walking
+        the tree again each time would be wasteful.
+        """
+        now = time.monotonic()
+        cached = self._file_list_cache.get(root)
+        if cached is not None and now - cached[0] < 5.0:
+            return cached[1]
+        files = _walk_vanta_files(root)
+        self._file_list_cache[root] = (now, files)
+        return files
 
     # -- document symbols --------------------------------------------------
 

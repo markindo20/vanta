@@ -127,7 +127,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
-   rename (prepare and edit), quick fixes, and document symbols. The
+   rename (prepare and edit), quick fixes, workspace symbols, and document
+   symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -212,6 +213,20 @@ keyword to `mut`, which is what the type checker's storage-chain rule requires
 even for a field write such as `e.hp = 5`. Parameters and loop variables are
 skipped because they have no `let` keyword, and unrelated diagnostics produce
 no action.
+
+Workspace symbols (v0.53.0) answer `workspace/symbol`. The server walks the
+workspace root for `.vnt` files, skipping `build`, `dist`, `node_modules`,
+virtual environments, and hidden directories, and parses each one on its own
+(`_ProjectIndex.parse_text`) so an import does not drag in a second copy of a
+file. When the editor sent no root, the open documents and the modules they
+import are searched instead. Every function, struct, enum, constant, struct
+field, and enum member becomes a symbol with its kind and its container (the
+module, or the declaration that owns a field or member). The query is ranked
+by `_symbol_score`: an exact name, then a prefix, then a case-insensitive
+substring, and finally a loose subsequence match, so `dmg` finds `damage`.
+The file list is cached for five seconds and each file is re-parsed only when
+its modification time, size, or unsaved buffer text changes, which keeps the
+editor's per-keystroke queries cheap.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -415,7 +430,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 827 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 831 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

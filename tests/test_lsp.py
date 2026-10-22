@@ -80,6 +80,9 @@ class LspTests(unittest.TestCase):
         })[0]
         return response['result']
 
+    def workspace_symbols(self, query):
+        return self.request('workspace/symbol', {'query': query})[0]['result']
+
     def test_initialize_capabilities(self):
         result = self.request('initialize', {}, 1)[0]['result']
         caps = result['capabilities']
@@ -89,6 +92,7 @@ class LspTests(unittest.TestCase):
         self.assertEqual(caps['renameProvider'], {'prepareProvider': True})
         self.assertEqual(caps['codeActionProvider'],
                          {'codeActionKinds': ['quickfix']})
+        self.assertTrue(caps['workspaceSymbolProvider'])
         self.assertTrue(caps['documentSymbolProvider'])
         self.assertEqual(caps['textDocumentSync']['change'], 1)
         self.assertIn('.', caps['completionProvider']['triggerCharacters'])
@@ -1097,6 +1101,105 @@ func main() -> i32:
 ''')
         uri = self.open(path)
         self.assertEqual(self.code_actions(uri, 2, 13), [])
+
+    def test_workspace_symbols_find_declarations_across_the_workspace(self):
+        self.write('game.vnt', '''\
+module game
+
+pub struct Enemy:
+    hp: i32
+    damage: i32
+
+pub enum Color:
+    red
+    blue
+
+pub func spawn_enemy() -> i32:
+    return 1
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "game.vnt" as g
+
+func main() -> i32:
+    return g.spawn_enemy()
+''')
+        self.open(main_path)
+        self.server.root_path = self.tmp
+        self.server.root_uri = path_to_uri(self.tmp)
+
+        symbols = self.workspace_symbols('spawn')
+        self.assertEqual([s['name'] for s in symbols], ['spawn_enemy'])
+        self.assertEqual(symbols[0]['kind'], 12)          # Function
+        self.assertEqual(symbols[0]['containerName'], 'game')
+        location = symbols[0]['location']
+        self.assertEqual(location['uri'], path_to_uri(
+            os.path.join(self.tmp, 'game.vnt')))
+        self.assertEqual(location['range']['start'], {'line': 10, 'character': 9})
+        self.assertEqual(location['range']['end'], {'line': 10, 'character': 20})
+
+        # A struct, its fields, and an enum with its members are symbols too.
+        names = [s['name'] for s in self.workspace_symbols('')]
+        self.assertEqual(names, ['Color', 'Enemy', 'blue', 'damage', 'hp',
+                                 'main', 'red', 'spawn_enemy'])
+        fields = {s['name']: s for s in self.workspace_symbols('hp')}
+        self.assertEqual(list(fields), ['hp'])
+        self.assertEqual(fields['hp']['kind'], 8)          # Field
+        self.assertEqual(fields['hp']['containerName'], 'Enemy')
+
+    def test_workspace_symbols_match_by_prefix_and_substring(self):
+        self.write('main.vnt', '''\
+struct Point:
+    x: i32
+
+func draw_player() -> void:
+    return
+''')
+        self.open(os.path.join(self.tmp, 'main.vnt'))
+        self.server.root_path = self.tmp
+        self.server.root_uri = path_to_uri(self.tmp)
+
+        self.assertEqual([s['name'] for s in self.workspace_symbols('draw')],
+                         ['draw_player'])
+        self.assertEqual([s['name'] for s in self.workspace_symbols('Point')],
+                         ['Point'])
+        self.assertEqual([s['name'] for s in self.workspace_symbols('oint')],
+                         ['Point'])
+        self.assertEqual(self.workspace_symbols('nothing_here'), [])
+
+    def test_workspace_symbols_use_the_unsaved_buffer(self):
+        path = self.write('main.vnt', 'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        self.server.root_path = self.tmp
+        self.server.root_uri = path_to_uri(self.tmp)
+        self.assertEqual(
+            [s['name'] for s in self.workspace_symbols('main')], ['main'])
+        self.change(uri, 'func renamed() -> void:\n    return\n')
+        self.assertEqual(
+            [s['name'] for s in self.workspace_symbols('renamed')],
+            ['renamed'])
+        self.assertEqual(self.workspace_symbols('main'), [])
+
+    def test_workspace_symbols_without_a_root_use_open_documents(self):
+        self.write('game.vnt', '''\
+module game
+
+pub func helper() -> i32:
+    return 1
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "game.vnt" as g
+
+func main() -> i32:
+    return g.helper()
+''')
+        self.open(main_path)
+        # No workspace root: only the open document and its import are known.
+        names = [s['name'] for s in self.workspace_symbols('')]
+        self.assertEqual(sorted(names), ['helper', 'main'])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')
