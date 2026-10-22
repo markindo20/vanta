@@ -83,6 +83,34 @@ class LspTests(unittest.TestCase):
     def workspace_symbols(self, query):
         return self.request('workspace/symbol', {'query': query})[0]['result']
 
+    def semantic_tokens(self, uri):
+        return self.request('textDocument/semanticTokens/full', {
+            'textDocument': {'uri': uri},
+        })[0]['result']['data']
+
+    def decode_tokens(self, data):
+        """Turn the flat semantic token array into readable entries."""
+        types = ['namespace', 'type', 'class', 'enum', 'interface', 'struct',
+                 'typeParameter', 'parameter', 'variable', 'property',
+                 'enumMember', 'event', 'function', 'method', 'macro',
+                 'keyword', 'modifier', 'comment', 'string', 'number',
+                 'regexp', 'operator', 'decorator']
+        modifiers = ['declaration', 'definition', 'readonly', 'static',
+                     'deprecated', 'abstract', 'async', 'modification',
+                     'documentation', 'defaultLibrary']
+        result = []
+        line = 0
+        char = 0
+        for i in range(0, len(data), 5):
+            delta_line, delta_char, length, token_type, token_mod = \
+                data[i:i + 5]
+            line += delta_line
+            char = delta_char if delta_line else char + delta_char
+            result.append((line, char, length, types[token_type],
+                           [modifiers[bit] for bit in range(len(modifiers))
+                            if token_mod & (1 << bit)]))
+        return result
+
     def test_initialize_capabilities(self):
         result = self.request('initialize', {}, 1)[0]['result']
         caps = result['capabilities']
@@ -93,6 +121,11 @@ class LspTests(unittest.TestCase):
         self.assertEqual(caps['codeActionProvider'],
                          {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['workspaceSymbolProvider'])
+        self.assertEqual(caps['semanticTokensProvider']['full'], True)
+        self.assertIn('function', caps['semanticTokensProvider']['legend']
+                      ['tokenTypes'])
+        self.assertIn('declaration', caps['semanticTokensProvider']['legend']
+                      ['tokenModifiers'])
         self.assertTrue(caps['documentSymbolProvider'])
         self.assertEqual(caps['textDocumentSync']['change'], 1)
         self.assertIn('.', caps['completionProvider']['triggerCharacters'])
@@ -1200,6 +1233,81 @@ func main() -> i32:
         # No workspace root: only the open document and its import are known.
         names = [s['name'] for s in self.workspace_symbols('')]
         self.assertEqual(sorted(names), ['helper', 'main'])
+
+    def test_semantic_tokens_classify_declarations_and_uses(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+enum Color:
+    red
+
+const LIMIT: i32 = 10
+
+func damage(e: Enemy, amount: i32) -> i32:
+    # Subtract the armor first.
+    let total: i32 = e.hp + amount
+    let c: Color = Color.red
+    return total + LIMIT
+''')
+        uri = self.open(path)
+        tokens = self.decode_tokens(self.semantic_tokens(uri))
+        kinds = {(line, char): (kind, mods)
+                  for line, char, _length, kind, mods in tokens}
+        with open(path, encoding='utf-8') as f:
+            source = f.read().splitlines()
+
+        def word_at(line, char):
+            return source[line][char:char + 5]
+
+        # The struct name, its field, the enum, and its member.
+        self.assertEqual(kinds[(0, 7)][0], 'struct')
+        self.assertIn('declaration', kinds[(0, 7)][1])
+        self.assertEqual(kinds[(1, 4)][0], 'property')
+        self.assertEqual(kinds[(3, 5)][0], 'enum')
+        self.assertEqual(kinds[(4, 4)][0], 'enumMember')
+        # A constant is a read-only variable.
+        self.assertEqual(kinds[(6, 6)][0], 'variable')
+        self.assertIn('readonly', kinds[(6, 6)][1])
+        # A function, its parameters, and a local.
+        self.assertEqual(kinds[(8, 5)][0], 'function')
+        self.assertIn('declaration', kinds[(8, 5)][1])
+        self.assertEqual(kinds[(8, 12)][0], 'parameter')
+        self.assertEqual(kinds[(8, 22)][0], 'parameter')
+        self.assertEqual(kinds[(10, 8)][0], 'variable')
+        # A use of a parameter and of a field.
+        self.assertEqual(kinds[(10, 21)][0], 'parameter')
+        self.assertEqual(kinds[(10, 23)][0], 'property')
+        # A type annotation and an enum member in an expression.
+        self.assertEqual(kinds[(11, 11)][0], 'enum')
+        self.assertEqual(kinds[(11, 25)][0], 'enumMember')
+        # Comments and keywords are lexical tokens.
+        self.assertEqual(kinds[(9, 4)][0], 'comment')
+        self.assertEqual(kinds[(8, 0)][0], 'keyword')
+        self.assertEqual(word_at(8, 5), 'damag')
+
+    def test_semantic_tokens_mark_builtins_as_library(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let x: i32 = print_i32(3)
+    return x
+''')
+        uri = self.open(path)
+        tokens = self.decode_tokens(self.semantic_tokens(uri))
+        kinds = {(line, char): (kind, mods)
+                  for line, char, _length, kind, mods in tokens}
+        self.assertEqual(kinds[(1, 17)][0], 'function')
+        self.assertIn('defaultLibrary', kinds[(1, 17)][1])
+        self.assertEqual(kinds[(0, 15)][0], 'type')
+        self.assertIn('defaultLibrary', kinds[(0, 15)][1])
+
+    def test_semantic_tokens_survive_an_unparsed_buffer(self):
+        path = self.write('main.vnt', 'func main() -> void:\n    return\n')
+        uri = self.open(path, 'func main() -> void:\n    let x: i32 = 1\n')
+        tokens = self.decode_tokens(self.semantic_tokens(uri))
+        self.assertTrue(tokens)
+        kinds = {kind for _line, _char, _length, kind, _mods in tokens}
+        self.assertIn('variable', kinds)
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

@@ -8,8 +8,9 @@ does not parse yet.
 
 Only the pieces of LSP that the VS Code client needs are implemented:
 document sync, diagnostics, completion, hover, go-to-definition, references,
-rename, quick fixes, and document symbols.  The server speaks JSON-RPC over
-stdin/stdout with the usual ``Content-Length`` framing.
+rename, quick fixes, workspace symbols, semantic tokens, and document symbols.
+The server speaks JSON-RPC over stdin/stdout with the usual ``Content-Length``
+framing.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from . import VERSION
 from . import ast_nodes as A
 from .lexer import LexError, Lexer
 from .loader import LoadError, STDLIB_DIR, load_program
-from .tokens import KEYWORDS
+from .tokens import KEYWORDS, TT
 from .parser import ParseError, Parser
 from .type_checker import CheckError, TypeChecker
 from .typesys import PRIM_TYPES
@@ -82,6 +83,124 @@ S_STRUCT = 23
 S_EVENT = 24
 S_OPERATOR = 25
 S_TYPE_PARAMETER = 26
+
+# Semantic token types.  The order is the legend the server advertises, so
+# the numbers are part of the protocol contract with the editor.
+ST_NAMESPACE = 0
+ST_TYPE = 1
+ST_CLASS = 2
+ST_ENUM = 3
+ST_INTERFACE = 4
+ST_STRUCT = 5
+ST_TYPE_PARAMETER = 6
+ST_PARAMETER = 7
+ST_VARIABLE = 8
+ST_PROPERTY = 9
+ST_ENUM_MEMBER = 10
+ST_EVENT = 11
+ST_FUNCTION = 12
+ST_METHOD = 13
+ST_MACRO = 14
+ST_KEYWORD = 15
+ST_MODIFIER = 16
+ST_COMMENT = 17
+ST_STRING = 18
+ST_NUMBER = 19
+ST_REGEXP = 20
+ST_OPERATOR = 21
+ST_DECORATOR = 22
+
+SEMANTIC_TOKEN_TYPES = [
+    'namespace', 'type', 'class', 'enum', 'interface', 'struct',
+    'typeParameter', 'parameter', 'variable', 'property', 'enumMember',
+    'event', 'function', 'method', 'macro', 'keyword', 'modifier', 'comment',
+    'string', 'number', 'regexp', 'operator', 'decorator',
+]
+
+# Semantic token modifiers, in legend order.
+ST_MOD_DECLARATION = 1 << 0
+ST_MOD_DEFINITION = 1 << 1
+ST_MOD_READONLY = 1 << 2
+ST_MOD_STATIC = 1 << 3
+ST_MOD_DEPRECATED = 1 << 4
+ST_MOD_ABSTRACT = 1 << 5
+ST_MOD_ASYNC = 1 << 6
+ST_MOD_MODIFICATION = 1 << 7
+ST_MOD_DOCUMENTATION = 1 << 8
+ST_MOD_DEFAULT_LIBRARY = 1 << 9
+
+SEMANTIC_TOKEN_MODIFIERS = [
+    'declaration', 'definition', 'readonly', 'static', 'deprecated',
+    'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
+]
+
+# The semantic kind of a resolved identifier, mapped to a token type and
+# the modifiers that kind always carries.
+_SEMANTIC_TOKEN_BY_KIND = {
+    'function': (ST_FUNCTION, 0),
+    'struct': (ST_STRUCT, 0),
+    'enum': (ST_ENUM, 0),
+    'const': (ST_VARIABLE, ST_MOD_READONLY),
+    'parameter': (ST_PARAMETER, 0),
+    'variable': (ST_VARIABLE, 0),
+    'property': (ST_PROPERTY, 0),
+    'enumMember': (ST_ENUM_MEMBER, 0),
+    'namespace': (ST_NAMESPACE, 0),
+}
+
+# Lexical token types, mapped to a semantic token type.
+_SEMANTIC_LEXICAL_TYPE = {
+    TT.FUNC: ST_KEYWORD,
+    TT.LET: ST_KEYWORD,
+    TT.MUT: ST_KEYWORD,
+    TT.RETURN: ST_KEYWORD,
+    TT.CONST: ST_KEYWORD,
+    TT.STRUCT: ST_KEYWORD,
+    TT.COMPONENT: ST_KEYWORD,
+    TT.SYSTEM: ST_KEYWORD,
+    TT.EXTERN: ST_KEYWORD,
+    TT.ENUM: ST_KEYWORD,
+    TT.IMPORT: ST_KEYWORD,
+    TT.MODULE: ST_KEYWORD,
+    TT.PUB: ST_KEYWORD,
+    TT.AS: ST_KEYWORD,
+    TT.IF: ST_KEYWORD,
+    TT.ELIF: ST_KEYWORD,
+    TT.ELSE: ST_KEYWORD,
+    TT.MATCH: ST_KEYWORD,
+    TT.WHILE: ST_KEYWORD,
+    TT.FOR: ST_KEYWORD,
+    TT.IN: ST_KEYWORD,
+    TT.BREAK: ST_KEYWORD,
+    TT.CONTINUE: ST_KEYWORD,
+    TT.TRUE: ST_KEYWORD,
+    TT.FALSE: ST_KEYWORD,
+    TT.AND: ST_KEYWORD,
+    TT.OR: ST_KEYWORD,
+    TT.NOT: ST_KEYWORD,
+    TT.STRING: ST_STRING,
+    TT.INT: ST_NUMBER,
+    TT.FLOAT: ST_NUMBER,
+    TT.PLUS: ST_OPERATOR,
+    TT.MINUS: ST_OPERATOR,
+    TT.STAR: ST_OPERATOR,
+    TT.SLASH: ST_OPERATOR,
+    TT.PERCENT: ST_OPERATOR,
+    TT.EQ: ST_OPERATOR,
+    TT.NEQ: ST_OPERATOR,
+    TT.LT: ST_OPERATOR,
+    TT.LTE: ST_OPERATOR,
+    TT.GT: ST_OPERATOR,
+    TT.GTE: ST_OPERATOR,
+    TT.ASSIGN: ST_OPERATOR,
+    TT.PLUS_EQ: ST_OPERATOR,
+    TT.MINUS_EQ: ST_OPERATOR,
+    TT.STAR_EQ: ST_OPERATOR,
+    TT.SLASH_EQ: ST_OPERATOR,
+    TT.ARROW: ST_OPERATOR,
+    TT.DOT: ST_OPERATOR,
+    TT.COLONCOLON: ST_OPERATOR,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +355,86 @@ def _symbol_score(name: str, query: str) -> Optional[int]:
             return None
         position += 1
     return 3
+
+
+def _lexical_token_length(token: Any, line_text: str, col: int) -> int:
+    """The source length of a lexical token, in UTF-16 units.
+
+    The lexer stores decoded values, so a string's escapes and a number's
+    leading zeros would make the value shorter than the text it came from.
+    The source is measured instead.
+    """
+    if token.type == TT.STRING:
+        index = col
+        while index < len(line_text) and line_text[index] != '"':
+            index += 1
+        if index < len(line_text):
+            index += 1
+        while index < len(line_text) and line_text[index] != '"':
+            index += 1
+        if index < len(line_text):
+            index += 1
+        return _utf16_len(line_text[col:index])
+    if token.type in (TT.INT, TT.FLOAT):
+        index = col
+        while index < len(line_text) and (
+                line_text[index].isdigit() or line_text[index] == '.'):
+            index += 1
+        return _utf16_len(line_text[col:index])
+    value = token.value
+    if not isinstance(value, str):
+        value = str(value)
+    return _utf16_len(value)
+
+
+def _dedupe_tokens(tokens: list[tuple[int, int, int, int, int]]) \
+        -> list[tuple[int, int, int, int, int]]:
+    """Drop tokens that overlap an earlier one at the same place.
+
+    The protocol forbids overlapping tokens, and the walker and the lexer can
+    both claim the same word: a resolved identifier wins, because it carries
+    more meaning than the lexical classification.
+    """
+    ordered = sorted(tokens, key=lambda item: (item[0], item[1], -item[2]))
+    result: list[tuple[int, int, int, int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for token in ordered:
+        key = (token[0], token[1])
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(token)
+    return result
+
+
+def _comment_tokens(text: str, lines: list[str]) \
+        -> list[tuple[int, int, int, int, int]]:
+    """Comment tokens, which the lexer drops from its token stream."""
+    tokens: list[tuple[int, int, int, int, int]] = []
+    for number, line in enumerate(lines):
+        index = 0
+        in_string = False
+        while index < len(line):
+            char = line[index]
+            if in_string:
+                if char == '\\':
+                    index += 2
+                    continue
+                if char == '"':
+                    in_string = False
+                index += 1
+                continue
+            if char == '"':
+                in_string = True
+                index += 1
+                continue
+            if char == '#':
+                start = _py_to_lsp_char(line, index)
+                length = _utf16_len(line[index:])
+                tokens.append((number, start, length, ST_COMMENT, 0))
+                break
+            index += 1
+    return tokens
 
 
 def _walk_vanta_files(root: str, limit: int = 2000) -> list[str]:
@@ -994,6 +1193,17 @@ class _Ref:
     name: str          # exact source text to replace
     symbol: tuple      # stable identity, see _ReferenceWalker
     declaration: bool = False
+    kind: str = ''     # semantic kind: function, struct, variable, ...
+
+
+def _decl_kind(decl: 'DeclInfo') -> str:
+    """The semantic kind of a top-level declaration."""
+    return {
+        'func': 'function',
+        'struct': 'struct',
+        'enum': 'enum',
+        'const': 'const',
+    }.get(decl.kind, 'variable')
 
 
 def _global_symbol(decl: 'DeclInfo') -> tuple:
@@ -1030,7 +1240,7 @@ class _ReferenceWalker:
         self.path = module.path
         self.lines = _lines(module.source)
         self.refs: list[_Ref] = []
-        self._scopes: list[dict[str, tuple[str, tuple]]] = []
+        self._scopes: list[dict[str, tuple[str, tuple, str]]] = []
         self._aliases: dict[str, ImportInfo] = {
             imp.alias: imp for imp in module.imports
             if imp.alias and imp.target is not None
@@ -1042,30 +1252,32 @@ class _ReferenceWalker:
     # -- recording ---------------------------------------------------------
 
     def _add(self, line: int, col: int, name: str, symbol: tuple,
-             declaration: bool = False) -> None:
+             declaration: bool = False, kind: str = '') -> None:
         if not name or line <= 0 or col <= 0:
             return
-        self.refs.append(_Ref(self.path, line, col, name, symbol, declaration))
+        self.refs.append(_Ref(self.path, line, col, name, symbol, declaration,
+                              kind))
 
     def _seed_declarations(self) -> None:
         for decl in self.module.decls:
             self._add(decl.name_line, decl.name_col, decl.name,
-                      _global_symbol(decl), True)
+                      _global_symbol(decl), True, _decl_kind(decl))
             if decl.kind == 'struct':
                 for f in decl.fields:
                     self._add(f.line, f.col, f.name,
-                              _field_symbol(decl, f.name), True)
+                              _field_symbol(decl, f.name), True, 'property')
             elif decl.kind == 'enum':
                 for m in decl.members:
                     self._add(m.line, m.col, m.name,
-                              _member_symbol(decl, m.name), True)
+                              _member_symbol(decl, m.name), True, 'enumMember')
         for imp in self.module.imports:
             if not imp.alias:
                 continue
             pos = self._alias_decl_pos(imp)
             if pos is not None:
                 self._add(pos[0], pos[1], imp.alias,
-                          ('alias', self.path, imp.line, imp.alias), True)
+                          ('alias', self.path, imp.line, imp.alias), True,
+                          'namespace')
 
     def _alias_decl_pos(self, imp: ImportInfo) -> Optional[tuple[int, int]]:
         line_text = _line_at(self.lines, imp.line - 1)
@@ -1079,7 +1291,7 @@ class _ReferenceWalker:
 
     # -- scopes ------------------------------------------------------------
 
-    def _lookup(self, name: str) -> Optional[tuple[str, tuple]]:
+    def _lookup(self, name: str) -> Optional[tuple[str, tuple, str]]:
         for scope in reversed(self._scopes):
             hit = scope.get(name)
             if hit is not None:
@@ -1116,14 +1328,15 @@ class _ReferenceWalker:
                     self._visit_type(fd.ret)
 
     def _walk_function(self, func: A.FuncDecl) -> None:
-        scope: dict[str, tuple[str, tuple]] = {}
+        scope: dict[str, tuple[str, tuple, str]] = {}
         self._scopes.append(scope)
         try:
             for param in func.params:
                 symbol = ('local', self.path, param.pos.line, param.pos.col)
                 self._add(param.pos.line, param.pos.col, param.name,
-                          symbol, True)
-                scope[param.name] = (_type_expr_text(param.type), symbol)
+                          symbol, True, 'parameter')
+                scope[param.name] = (_type_expr_text(param.type), symbol,
+                                     'parameter')
                 self._visit_type(param.type)
             self._visit_type(func.ret)
             self._walk_block(func.body)
@@ -1142,11 +1355,11 @@ class _ReferenceWalker:
             self._visit_expr(stmt.value)
             pos = _find_name_pos(self.lines, stmt.pos, stmt.name)
             symbol = ('local', self.path, pos[0], pos[1])
-            self._add(pos[0], pos[1], stmt.name, symbol, True)
+            self._add(pos[0], pos[1], stmt.name, symbol, True, 'variable')
             type_text = (_type_expr_text(stmt.type_ann)
                          if stmt.type_ann is not None
                          else self._expr_type_text(stmt.value))
-            self._scopes[-1][stmt.name] = (type_text, symbol)
+            self._scopes[-1][stmt.name] = (type_text, symbol, 'variable')
         elif isinstance(stmt, A.AssignStmt):
             self._visit_expr(stmt.target)
             self._visit_expr(stmt.value)
@@ -1205,8 +1418,8 @@ class _ReferenceWalker:
         else:
             col = pos.col
         symbol = ('local', self.path, pos.line, col)
-        self._add(pos.line, col, name, symbol, True)
-        self._scopes[-1][name] = (type_text, symbol)
+        self._add(pos.line, col, name, symbol, True, 'variable')
+        self._scopes[-1][name] = (type_text, symbol, 'variable')
 
     def _walk_pattern(self, pattern: A.MatchPattern) -> None:
         enum_decl = self._resolve_type_decl(pattern.enum_name)
@@ -1219,14 +1432,16 @@ class _ReferenceWalker:
             imp = self._aliases.get(qualifier)
             if imp is not None:
                 self._add(pattern.pos.line, pattern.pos.col, qualifier,
-                          ('alias', self.path, imp.line, qualifier))
+                          ('alias', self.path, imp.line, qualifier), False,
+                          'namespace')
             tail = pattern.enum_name.rsplit('.', 1)[-1]
             pos = self._pattern_segment_pos(pattern, tail)
             if pos is not None:
-                self._add(pos[0], pos[1], tail, _global_symbol(enum_decl))
+                self._add(pos[0], pos[1], tail, _global_symbol(enum_decl),
+                          False, 'enum')
         else:
             self._add(pattern.pos.line, pattern.pos.col, pattern.enum_name,
-                      _global_symbol(enum_decl))
+                      _global_symbol(enum_decl), False, 'enum')
         member = next((m for m in enum_decl.members
                        if m.name == pattern.member), None)
         if member is None:
@@ -1234,7 +1449,8 @@ class _ReferenceWalker:
         pos = self._pattern_member_pos(pattern)
         if pos is not None:
             self._add(pos[0], pos[1], pattern.member,
-                      _member_symbol(enum_decl, pattern.member))
+                      _member_symbol(enum_decl, pattern.member), False,
+                      'enumMember')
         if not pattern.bindings:
             return
         payload = _split_top(member.payload) if member.payload else []
@@ -1250,8 +1466,8 @@ class _ReferenceWalker:
             type_text = (self._qualify_type_text(payload[i], owner)
                          if i < len(payload) else '')
             symbol = ('local', self.path, pos[0], pos[1])
-            self._add(pos[0], pos[1], binding, symbol, True)
-            self._scopes[-1][binding] = (type_text, symbol)
+            self._add(pos[0], pos[1], binding, symbol, True, 'variable')
+            self._scopes[-1][binding] = (type_text, symbol, 'variable')
 
     def _pattern_member_pos(self, pattern: A.MatchPattern) \
             -> Optional[tuple[int, int]]:
@@ -1317,17 +1533,19 @@ class _ReferenceWalker:
     def _visit_name(self, expr: A.Name) -> None:
         local = self._lookup(expr.name)
         if local is not None:
-            self._add(expr.pos.line, expr.pos.col, expr.name, local[1])
+            self._add(expr.pos.line, expr.pos.col, expr.name, local[1],
+                      False, local[2])
             return
         decl = self._resolve_global(expr.name)
         if decl is not None:
             self._add(expr.pos.line, expr.pos.col, expr.name,
-                      _global_symbol(decl))
+                      _global_symbol(decl), False, _decl_kind(decl))
             return
         imp = self._aliases.get(expr.name)
         if imp is not None:
             self._add(expr.pos.line, expr.pos.col, expr.name,
-                      ('alias', self.path, imp.line, expr.name))
+                      ('alias', self.path, imp.line, expr.name), False,
+                      'namespace')
 
     def _visit_member(self, expr: A.Member) -> None:
         self._visit_expr(expr.obj)
@@ -1347,7 +1565,8 @@ class _ReferenceWalker:
                 pos = self._field_pos(expr)
                 if pos is not None:
                     self._add(pos[0], pos[1], expr.field,
-                              _global_symbol(target))
+                              _global_symbol(target), False,
+                              _decl_kind(target))
                 return
         receiver = self._receiver_decl(expr.obj)
         if receiver is None:
@@ -1358,11 +1577,13 @@ class _ReferenceWalker:
         if receiver.kind == 'struct':
             if any(f.name == expr.field for f in receiver.fields):
                 self._add(pos[0], pos[1], expr.field,
-                          _field_symbol(receiver, expr.field))
+                          _field_symbol(receiver, expr.field), False,
+                          'property')
         elif receiver.kind == 'enum':
             if any(m.name == expr.field for m in receiver.members):
                 self._add(pos[0], pos[1], expr.field,
-                          _member_symbol(receiver, expr.field))
+                          _member_symbol(receiver, expr.field), False,
+                          'enumMember')
 
     def _visit_constructor_labels(self, call: A.Call) -> None:
         decl = self._call_result_decl(call)
@@ -1375,7 +1596,7 @@ class _ReferenceWalker:
             pos = self._label_pos(call.args[i], label)
             if pos is not None:
                 self._add(pos[0], pos[1], label,
-                          _field_symbol(decl, label))
+                          _field_symbol(decl, label), False, 'property')
 
     def _field_pos(self, node: A.Member) -> Optional[tuple[int, int]]:
         if node.pos is None:
@@ -1433,18 +1654,20 @@ class _ReferenceWalker:
                 imp = self._aliases.get(qualifier)
                 if imp is not None:
                     self._add(te.pos.line, te.pos.col, qualifier,
-                              ('alias', self.path, imp.line, qualifier))
+                              ('alias', self.path, imp.line, qualifier), False,
+                              'namespace')
                 decl = self._resolve_type_decl(name)
                 if decl is not None:
                     pos = self._qualified_segment_pos(te, tail)
                     if pos is not None:
                         self._add(pos[0], pos[1], tail,
-                                  _global_symbol(decl))
+                                  _global_symbol(decl), False,
+                                  _decl_kind(decl))
             else:
                 decl = self._resolve_type_decl(name)
                 if decl is not None:
                     self._add(te.pos.line, te.pos.col, name,
-                              _global_symbol(decl))
+                              _global_symbol(decl), False, _decl_kind(decl))
         for arg in te.args or []:
             self._visit_type(arg)
 
@@ -2165,6 +2388,16 @@ class LanguageServer:
                     'renameProvider': {'prepareProvider': True},
                     'codeActionProvider': {'codeActionKinds': ['quickfix']},
                     'workspaceSymbolProvider': True,
+                    'semanticTokensProvider': {
+                        'legend': {
+                            'tokenTypes': SEMANTIC_TOKEN_TYPES,
+                            'tokenModifiers': SEMANTIC_TOKEN_MODIFIERS,
+                        },
+                        # A null selector means "use the client's", which is
+                        # what the VS Code language client expects.
+                        'documentSelector': None,
+                        'full': True,
+                    },
                     'documentSymbolProvider': True,
                 },
                 'serverInfo': {
@@ -2200,6 +2433,8 @@ class LanguageServer:
             self._response(msg_id, self._code_actions(params))
         elif method == 'workspace/symbol':
             self._response(msg_id, self._workspace_symbols(params))
+        elif method == 'textDocument/semanticTokens/full':
+            self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -3400,6 +3635,113 @@ class LanguageServer:
         files = _walk_vanta_files(root)
         self._file_list_cache[root] = (now, files)
         return files
+
+    # -- semantic tokens ----------------------------------------------------
+
+    def _semantic_tokens(self, params: dict) -> dict:
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return {'data': []}
+        project = self._project(doc)
+        module = project.current
+        lines = _lines(module.source)
+        tokens: list[tuple[int, int, int, int, int]] = []
+        # The walker resolves every identifier to a declaration, so the token
+        # kind is semantic rather than a guess from the spelling.
+        walker = _ReferenceWalker(module, project)
+        claimed: set[tuple[int, int]] = set()
+        for ref in walker.refs:
+            if ref.path != module.path or not ref.kind:
+                continue
+            line_text = _line_at(lines, ref.line - 1)
+            start = _py_to_lsp_char(line_text, ref.col - 1)
+            length = _utf16_len(ref.name)
+            if length <= 0:
+                continue
+            entry = _SEMANTIC_TOKEN_BY_KIND.get(ref.kind)
+            if entry is None:
+                continue
+            token_type, modifiers = entry
+            if ref.declaration:
+                modifiers |= ST_MOD_DECLARATION
+            claimed.add((ref.line, ref.col))
+            tokens.append((ref.line - 1, start, length, token_type,
+                           modifiers))
+        # Lexical tokens: keywords, strings, numbers, and comments.
+        tokens.extend(self._lexical_tokens(doc.text, lines))
+        # Builtins the walker cannot resolve, because they are not declared
+        # anywhere in the project.
+        tokens.extend(self._builtin_tokens(doc.text, lines, claimed))
+        tokens = _dedupe_tokens(tokens)
+        tokens.sort(key=lambda item: (item[0], item[1]))
+        data: list[int] = []
+        prev_line = 0
+        prev_start = 0
+        for line, start, length, token_type, modifiers in tokens:
+            delta_line = line - prev_line
+            delta_start = start - prev_start if delta_line == 0 else start
+            data.extend([delta_line, delta_start, length, token_type,
+                         modifiers])
+            prev_line = line
+            prev_start = start
+        return {'data': data}
+
+    def _builtin_tokens(self, text: str, lines: list[str],
+                        claimed: set[tuple[int, int]]) \
+            -> list[tuple[int, int, int, int, int]]:
+        """Builtin functions and types, which nothing declares."""
+        tokens: list[tuple[int, int, int, int, int]] = []
+        functions = _builtin_funcs()
+        types = _builtin_type_names()
+        try:
+            raw = Lexer(text, '<semantic>').tokenize()
+        except LexError:
+            return tokens
+        for token in raw:
+            if token.type != TT.IDENT:
+                continue
+            if (token.line, token.col) in claimed:
+                continue
+            name = str(token.value)
+            if name in functions:
+                token_type = ST_FUNCTION
+            elif name in types:
+                token_type = ST_TYPE
+            else:
+                continue
+            line_text = _line_at(lines, token.line - 1)
+            start = _py_to_lsp_char(line_text, token.col - 1)
+            length = _utf16_len(name)
+            if length <= 0:
+                continue
+            tokens.append((token.line - 1, start, length, token_type,
+                           ST_MOD_DEFAULT_LIBRARY))
+        return tokens
+
+    def _lexical_tokens(self, text: str, lines: list[str]) \
+            -> list[tuple[int, int, int, int, int]]:
+        """Keyword, string, number, and comment tokens for the buffer."""
+        tokens: list[tuple[int, int, int, int, int]] = []
+        try:
+            raw = Lexer(text, '<semantic>').tokenize()
+        except LexError:
+            return tokens
+        for token in raw:
+            if token.type in (TT.NEWLINE, TT.INDENT, TT.DEDENT, TT.EOF):
+                continue
+            if token.type == TT.IDENT:
+                continue
+            token_type = _SEMANTIC_LEXICAL_TYPE.get(token.type)
+            if token_type is None:
+                continue
+            line_text = _line_at(lines, token.line - 1)
+            start = _py_to_lsp_char(line_text, token.col - 1)
+            length = _lexical_token_length(token, line_text, token.col - 1)
+            if length <= 0:
+                continue
+            tokens.append((token.line - 1, start, length, token_type, 0))
+        tokens.extend(_comment_tokens(text, lines))
+        return tokens
 
     # -- document symbols --------------------------------------------------
 

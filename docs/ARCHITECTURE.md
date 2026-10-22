@@ -127,8 +127,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
-   rename (prepare and edit), quick fixes, workspace symbols, and document
-   symbols. The
+   rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
+   and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -227,6 +227,20 @@ substring, and finally a loose subsequence match, so `dmg` finds `damage`.
 The file list is cached for five seconds and each file is re-parsed only when
 its modification time, size, or unsaved buffer text changes, which keeps the
 editor's per-keystroke queries cheap.
+
+Semantic tokens (v0.54.0) answer `textDocument/semanticTokens/full`. The
+server reuses the scope-aware walker that powers references and rename, so
+each resolved identifier is classified by what it *is*: a function, a struct,
+an enum, a constant, a parameter, a local, a struct field, an enum member,
+or a module alias. The walker's `_Ref` grew a `kind` field for that, and
+`_decl_kind` maps a declaration to its kind. Lexical tokens (keywords,
+operators, strings, numbers, and comments) come from the lexer, except
+comments, which the lexer drops and `_comment_tokens` recovers by scanning
+the source. Token lengths are measured in the source rather than taken from
+the lexer's decoded values, so a string's escapes and a number's leading
+zeros are counted correctly. Builtins, which nothing in the project declares,
+are marked as library code. Overlapping tokens are dropped, keeping the
+resolved identifier over the lexical one.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -430,7 +444,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 831 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 834 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

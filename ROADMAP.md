@@ -5,10 +5,21 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.53.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.54.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.54.0
+
+Semantic highlighting landed. The server answers `textDocument/semanticTokens/full`
+and the editor colours code by what each name is: functions, structs, enums,
+constants, parameters, locals, struct fields, enum members, and module
+aliases, with builtins marked as library code. The classification is
+scope-aware, so a local and a field with the same name no longer look alike.
+834 tests total.
+
+The next editor work is formatting.
 
 ## Landed in v0.53.0
 
@@ -17,7 +28,7 @@ Symbol in Workspace searches the project: functions, structs, enums,
 constants, struct fields, and enum members, ranked by how well they match the
 query. 831 tests total.
 
-The next editor work is formatting and semantic tokens.
+The next editor work is formatting.
 
 ## Landed in v0.52.0
 
@@ -357,7 +368,8 @@ public declarations. `examples/modules_demo/` is the worked example.
 - Editor support is shipped in v0.32.0: `vanta lsp` plus the VS Code client
   provide diagnostics, completion, hover, definition, and document symbols.
   Signature help landed in v0.50.0, references and rename in v0.51.0, quick
-  fixes in v0.52.0, and workspace symbols in v0.53.0.
+  fixes in v0.52.0, workspace symbols in v0.53.0, and semantic highlighting in
+  v0.54.0.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and

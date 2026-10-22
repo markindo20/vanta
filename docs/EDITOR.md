@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.53.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.54.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -33,6 +33,10 @@ The server and debug adapter are part of the compiler package, so an installed
 - **Go to Symbol in Workspace** with `Ctrl+T`: functions, structs, enums,
   constants, struct fields, and enum members from every Vanta file in the
   project.
+- **Semantic highlighting**: names are coloured by what they are - a function,
+  a struct, an enum, a constant, a parameter, a local, a struct field, an
+  enum member, or a module alias - so a local and a field with the same name
+  no longer look alike.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -130,6 +134,35 @@ buffer is searched as it is on screen, not as it is on disk.
 Without a workspace root the server searches the open documents and the
 modules they import.
 
+## Semantic highlighting
+
+The editor colours Vanta code by what each name *is*, not by how it is
+spelled. The server answers `textDocument/semanticTokens/full` and uses the
+same scope-aware resolver that powers references and rename, so the colouring
+is exact:
+
+| Kind | Examples |
+| --- | --- |
+| function | `damage`, `main` |
+| struct | `Enemy` |
+| enum | `Color` |
+| constant | `LIMIT` (also marked read-only) |
+| parameter | `e`, `amount` |
+| local | `total` |
+| struct field | `hp` |
+| enum member | `red` |
+| module alias | `g` in `g.Enemy` |
+
+A local named `hp` and a field named `hp` therefore get different colours,
+and a shadowing inner local is told apart from the outer one. Builtins such
+as `print_i32` and `Vec2` are marked as library code, and a declaration is
+marked as one. Keywords, operators, strings, numbers, and comments keep their
+lexical colouring.
+
+The tokens are computed from the buffer as it is on screen, so an unsaved
+file is highlighted the way it is written, and a file that does not parse yet
+is still highlighted as far as it goes.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -160,11 +193,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.24.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.25.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.24.0.vsix
+code --install-extension vanta-language-0.25.0.vsix
 ```
 
 ### Build from source
@@ -173,7 +206,7 @@ code --install-extension vanta-language-0.24.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.24.0.vsix
+code --install-extension vanta-language-0.25.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -284,8 +317,8 @@ vanta lsp
 
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
-rename (with prepare support), quick fixes, workspace symbols, and document
-symbols. It does not require a workspace root to start.
+rename (with prepare support), quick fixes, workspace symbols, semantic tokens,
+and document symbols. It does not require a workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -317,6 +350,9 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - Workspace symbols cover the files under the workspace root and the imports
   of the open documents. A file that is neither in the root nor imported is
   not searched, and locals and parameters are not workspace symbols.
+- Semantic highlighting marks the kinds of names it can resolve. A name that
+  resolves to nothing is left to the lexical colouring, and a file that does
+  not parse is highlighted as far as it goes.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

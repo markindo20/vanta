@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.54.0 - 2026-10-22
+
+- Semantic highlighting. The server answers `textDocument/semanticTokens/full`,
+  so the editor colours Vanta code by what each name *is* rather than by how
+  it is spelled.
+- The classification is scope-aware, because it comes from the same resolver
+  that powers references and rename: a function, a struct, an enum, a
+  constant, a parameter, a local, a struct field, an enum member, and a module
+  alias each get their own kind. A local named `hp` and a field named `hp`
+  are no longer the same colour, and a shadowing inner local is told apart
+  from the outer one.
+- Builtins are marked as library code, so `print_i32` and `Vec2` read as
+  built-in rather than as user code. Keywords, operators, strings, numbers,
+  and comments keep their lexical colouring, and a declaration is marked as
+  such.
+- The tokens are computed from the buffer as it is on screen, so an unsaved
+  file is highlighted the way it is written.
+- Tests: 834 in total. New tests cover the capability, the classification of
+  declarations and uses, builtins, and a buffer that does not parse.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe semantic highlighting. The
+  VS Code extension is 0.25.0.
+
 ## v0.53.0 - 2026-10-22
 
 - Workspace symbols. The server answers `workspace/symbol`, so VS Code's
