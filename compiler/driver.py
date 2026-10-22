@@ -1006,6 +1006,38 @@ def _gdb_quote(value: str) -> str:
     return text
 
 
+def _gdb_python(gdb_path):
+    """True when this debugger is a GDB built with Python scripting."""
+    name = os.path.basename(str(gdb_path or '')).lower()
+    if 'gdb' not in name:
+        # lldb-mi has no Python console, and probing it would wait for input.
+        return False
+    try:
+        proc = subprocess.run([gdb_path, '--batch', '--nx', '-ex', 'python 1'],
+                              capture_output=True, text=True, timeout=8,
+                              stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _source_prelude(gdb_path, source):
+    """The GDB commands that make the Vanta file the current source.
+
+    A bare ``break 3`` uses GDB's current source file.  GDB picks the file the
+    C++ compiler was given - the generated ``main.cpp`` - because that is the
+    unit's name, so on a Linux GDB a line number typed at the ``vanta debug``
+    prompt landed in generated code.  Listing one line of the Vanta file makes
+    it the current source; the listing is run through GDB's Python API with
+    ``to_string`` so it prints nothing and the prompt stays where it was.
+    """
+    if not _gdb_python(gdb_path):
+        return []
+    path = os.path.abspath(source).replace('\\', '/')
+    command = 'list "' + path.replace('"', '\\"') + '":1'
+    return ['python gdb.execute(' + repr(command) + ', to_string=True)']
+
+
 def cmd_debug(args):
     """Build a program with Vanta source locations and debug it with GDB."""
     source = args.source
@@ -1040,6 +1072,8 @@ def cmd_debug(args):
         # `show args` in the session sees them.
         command += ['-ex', 'set args ' + ' '.join(
             _gdb_quote(item) for item in args.prog_args)]
+    for item in _source_prelude(gdb_path, source):
+        command += ['-ex', item]
     for item in args.exec:
         command += ['-ex', item]
     env = build.get('env') or dict(os.environ)

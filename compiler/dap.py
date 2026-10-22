@@ -566,10 +566,14 @@ def _probe_gdb(path: str) -> bool:
                               stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return False
-    output = proc.stdout + proc.stderr
+    output = (proc.stdout or '') + (proc.stderr or '')
     if proc.returncode != 0:
         return False
-    return 'GDB' in output or 'LLDB' in output
+    # A distribution builds spell the name in lower case - "GNU gdb (Ubuntu
+    # 15.0.50)" - so the banner is matched without regard to case.  An
+    # upper-case-only check refused a perfectly good /usr/bin/gdb.
+    lowered = output.lower()
+    return 'gdb' in lowered or 'lldb' in lowered
 
 
 def find_gdb(explicit=None) -> str:
@@ -606,7 +610,7 @@ def describe_gdb(path: str) -> str:
     text = (proc.stdout or '') + (proc.stderr or '')
     first = text.strip().splitlines()[0].strip() if text.strip() else ''
     base = os.path.basename(path).lower()
-    name = 'LLDB-MI' if 'lldb' in base or 'LLDB' in first else 'GDB'
+    name = 'LLDB-MI' if 'lldb' in base or 'lldb' in first.lower() else 'GDB'
     match = re.search(r'\b(\d+\.\d+(?:\.\d+)?)\b', first)
     if match:
         return f'{name} {match.group(1)}'
@@ -1614,6 +1618,8 @@ class DapAdapter:
             self._select_frame(thread_id, level)
             if kind == 'struct':
                 variables = self._struct_variables(thread_id, level, info)
+            elif kind == 'list':
+                variables = self._list_variables(thread_id, level, info)
             else:
                 variables = self._variables_for(thread_id, level, kind)
         except Exception as exc:
@@ -2250,12 +2256,70 @@ class DapAdapter:
             elif field_type == 'str' or field_type.startswith('List<'):
                 entry['value'] = self._display_value(path, field_type,
                                                      entry['value'])
+                if field_type.startswith('List<'):
+                    entry['variablesReference'] = self._new_var_ref(
+                        thread_id, level, 'list', expr=path,
+                        type=field_type)
             elif field_type in ('f32', 'f64'):
                 entry['value'] = _format_float(entry['value'])
+            if not entry['value'] and _looks_aggregate(field_type):
+                entry['value'] = '{...}'
             reference = self._memory_reference(path, display=field)
             if reference:
                 entry['memoryReference'] = reference
             out.append(entry)
+        return out
+
+    def _list_variables(self, thread_id, level, info):
+        """The items of a List, read one at a time.
+
+        A list is a handle to a heap header, so the length comes from the
+        header and one item is ``data[i]``.  A very long list is cut off: a
+        Variables view with ten thousand rows helps nobody.
+        """
+        expression = str(info.get('expr') or '')
+        element = _list_element_type(str(info.get('type') or ''))
+        value, ok = self._evaluate_expression(f'{expression}.h->len')
+        count = _int_or_none(value.strip()) if ok else None
+        if not count or count <= 0:
+            return []
+        layouts = self._program_tables()['layouts']
+        structs = layouts.get('structs', {})
+        enums = layouts.get('enums', {})
+        out = []
+        for index in range(min(count, _LIST_ITEM_LIMIT)):
+            path = f'{expression}.h->data[{index}]'
+            item, ok = self._evaluate_expression(path)
+            entry = {
+                'name': f'[{index}]',
+                'value': str(item) if ok else '<unavailable>',
+                'type': element,
+                'variablesReference': 0,
+            }
+            if element in structs:
+                entry['value'] = '{...}'
+                entry['variablesReference'] = self._new_var_ref(
+                    thread_id, level, 'struct', expr=path, type=element)
+            elif element.startswith('List<'):
+                entry['value'] = self._display_value(path, element,
+                                                     entry['value'])
+                entry['variablesReference'] = self._new_var_ref(
+                    thread_id, level, 'list', expr=path, type=element)
+            elif element == 'str':
+                entry['value'] = self._display_value(path, element,
+                                                     entry['value'])
+            elif element in enums:
+                entry['value'] = entry['value'].replace('vanta_user::', '')
+            elif element in ('f32', 'f64'):
+                entry['value'] = _format_float(entry['value'])
+            out.append(entry)
+        if count > _LIST_ITEM_LIMIT:
+            out.append({
+                'name': f'... {count - _LIST_ITEM_LIMIT} more',
+                'value': '',
+                'type': '',
+                'variablesReference': 0,
+            })
         return out
 
     def _watch_variables(self):
@@ -2331,8 +2395,14 @@ class DapAdapter:
             elif type_name in ('str',) or type_name.startswith('List<'):
                 entry['value'] = self._display_value(f'v_{display}', type_name,
                                                      str(value))
+                if type_name.startswith('List<'):
+                    entry['variablesReference'] = self._new_var_ref(
+                        thread_id, level, 'list', expr=f'v_{display}',
+                        type=type_name)
             elif type_name in ('f32', 'f64'):
                 entry['value'] = _format_float(entry['value'])
+            if not entry['value'] and _looks_aggregate(type_name):
+                entry['value'] = '{...}'
             reference = self._memory_reference(f'v_{display}', display)
             if reference:
                 entry['memoryReference'] = reference
@@ -2659,6 +2729,39 @@ def _translate_vanta_expression(expression: str) -> str:
     return ''.join(parts)
 
 
+_LIST_ITEM_LIMIT = 100
+
+
+_PRIMITIVE_TYPE_NAMES = frozenset({
+    'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'isize', 'usize',
+    'f32', 'f64', 'bool', 'char', 'str', 'void',
+})
+
+
+def _looks_aggregate(type_name: str) -> bool:
+    """True for a type a reader expects to expand rather than read.
+
+    GDB reports no value for an aggregate in a simple-values listing, so a
+    handle like ``Arena`` would otherwise show as an empty cell.  The types
+    that have a readable value of their own are listed; everything else is
+    shown as ``{...}``.
+    """
+    text = str(type_name or '').strip()
+    if not text or text in _PRIMITIVE_TYPE_NAMES:
+        return False
+    if text.startswith(('ptr<', '[', 'List<', 'func', '(')):
+        return False
+    return True
+
+
+def _list_element_type(type_name: str) -> str:
+    """The T of a ``List<T>`` name, or '' when the name is not a list."""
+    text = str(type_name or '').strip()
+    if not text.startswith('List<') or not text.endswith('>'):
+        return ''
+    return text[len('List<'):-1].strip()
+
+
 def _hit_condition_matches(spec, count: int) -> Optional[bool]:
     """Evaluate a DAP hit condition against a hit count.
 
@@ -2772,9 +2875,18 @@ def _format_float(value: str) -> str:
 
 
 def _strip_pointer(value: str) -> str:
-    """Drop the address GDB prints in front of a string."""
+    """The text of a string, without the address GDB prints in front of it.
+
+    GDB prints ``0x1234 "abc"`` for a string that has no symbol, and
+    ``0x1234 <vanta_user::v_LIMIT+4> "abc"`` when the characters happen to
+    live at a named address, so a symbol annotation is skipped when present.
+    A null pointer is the empty string.
+    """
     text = str(value).strip()
-    match = re.match(r'^0x[0-9a-fA-F]+\s+(".*")$', text, re.DOTALL)
+    if text in ('0x0', '0x0000000000000000', 'nullptr', 'null'):
+        return '""'
+    match = re.match(r'^0x[0-9a-fA-F]+(?:\s+<[^>]*>)?\s+(".*")$', text,
+                     re.DOTALL)
     if match:
         return match.group(1)
     return text

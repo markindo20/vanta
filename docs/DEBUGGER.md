@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.48.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.49.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -12,8 +12,9 @@ it:
 
 - line breakpoints, including breakpoints in imported Vanta files
 - stack traces with Vanta file paths and line numbers
-- **Locals** and **Arguments** scopes, with structs that expand into their
-  fields and enums that show their member
+- **Locals** and **Arguments** scopes, with structs and lists that expand
+  into their fields and items, strings shown as text, and enums that show
+  their member
 - continue, pause, step over, step into, and step out
 - `stopOnEntry`
 - program stdout/stderr in the debug console
@@ -92,7 +93,7 @@ reads DWARF and not PDB.
 
 ## Requirements
 
-- Vanta 0.48.0 or newer (`vanta --version`)
+- Vanta 0.49.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -116,7 +117,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.19.0.vsix
+code --install-extension vanta-language-0.20.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -154,7 +155,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.19.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.20.0.vsix`.
 
 ## Breakpoints
 
@@ -199,6 +200,14 @@ time the program stops. Expressions use Vanta names, so `total`, `hp`, and
 `len(items)` all work. An expression that cannot be evaluated - because the
 variable is not in scope yet, for example - shows `<not available>` instead of
 failing the session.
+
+## Structs, lists, and strings
+
+A struct expands into its fields, and a `List<T>` expands into its items -
+`[0]`, `[1]`, and so on - each of which expands again when it holds a
+struct. A list stops at its first hundred items and a final row counts the
+rest. A `str` is shown as the text it holds rather than as the address of
+its characters, and an enum shows the member the programmer wrote.
 
 ## Values in hex
 
@@ -477,8 +486,8 @@ vanta build game.vnt --debug -o build/game-debug.exe
 - Only locals declared with `mut` can be edited, and a field of a struct
   follows the binding that holds it. Module constants and immutable
   bindings are refused on purpose.
-- A struct expands into its fields, but a list shows its length rather
-  than its items, and an enum with a payload is shown as a number.
+- A list expands into its items, but only the first hundred; a final row
+  counts the rest. An enum with a payload is shown as a number.
 - Data breakpoints watch one address, so they stop on a write to that
   address, not on a change of a larger value such as a struct.
 - "Run to cursor" moves the program counter, which GDB does not fully

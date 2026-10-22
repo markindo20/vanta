@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.48.0)
+# Vanta - a game-oriented systems language (v0.49.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -122,7 +122,7 @@ the generated C++. On C++ compilation failure the generated source is saved to
 
 ### Editor support
 
-v0.48.0 ships a language server and a native debugger:
+v0.49.0 ships a language server and a native debugger:
 
 ```powershell
 vanta lsp
@@ -133,8 +133,8 @@ vanta dap
 hover, go-to-definition, and document symbols. `vanta dap` speaks the Debug
 Adapter Protocol and drives GDB/MI2: line, function, conditional,
 hit-count, log-point, data, and exception breakpoints, stack traces, locals and
-arguments with structs that expand into their fields and a scope for the
-program's constants, watch expressions,
+arguments with structs and lists that expand into their fields and items, a
+scope for the program's constants, watch expressions,
 editing mutable locals, registers, disassembly and memory, run-to-cursor,
 continue/step/pause, `stopOnEntry`, program output, attaching to a running
 program, debugging a program on another machine, restart, and clean
@@ -229,7 +229,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (782 tests) |
+| `tests/` | `unittest` suite (796 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -370,8 +370,9 @@ are real:
 Editor support covers diagnostics, completion, hover, definition, and
 document symbols through `vanta lsp` and the VS Code client. `vanta dap` adds
 native debugging: line, function, conditional, hit-count, log-point, data, and
-exception breakpoints, stack traces, locals and arguments with structs that
-expand into their fields, watch expressions, a hex toggle for integers, editing
+exception breakpoints, stack traces, locals and arguments with structs and
+lists that expand into their fields and items, watch expressions, a hex toggle
+for integers, editing
 mutable locals, registers, disassembly and memory, run-to-cursor,
 continue/step/pause, `stopOnEntry`,
 program output, attaching to a running program, debugging a program on another

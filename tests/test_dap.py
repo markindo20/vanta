@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from compiler.codegen_cpp import CodeGen
 from compiler.dap import (
@@ -21,7 +22,11 @@ from compiler.dap import (
     _internal_function_name,
     _interpolate_log_message,
     _is_truthy,
+    _list_element_type,
+    _looks_aggregate,
     _mi_quote,
+    _probe_gdb,
+    _strip_pointer,
     _translate_vanta_expression,
     _value_type_problem,
     _vanta_type,
@@ -31,6 +36,8 @@ from compiler.dap import (
     write_dap_message,
 )
 from compiler.driver import (
+    _gdb_python,
+    _source_prelude,
     build_debug,
     find_debug_compiler,
     mutable_locals,
@@ -165,6 +172,28 @@ class AdapterFormattingTests(unittest.TestCase):
         self.assertEqual(_hex_if_integer('"42"'), '"42"')
         self.assertEqual(_hex_if_integer('0x10'), '0x10')
         self.assertEqual(_hex_if_integer('true'), 'true')
+
+    def test_a_string_is_shown_without_its_address(self):
+        self.assertEqual(_strip_pointer('0x1234 "abc"'), '"abc"')
+        self.assertEqual(_strip_pointer('0x1234 <vanta_user::v_LIMIT+4> "abc"'),
+                         '"abc"')
+        self.assertEqual(_strip_pointer('0x0'), '""')
+        self.assertEqual(_strip_pointer('0x1234'), '0x1234')
+
+    def test_a_list_name_gives_its_element_type(self):
+        self.assertEqual(_list_element_type('List<i32>'), 'i32')
+        self.assertEqual(_list_element_type('List<List<i32>>'), 'List<i32>')
+        self.assertEqual(_list_element_type('Enemy'), '')
+        self.assertEqual(_list_element_type(''), '')
+
+    def test_an_aggregate_name_is_recognised(self):
+        self.assertTrue(_looks_aggregate('Enemy'))
+        self.assertTrue(_looks_aggregate('Arena'))
+        self.assertFalse(_looks_aggregate('i32'))
+        self.assertFalse(_looks_aggregate('str'))
+        self.assertFalse(_looks_aggregate('List<i32>'))
+        self.assertFalse(_looks_aggregate('ptr<u8>'))
+        self.assertFalse(_looks_aggregate('[i32, 4]'))
 
     def test_locals_hide_arguments(self):
         adapter = DapAdapter(io.BytesIO(), io.BytesIO())
@@ -1204,6 +1233,21 @@ class CommandLineArgumentTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_a_distribution_gdb_is_recognised(self):
+        banner = ('GNU gdb (Ubuntu 15.0.50.20240403-0ubuntu1) '
+                  '15.0.50.20240403-git\n')
+        completed = subprocess.CompletedProcess(['gdb', '--version'], 0,
+                                                stdout=banner, stderr='')
+        with mock.patch('compiler.dap.subprocess.run', return_value=completed):
+            self.assertTrue(_probe_gdb('/usr/bin/gdb'))
+
+    def test_a_program_that_is_not_a_debugger_is_refused(self):
+        completed = subprocess.CompletedProcess(['python', '--version'], 0,
+                                                stdout='Python 3.10.11\n',
+                                                stderr='')
+        with mock.patch('compiler.dap.subprocess.run', return_value=completed):
+            self.assertFalse(_probe_gdb('/usr/bin/python3'))
+
     def test_a_dashed_argument_reaches_the_program(self):
         result = subprocess.run(
             [sys.executable, '-m', 'compiler', 'run', self.source,
@@ -1214,6 +1258,12 @@ class CommandLineArgumentTests(unittest.TestCase):
         self.assertIn('7', result.stdout)
 
     def test_the_debugger_receives_the_program_arguments(self):
+        try:
+            find_gdb()
+        except GdbError:
+            raise unittest.SkipTest('no working GDB')
+        if not _debug_toolchain_available():
+            raise unittest.SkipTest('no GCC/Clang compiler')
         result = subprocess.run(
             [sys.executable, '-m', 'compiler', 'debug', self.source,
              '--build-dir', self.tmp, '--exec', 'show args',
@@ -1323,8 +1373,27 @@ class CommandLineDebugTests(unittest.TestCase):
                 capture_output=True, text=True,
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('main.vnt', result.stdout)
-            self.assertIn('line 3', result.stdout)
+            self.assertIn('main.vnt, line 3', result.stdout)
+
+
+class SourcePreludeTests(unittest.TestCase):
+    """A bare breakpoint number means the Vanta line, on any GDB."""
+
+    def test_the_vanta_file_becomes_the_current_source(self):
+        expected = os.path.abspath('/tmp/a b/main.vnt').replace('\\', '/')
+        with mock.patch('compiler.driver._gdb_python', return_value=True):
+            commands = _source_prelude('/usr/bin/gdb', '/tmp/a b/main.vnt')
+        self.assertEqual(len(commands), 1)
+        self.assertIn('list "%s":1' % expected, commands[0])
+        self.assertIn('to_string=True', commands[0])
+
+    def test_a_debugger_without_python_gets_no_prelude(self):
+        with mock.patch('compiler.driver._gdb_python', return_value=False):
+            self.assertEqual(_source_prelude('/usr/bin/lldb-mi', '/tmp/main.vnt'),
+                             [])
+
+    def test_lldb_mi_is_not_probed(self):
+        self.assertFalse(_gdb_python('/usr/bin/lldb-mi'))
 
 
 class DapSessionLogTests(_DapSessionTestCase):
@@ -1510,6 +1579,87 @@ class DapHexFormatTests(_DapSessionTestCase):
                                m.get('command') == 'evaluate')
         self.assertTrue(response['success'], response)
         self.assertEqual(response['body']['result'], '0xff')
+
+
+class DapStructuredValueTests(_DapSessionTestCase):
+    """Strings read as text and lists expand into their items."""
+
+    PROGRAM = ('struct Enemy:\n'
+               '    hp: i32\n'
+               '    name: str\n'
+               '\n'
+               'func main() -> void:\n'
+               '    let arena = Arena(4096)\n'
+               '    let xs = arena.list::<i32>()\n'
+               '    xs.push(7)\n'
+               '    xs.push(9)\n'
+               '    let enemies = arena.list::<Enemy>()\n'
+               '    enemies.push(Enemy(hp: 3, name: "orc"))\n'
+               '    let words = arena.list::<str>()\n'
+               '    words.push("hi")\n'
+               '    let empty = arena.list::<i32>()\n'
+               '    let hero = Enemy(hp: 10, name: "ivy")\n'
+               '    print_i32(xs[0])\n')
+
+    def setUp(self):
+        super().setUp()
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 16}])
+        self.configuration_done()
+        self.stopped_event()
+        self.locals = {v['name']: v for v in self.variables(self.scope('Locals'))}
+
+    def scope(self, name):
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(lambda m: m.get('type') == 'response' and
+                               m.get('command') == 'scopes')
+        for entry in response['body']['scopes']:
+            if entry['name'] == name:
+                return entry['variablesReference']
+        self.fail(f'no {name} scope')
+
+    def variables(self, reference):
+        self.send('variables', {'variablesReference': reference})
+        response = self.expect(lambda m: m.get('type') == 'response' and
+                               m.get('command') == 'variables')
+        self.assertTrue(response['success'], response)
+        return response['body']['variables']
+
+    def test_a_string_reads_as_text(self):
+        fields = self.variables(self.locals['hero']['variablesReference'])
+        values = {v['name']: v['value'] for v in fields}
+        self.assertEqual(values['name'], '"ivy"')
+        self.assertEqual(values['hp'], '10')
+
+    def test_a_list_expands_into_its_items(self):
+        self.assertEqual(self.locals['xs']['value'], '2 items')
+        items = self.variables(self.locals['xs']['variablesReference'])
+        self.assertEqual([(v['name'], v['value']) for v in items],
+                         [('[0]', '7'), ('[1]', '9')])
+
+    def test_a_list_of_structs_expands_through_the_items(self):
+        self.assertEqual(self.locals['enemies']['value'], '1 item')
+        items = self.variables(self.locals['enemies']['variablesReference'])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['value'], '{...}')
+        self.assertTrue(items[0]['variablesReference'])
+        fields = self.variables(items[0]['variablesReference'])
+        values = {v['name']: v['value'] for v in fields}
+        self.assertEqual(values, {'hp': '3', 'name': '"orc"'})
+
+    def test_a_list_of_strings_shows_text(self):
+        items = self.variables(self.locals['words']['variablesReference'])
+        self.assertEqual([(v['name'], v['value']) for v in items],
+                         [('[0]', '"hi"')])
+
+    def test_an_empty_list_has_no_items(self):
+        self.assertEqual(self.locals['empty']['value'], '0 items')
+        self.assertEqual(self.variables(self.locals['empty']['variablesReference']),
+                         [])
+
+    def test_a_handle_shows_braces(self):
+        self.assertEqual(self.locals['arena']['value'], '{...}')
 
 
 class DapGlobalsIntegrationTests(_DapSessionTestCase):

@@ -2,6 +2,39 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.49.0 - 2026-10-22
+
+- A distribution GDB is found. The probe looked for an upper-case `GDB` in
+  `--version`, and a Linux build prints `GNU gdb (Ubuntu 15.0.50)` in lower
+  case, so a perfectly good `/usr/bin/gdb` was reported as missing. The banner
+  is now matched without regard to case.
+- A bare breakpoint number means the Vanta line. GDB takes the generated C++
+  file as its current source on Linux, so `break 3` typed at the `vanta debug`
+  prompt landed in generated code there. The session now selects the Vanta file
+  before the prompt appears, through GDB's Python API so nothing is printed; a
+  debugger without Python keeps the old behaviour instead of failing to start.
+- A list expands. A `List<T>` in the Variables view opens into its items -
+  `[0]`, `[1]`, and so on - and an item that is a struct opens again into its
+  fields. A list stops at its first hundred items and a final row counts the
+  rest, so a long list cannot flood the view.
+- A string reads as text. A `str` field of a struct showed the address of its
+  characters, sometimes with a symbol annotation, instead of the text; it now
+  shows `"abc"`, and a null string shows `""`.
+- A handle shows braces. A type with no layout to expand, such as `Arena`,
+  showed an empty cell; it now shows `{...}`.
+- Tests: 796 in total. New tests cover string display with and without a symbol
+  annotation, a null string, list expansion for integers, strings, and structs,
+  an empty list, a handle, the helpers, the GDB probe, and the source prelude.
+  The command-line test that drives `vanta debug` now skips when no GDB is
+  installed instead of failing the suite, which is what made CI red on machines
+  without one; the CI job also lifts Ubuntu's ptrace restriction so the attach
+  test can run, and the SDL probe tolerates another platform's `sdl2-config`
+  on `PATH`.
+- Docs: `docs/DEBUGGER.md` documents how structs, lists, and strings read, and
+  the limitation about lists is corrected. README, CHANGELOG, ROADMAP,
+  docs/EDITOR.md, and docs/ARCHITECTURE.md are updated. The VS Code extension
+  is 0.20.0. Reverse debugging and MSVC/PDB support remain future work.
+
 ## v0.48.0 - 2026-10-22
 
 - Values in hex. The Variables view has a hex toggle: with it on, an integer

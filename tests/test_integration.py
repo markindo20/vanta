@@ -33,9 +33,16 @@ def _find_sdl2():
         return None
     cfg = shutil.which('sdl2-config')
     if cfg:
-        out = subprocess.run([cfg, '--libs'], capture_output=True, text=True).stdout
-        lib_dirs = [tok[2:] for tok in out.split() if tok.startswith('-L')]
-        return {'lib_dirs': lib_dirs, 'libs': ['SDL2']}
+        try:
+            out = subprocess.run([cfg, '--libs'], capture_output=True,
+                                 text=True).stdout
+        except (OSError, subprocess.SubprocessError):
+            # Another platform's sdl2-config can be on PATH - WSL sees the
+            # Windows one - and it cannot run here, so keep looking.
+            pass
+        else:
+            lib_dirs = [tok[2:] for tok in out.split() if tok.startswith('-L')]
+            return {'lib_dirs': lib_dirs, 'libs': ['SDL2']}
     import ctypes.util
     if ctypes.util.find_library('SDL2'):
         return {'lib_dirs': [], 'libs': ['SDL2']}
