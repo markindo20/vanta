@@ -2490,6 +2490,7 @@ class LanguageServer:
                     'workspaceSymbolProvider': True,
                     'documentFormattingProvider': True,
                     'inlayHintProvider': True,
+                    'codeLensProvider': {'resolveProvider': False},
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2539,6 +2540,8 @@ class LanguageServer:
             self._response(msg_id, self._formatting(params))
         elif method == 'textDocument/inlayHint':
             self._response(msg_id, self._inlay_hints(params))
+        elif method == 'textDocument/codeLens':
+            self._response(msg_id, self._code_lenses(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
@@ -3906,6 +3909,115 @@ class LanguageServer:
                 'paddingRight': False,
             })
         return hints
+
+    # -- code lens ---------------------------------------------------------
+
+    def _code_lenses(self, params: dict) -> list[dict]:
+        """Show how many places use each top-level function."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        project = self._project(doc)
+        for uri, other in self.documents.items():
+            if other.path and uri != doc.uri:
+                try:
+                    project._load(other.path, [])
+                except Exception:
+                    pass
+        uses = self._reference_uses(project)
+        lenses: list[dict] = []
+        for decl in project.current.decls:
+            if decl.kind not in ('func', 'extern_func'):
+                continue
+            refs = uses.get(_global_symbol(decl), [])
+            if not refs:
+                continue
+            range_ = self._decl_name_range(project.current, decl)
+            if range_ is None:
+                continue
+            locations = []
+            for ref in refs:
+                location = self._ref_location(project, ref)
+                if location is not None:
+                    locations.append(location)
+            if not locations:
+                continue
+            count = len(locations)
+            lenses.append({
+                'range': range_,
+                'command': {
+                    'title': ('1 reference' if count == 1
+                              else f'{count} references'),
+                    'command': 'editor.action.showReferences',
+                    'arguments': [
+                        doc.uri,
+                        {'line': range_['start']['line'],
+                         'character': range_['start']['character']},
+                        locations,
+                    ],
+                },
+            })
+        return lenses
+
+    def _reference_uses(self, project: _ProjectIndex) -> dict[tuple, list]:
+        """Every use of every symbol in the project, keyed by symbol."""
+        uses: dict[tuple, list] = {}
+        seen: set[tuple[str, int, int]] = set()
+        modules = list(project.cache.values())
+        if project.current not in modules:
+            modules.append(project.current)
+        for module in modules:
+            walker = _ReferenceWalker(module, project)
+            for ref in walker.refs:
+                if ref.declaration:
+                    continue
+                key = (ref.path, ref.line, ref.col)
+                if key in seen:
+                    continue
+                seen.add(key)
+                uses.setdefault(ref.symbol, []).append(ref)
+        return uses
+
+    def _decl_name_range(self, module: ModuleInfo,
+                         decl: DeclInfo) -> Optional[dict]:
+        lines = _lines(module.source)
+        line = decl.name_line or decl.line
+        if line < 1 or line > len(lines):
+            return None
+        line_text = lines[line - 1]
+        index = max(0, (decl.name_col or 1) - 1)
+        if line_text[index:index + len(decl.name)] != decl.name:
+            found = line_text.find(decl.name)
+            if found < 0:
+                return None
+            index = found
+        start = _py_to_lsp_char(line_text, index)
+        return {
+            'start': {'line': line - 1, 'character': start},
+            'end': {'line': line - 1,
+                    'character': start + _utf16_len(decl.name)},
+        }
+
+    def _ref_location(self, project: _ProjectIndex, ref) -> Optional[dict]:
+        module = project.cache.get(_norm_path(ref.path))
+        if module is None:
+            module = project.current if ref.path == project.current.path else None
+        if module is None:
+            return None
+        try:
+            uri = path_to_uri(ref.path)
+        except (ValueError, OSError):
+            return None
+        line_text = _line_at(_lines(module.source), ref.line - 1)
+        start = _py_to_lsp_char(line_text, ref.col - 1)
+        return {
+            'uri': uri,
+            'range': {
+                'start': {'line': ref.line - 1, 'character': start},
+                'end': {'line': ref.line - 1,
+                        'character': start + _utf16_len(ref.name)},
+            },
+        }
 
     # -- document symbols --------------------------------------------------
 

@@ -123,6 +123,7 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['workspaceSymbolProvider'])
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
+        self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
         self.assertEqual(caps['semanticTokensProvider']['full'], True)
         self.assertIn('function', caps['semanticTokensProvider']['legend']
                       ['tokenTypes'])
@@ -1363,6 +1364,43 @@ func main() -> i32:
         lines = [hint['position']['line'] for hint in hints
                  if hint['label'] == ': i32']
         self.assertEqual(sorted(lines), [7, 9])
+
+    def test_code_lenses_count_the_uses_of_a_function(self):
+        path = self.write('main.vnt', '''\
+func helper() -> i32:
+    return 1
+
+func main() -> i32:
+    let a = helper()
+    let b = helper()
+    return a + b
+''')
+        uri = self.open(path)
+        lenses = self.request('textDocument/codeLens', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(len(lenses), 1)
+        command = lenses[0]['command']
+        self.assertEqual(command['title'], '2 references')
+        self.assertEqual(command['command'], 'editor.action.showReferences')
+        locations = command['arguments'][2]
+        self.assertEqual(len(locations), 2)
+        self.assertEqual({loc['range']['start']['line'] for loc in locations},
+                         {4, 5})
+
+    def test_code_lenses_skip_an_unused_function(self):
+        path = self.write('main.vnt', '''\
+func unused() -> i32:
+    return 1
+
+func main() -> i32:
+    return 2
+''')
+        uri = self.open(path)
+        lenses = self.request('textDocument/codeLens', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(lenses, [])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

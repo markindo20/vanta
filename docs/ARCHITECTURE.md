@@ -134,7 +134,7 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   formatting, inlay hints, and document symbols. The
+   formatting, inlay hints, code lenses, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -256,6 +256,13 @@ shows `i32` rather than nothing, and it resolves a constructor to the
 struct it builds and a field access to the field's type. The hint is
 placed after the name and labelled `: i32`; a local that already has an
 annotation gets none, because the type is already written down.
+
+Code lenses (v0.57.0) answer `textDocument/codeLens`. The server walks the
+project with the reference walker, keeps the *uses* of every symbol (the
+declarations are left out, and a use is counted once even when two modules
+see it), and puts a lens above each top-level function that has one. The
+lens carries the locations and the `editor.action.showReferences` command,
+so the editor can open the list of them.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -472,7 +479,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 856 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 858 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

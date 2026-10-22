@@ -2,6 +2,22 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.57.0 - 2026-10-22
+
+- A code lens above every function that is used somewhere. The editor shows
+  how many places call it, and clicking the count opens the list of them.
+- The count is the number of *uses*, not of occurrences, and it is
+  scope-aware: a call in another module counts, a shadowing local with the
+  same name does not, and the declaration itself does not count. The count
+  therefore matches what **Find All References** would list.
+- The lens appears on the function's name and carries the locations, so the
+  editor can jump straight to a use.
+- Tests: 858 in total. New tests cover the capability, the count and the
+  locations, and a function nobody calls.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the code lens. The VS Code
+  extension is 0.28.0.
+
 ## v0.56.0 - 2026-10-22
 
 - Inlay hints. The server answers `textDocument/inlayHint`, so the editor
