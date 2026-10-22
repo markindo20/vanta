@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.47.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.48.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -20,7 +20,7 @@ it:
 - conditional breakpoints and hit counts
 - log points that print instead of stopping
 - function breakpoints
-- watch expressions in a **Watch** scope
+- watch expressions in a **Watch** scope, and a hex toggle for integers
 - editing mutable locals
 - data breakpoints that stop when a value changes
 - a registers view, a disassembly view with instruction breakpoints, and
@@ -92,7 +92,7 @@ reads DWARF and not PDB.
 
 ## Requirements
 
-- Vanta 0.47.0 or newer (`vanta --version`)
+- Vanta 0.48.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -116,7 +116,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.18.0.vsix
+code --install-extension vanta-language-0.19.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -154,7 +154,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.18.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.19.0.vsix`.
 
 ## Breakpoints
 
@@ -199,6 +199,14 @@ time the program stops. Expressions use Vanta names, so `total`, `hp`, and
 `len(items)` all work. An expression that cannot be evaluated - because the
 variable is not in scope yet, for example - shows `<not available>` instead of
 failing the session.
+
+## Values in hex
+
+The **Variables** view has a hex toggle. With it on, an integer shows in
+hexadecimal - `0xff` instead of `255` - in locals, arguments, globals,
+the fields of a struct, and the result of an expression in the Debug
+Console. Floating point values, strings, and addresses keep their own
+form, because a hex rendering of those says nothing a reader could use.
 
 ## Breakpoint lines and jumping to a line
 

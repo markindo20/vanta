@@ -820,7 +820,7 @@ class DapAdapter:
             'supportsModulesRequest': False,
             'supportsRestartRequest': True,
             'supportsExceptionOptions': False,
-            'supportsValueFormattingOptions': False,
+            'supportsValueFormattingOptions': True,
             'supportsExceptionInfoRequest': False,
             'supportsDataBreakpoints': True,
             'supportsReadMemoryRequest': True,
@@ -1619,6 +1619,9 @@ class DapAdapter:
         except Exception as exc:
             self.error(request, exc)
             return
+        if (args.get('format') or {}).get('hex'):
+            variables = [dict(entry, value=_hex_if_integer(entry.get('value', '')))
+                         for entry in variables]
         self.response(request, {'variables': variables})
 
     def _request_continue(self, request, args):
@@ -1666,6 +1669,8 @@ class DapAdapter:
         if not ok:
             self.error(request, f'cannot evaluate {expression!r}')
             return
+        if (args.get('format') or {}).get('hex'):
+            value = _hex_if_integer(value)
         self.response(request, {'result': value, 'variablesReference': 0})
 
     def _request_source(self, request, args):
@@ -2740,6 +2745,21 @@ def _remote_target(value):
             return None
         return host, port
     return None
+
+
+def _hex_if_integer(value: str) -> str:
+    """Show a plain integer in hexadecimal, for the editor's hex toggle.
+
+    Only a value that is nothing but an integer changes: a string keeps its
+    quotes, a float keeps its decimals, and an address keeps its own form.
+    """
+    text = str(value).strip()
+    if not re.fullmatch(r'-?\d+', text):
+        return text
+    number = int(text)
+    if number < 0:
+        return '-' + hex(-number)
+    return hex(number)
 
 
 def _format_float(value: str) -> str:

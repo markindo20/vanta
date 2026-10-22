@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.48.0 - 2026-10-22
+
+- Values in hex. The Variables view has a hex toggle: with it on, an integer
+  shows as `0xff` instead of `255`, in locals, arguments, globals, the fields
+  of a struct, and the result of an expression in the Debug Console. Floats,
+  strings, and addresses keep their own form. The session advertises
+  `supportsValueFormattingOptions`, so an editor offers the toggle.
+- Tests: 782 in total. New tests cover the formatting helper, a variables
+  request that asks for hex, a struct field in hex, an evaluate request in
+  hex, and the decimal display when no format is asked for.
+- Docs: `docs/DEBUGGER.md` documents the toggle; README, CHANGELOG, ROADMAP,
+  docs/EDITOR.md, and docs/ARCHITECTURE.md are updated. The VS Code extension
+  is 0.19.0. Reverse debugging and MSVC/PDB support remain future work.
+
 ## v0.47.0 - 2026-10-22
 
 - Breakpoints on instructions. The disassembly view can put a breakpoint on

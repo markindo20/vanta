@@ -16,6 +16,7 @@ from compiler.dap import (
     GdbMi,
     MiRecord,
     _frame_name,
+    _hex_if_integer,
     _hit_condition_matches,
     _internal_function_name,
     _interpolate_log_message,
@@ -155,6 +156,15 @@ class AdapterFormattingTests(unittest.TestCase):
         self.assertEqual(_vanta_type('float'), 'f32')
         self.assertEqual(_vanta_type('vanta::Str'), 'str')
         self.assertEqual(_vanta_type('vanta::StrBuilder'), 'StrBuilder')
+
+    def test_hex_values_only_change_integers(self):
+        self.assertEqual(_hex_if_integer('42'), '0x2a')
+        self.assertEqual(_hex_if_integer('255'), '0xff')
+        self.assertEqual(_hex_if_integer('-1'), '-0x1')
+        self.assertEqual(_hex_if_integer('9.810000'), '9.810000')
+        self.assertEqual(_hex_if_integer('"42"'), '"42"')
+        self.assertEqual(_hex_if_integer('0x10'), '0x10')
+        self.assertEqual(_hex_if_integer('true'), 'true')
 
     def test_locals_hide_arguments(self):
         adapter = DapAdapter(io.BytesIO(), io.BytesIO())
@@ -1425,6 +1435,81 @@ class DapInstructionTests(_DapSessionTestCase):
         entry = response['body']['breakpoints'][0]
         self.assertFalse(entry['verified'], entry)
         self.assertIn('not an address', entry['message'])
+
+
+class DapHexFormatTests(_DapSessionTestCase):
+    """The Variables view and the console can show integers in hex."""
+
+    PROGRAM = ('const LIMIT = 255\n'
+               '\n'
+               'struct Box:\n'
+               '    size: i32\n'
+               '    name: str\n'
+               '\n'
+               'func main() -> void:\n'
+               '    mut b = Box(size: 66, name: "abc")\n'
+               '    let count = LIMIT\n'
+               '    let ratio: f32 = 0.5\n'
+               '    print_i32(b.size)\n')
+
+    def stopped_in_main(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 11}])
+        self.configuration_done()
+        self.stopped_event()
+
+    def variables(self, reference, **extra):
+        arguments = {'variablesReference': reference}
+        arguments.update(extra)
+        self.send('variables', arguments)
+        response = self.expect(lambda m: m.get('type') == 'response' and
+                               m.get('command') == 'variables')
+        self.assertTrue(response['success'], response)
+        return response['body']['variables']
+
+    def scope_reference(self, name):
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(lambda m: m.get('type') == 'response' and
+                               m.get('command') == 'scopes')
+        for scope in response['body']['scopes']:
+            if scope['name'] == name:
+                return scope['variablesReference']
+        self.fail(f'no {name} scope')
+
+    def test_the_session_advertises_value_formatting(self):
+        capabilities = self.initialize()['body']
+        self.assertTrue(capabilities.get('supportsValueFormattingOptions'))
+
+    def test_a_variables_request_can_ask_for_hex(self):
+        self.stopped_in_main()
+        values = self.variables(self.scope_reference('Locals'),
+                                format={'hex': True})
+        by_name = {v['name']: v['value'] for v in values}
+        self.assertEqual(by_name['count'], '0xff')
+        self.assertEqual(by_name['ratio'], '0.500000')
+
+    def test_a_struct_field_can_be_shown_in_hex(self):
+        self.stopped_in_main()
+        values = self.variables(self.scope_reference('Locals'),
+                                format={'hex': True})
+        box = [v for v in values if v['name'] == 'b'][0]
+        fields = self.variables(box['variablesReference'], format={'hex': True})
+        self.assertEqual({v['name']: v['value'] for v in fields}['size'], '0x42')
+
+    def test_without_the_format_values_stay_decimal(self):
+        self.stopped_in_main()
+        values = self.variables(self.scope_reference('Locals'))
+        self.assertEqual({v['name']: v['value'] for v in values}['count'], '255')
+
+    def test_an_evaluate_request_can_ask_for_hex(self):
+        self.stopped_in_main()
+        self.send('evaluate', {'expression': 'count', 'frameId': 0,
+                               'context': 'repl', 'format': {'hex': True}})
+        response = self.expect(lambda m: m.get('type') == 'response' and
+                               m.get('command') == 'evaluate')
+        self.assertTrue(response['success'], response)
+        self.assertEqual(response['body']['result'], '0xff')
 
 
 class DapGlobalsIntegrationTests(_DapSessionTestCase):

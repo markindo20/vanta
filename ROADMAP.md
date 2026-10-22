@@ -5,10 +5,20 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.47.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.48.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.48.0
+
+Values in hex landed. The Variables view has a hex toggle, so an integer shows
+as `0xff` instead of `255` in locals, arguments, globals, struct fields, and
+the Debug Console; floats, strings, and addresses keep their own form. 782
+tests total.
+
+The next debugger milestone is deliberately separate again: reverse debugging
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.47.0
 
@@ -256,7 +266,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.48.0)
+## Next: language (candidate v0.49.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become
