@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.42.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.43.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -63,7 +63,7 @@ vanta debug game.vnt -- --level 2
 
 ## Requirements
 
-- Vanta 0.42.0 or newer (`vanta --version`)
+- Vanta 0.43.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -87,7 +87,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.13.0.vsix
+code --install-extension vanta-language-0.14.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -125,7 +125,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.13.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.14.0.vsix`.
 
 ## Breakpoints
 
@@ -308,6 +308,17 @@ enum State:
 
 A struct field that is itself a struct expands again, so a whole object tree
 can be walked without leaving the debugger.
+
+The **Globals** scope lists the program's constants, with the names and types
+the programmer wrote:
+
+```vanta
+const MAX_ENEMIES = 10
+const GRAVITY: f32 = 9.81
+```
+
+A constant is a value the program can read but not change, so the scope is
+read-only.
 
 ## Registers, disassembly, and memory
 

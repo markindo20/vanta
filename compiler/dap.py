@@ -954,7 +954,7 @@ class DapAdapter:
         return {
             'source_lines': source_lines(program),
             'mutable_locals': mutable_locals(program),
-            'layouts': program_layouts(tc),
+            'layouts': program_layouts(program, tc),
         }
 
     def _request_disassemble(self, request, args):
@@ -1441,6 +1441,11 @@ class DapAdapter:
             watch_ref = self._new_var_ref(thread_id, level, 'watch')
             scopes.append({'name': 'Watch', 'presentationHint': 'watch',
                            'variablesReference': watch_ref, 'expensive': False})
+        if self._program_tables()['layouts'].get('constants'):
+            globals_ref = self._new_var_ref(thread_id, level, 'globals')
+            scopes.append({'name': 'Globals', 'presentationHint': 'globals',
+                           'variablesReference': globals_ref,
+                           'expensive': False})
         self.response(request, {'scopes': scopes})
 
     def _request_variables(self, request, args):
@@ -2023,9 +2028,26 @@ class DapAdapter:
         self._variable_refs[ref] = info
         return ref
 
+    def _global_variables(self):
+        """The program's module constants, for the Globals scope."""
+        constants = self._program_tables()['layouts'].get('constants', {})
+        out = []
+        for internal, info in constants.items():
+            expression = f'v_{internal}'
+            value, ok = self._evaluate_expression(expression)
+            out.append({
+                'name': str(info.get('source') or internal),
+                'value': value if ok else '<unavailable>',
+                'type': str(info.get('type', '')),
+                'variablesReference': 0,
+            })
+        return out
+
     def _variables_for(self, thread_id, level, kind):
         if kind == 'watch':
             return self._watch_variables()
+        if kind == 'globals':
+            return self._global_variables()
         if kind == 'arguments':
             record = self._gdb.command('-stack-list-arguments --simple-values')
             args = []

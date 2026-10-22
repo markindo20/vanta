@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.43.0 - 2026-10-22
+
+- A Globals scope. The program's constants are listed in their own scope,
+  with the names and types the programmer wrote, so `const MAX_ENEMIES = 10`
+  shows up as `MAX_ENEMIES: i32 = 10`. A constant is a value the program can
+  read but not change, so the scope is read-only.
+- Docs and tests. `docs/DEBUGGER.md` documents the Globals scope. 764 tests
+  total, including a session that reads the constants. Reverse debugging and
+  MSVC/PDB support remain future work.
+
 ## v0.42.0 - 2026-10-22
 
 - Debugging from the terminal. `vanta debug game.vnt` builds the program with

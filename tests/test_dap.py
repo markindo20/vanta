@@ -599,7 +599,7 @@ class SourceLineTests(unittest.TestCase):
                         '    let p = Player(hp: 41, name: "hero")\n'
                         '    print_i32(p.hp)\n')
             program, tc = _frontend_only(path)
-            layouts = program_layouts(tc)
+            layouts = program_layouts(program, tc)
             self.assertIn('Player', layouts['structs'])
             self.assertEqual([name for name, _ in layouts['structs']['Player']],
                              ['hp', 'name'])
@@ -1240,6 +1240,42 @@ class CommandLineDebugTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('main.vnt', result.stdout)
             self.assertIn('line 3', result.stdout)
+
+
+class DapGlobalsIntegrationTests(_DapSessionTestCase):
+    """The program's constants are listed in their own scope."""
+
+    PROGRAM = ('const MAX_ENEMIES = 10\n'
+               'const GRAVITY: f32 = 9.81\n'
+               '\n'
+               'func main() -> void:\n'
+               '    let x = MAX_ENEMIES\n'
+               '    print_i32(x)\n')
+
+    def test_the_globals_scope_lists_the_constants(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 5}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('scopes', {'frameId': 0, 'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'scopes')
+        globals_scope = next((scope for scope in response['body']['scopes']
+                              if scope['name'] == 'Globals'), None)
+        self.assertTrue(globals_scope, response)
+        self.send('variables',
+                  {'variablesReference': globals_scope['variablesReference']})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'variables')
+        values = {v['name']: v for v in response['body']['variables']}
+        self.assertIn('MAX_ENEMIES', values)
+        self.assertEqual(values['MAX_ENEMIES']['value'], '10')
+        self.assertEqual(values['MAX_ENEMIES']['type'], 'i32')
+        self.assertIn('GRAVITY', values)
+        self.assertEqual(values['GRAVITY']['type'], 'f32')
 
 
 class DapFieldEditingIntegrationTests(_DapSessionTestCase):

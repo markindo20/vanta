@@ -592,12 +592,13 @@ def source_lines(program):
     }
 
 
-def program_layouts(tc):
-    """The fields of every struct and the members of every enum.
+def program_layouts(program, tc):
+    """The fields of every struct, the members of every enum, and the
+    program's constants.
 
-    The debugger uses this to expand a struct in the Variables view and to
-    show the member an enum holds.  The keys are the internal names, which
-    are the names the generated C++ uses.
+    The debugger uses this to expand a struct in the Variables view, to show
+    the member an enum holds, and to list the constants.  The keys are the
+    internal names, which are the names the generated C++ uses.
     """
     structs = {}
     for name, st in tc.structs.items():
@@ -610,7 +611,30 @@ def program_layouts(tc):
         if getattr(et, 'has_payloads', False):
             continue
         enums[name] = dict(et.members)
-    return {'structs': structs, 'enums': enums}
+    return {
+        'structs': structs,
+        'enums': enums,
+        'constants': program_constants(program, tc),
+    }
+
+
+def program_constants(program, tc):
+    """The program's module constants, with their source names and types.
+
+    The debugger uses this for the Globals scope: a constant is a value the
+    program can read but not change.
+    """
+    result = {}
+    for decl in program.decls:
+        if not isinstance(decl, A.ConstDecl):
+            continue
+        source = program.display_names.get(decl.name, decl.name)
+        type_obj = tc.constants.get(decl.name)
+        result[decl.name] = {
+            'source': source,
+            'type': repr(type_obj) if type_obj is not None else '',
+        }
+    return result
 
 
 def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
@@ -685,7 +709,7 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
         'types': program_types(program),
         'type_aliases': program_type_aliases(program),
         'source_lines': source_lines(program),
-        'layouts': program_layouts(tc),
+        'layouts': program_layouts(program, tc),
     }
 
 

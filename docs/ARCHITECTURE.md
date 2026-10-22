@@ -170,7 +170,7 @@ editor's project.
 ## Debugger (v0.33.0, depth in v0.34.0, editing in v0.35.0,
 navigation in v0.36.0, sessions in v0.37.0, data in v0.38.0,
 speed in v0.39.0, reach in v0.40.0, editing in v0.41.0,
-terminal in v0.42.0)
+terminal in v0.42.0, scope in v0.43.0)
 
 `vanta dap` runs `dap.py` as a stdio Debug Adapter Protocol server. A launch
 request names a Vanta source file; the adapter calls `build_debug()` in
@@ -358,7 +358,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 763 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 764 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session
