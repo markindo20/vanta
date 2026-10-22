@@ -134,7 +134,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   formatting, inlay hints, code lenses, and document symbols. The
+   formatting, inlay hints, code lenses, call hierarchy, and document symbols.
+   The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -263,6 +264,15 @@ declarations are left out, and a use is counted once even when two modules
 see it), and puts a lens above each top-level function that has one. The
 lens carries the locations and the `editor.action.showReferences` command,
 so the editor can open the list of them.
+
+The call hierarchy (v0.58.0) answers `textDocument/prepareCallHierarchy`
+and the two follow-up requests. The reference walker now records the
+function each occurrence sits in (`_Ref.enclosing`), so a use of a function
+can be attributed to the caller. `incomingCalls` groups the uses of the
+target by their caller, and `outgoingCalls` groups the uses inside the
+target by the function they name. The item's `data` field carries the
+global symbol, so the follow-up requests do not have to re-resolve the
+name.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -479,7 +489,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 858 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 860 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

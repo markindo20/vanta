@@ -1204,6 +1204,7 @@ class _Ref:
     symbol: tuple      # stable identity, see _ReferenceWalker
     declaration: bool = False
     kind: str = ''     # semantic kind: function, struct, variable, ...
+    enclosing: Optional[tuple] = None   # the function it appears in
 
 
 def _decl_kind(decl: 'DeclInfo') -> str:
@@ -1218,6 +1219,14 @@ def _decl_kind(decl: 'DeclInfo') -> str:
 
 def _global_symbol(decl: 'DeclInfo') -> tuple:
     return ('global', decl.path, decl.name_line, decl.name_col)
+
+
+def _symbol_from_item(item: dict) -> Optional[tuple]:
+    """The symbol a call hierarchy item stands for."""
+    data = item.get('data')
+    if not isinstance(data, list) or not data:
+        return None
+    return tuple(data)
 
 
 def _field_symbol(decl: 'DeclInfo', field: str) -> tuple:
@@ -1252,6 +1261,7 @@ class _ReferenceWalker:
         self.refs: list[_Ref] = []
         self.hints: list[_Hint] = []
         self._scopes: list[dict[str, tuple[str, tuple, str]]] = []
+        self._enclosing: list[tuple] = []
         self._aliases: dict[str, ImportInfo] = {
             imp.alias: imp for imp in module.imports
             if imp.alias and imp.target is not None
@@ -1266,8 +1276,9 @@ class _ReferenceWalker:
              declaration: bool = False, kind: str = '') -> None:
         if not name or line <= 0 or col <= 0:
             return
+        enclosing = self._enclosing[-1] if self._enclosing else None
         self.refs.append(_Ref(self.path, line, col, name, symbol, declaration,
-                              kind))
+                              kind, enclosing))
 
     def _seed_declarations(self) -> None:
         for decl in self.module.decls:
@@ -1289,6 +1300,13 @@ class _ReferenceWalker:
                 self._add(pos[0], pos[1], imp.alias,
                           ('alias', self.path, imp.line, imp.alias), True,
                           'namespace')
+
+    def _func_symbol(self, name: str) -> Optional[tuple]:
+        """The global symbol of a function declared in this module."""
+        for decl in self.module.decls:
+            if decl.name == name and decl.kind == 'func':
+                return _global_symbol(decl)
+        return None
 
     def _alias_decl_pos(self, imp: ImportInfo) -> Optional[tuple[int, int]]:
         line_text = _line_at(self.lines, imp.line - 1)
@@ -1321,7 +1339,7 @@ class _ReferenceWalker:
     def _walk_program(self, program: A.Program) -> None:
         for decl in program.decls:
             if isinstance(decl, A.FuncDecl):
-                self._walk_function(decl)
+                self._walk_function(decl, self._func_symbol(decl.name))
             elif isinstance(decl, A.StructDecl):
                 for _name, ftype, _pos in decl.fields:
                     self._visit_type(ftype)
@@ -1338,20 +1356,24 @@ class _ReferenceWalker:
                         self._visit_type(param.type)
                     self._visit_type(fd.ret)
 
-    def _walk_function(self, func: A.FuncDecl) -> None:
+    def _walk_function(self, func: A.FuncDecl, symbol: Optional[tuple] = None) \
+            -> None:
         scope: dict[str, tuple[str, tuple, str]] = {}
         self._scopes.append(scope)
+        self._enclosing.append(symbol) if symbol is not None else None
         try:
             for param in func.params:
-                symbol = ('local', self.path, param.pos.line, param.pos.col)
+                psymbol = ('local', self.path, param.pos.line, param.pos.col)
                 self._add(param.pos.line, param.pos.col, param.name,
-                          symbol, True, 'parameter')
-                scope[param.name] = (_type_expr_text(param.type), symbol,
+                          psymbol, True, 'parameter')
+                scope[param.name] = (_type_expr_text(param.type), psymbol,
                                      'parameter')
                 self._visit_type(param.type)
             self._visit_type(func.ret)
             self._walk_block(func.body)
         finally:
+            if symbol is not None:
+                self._enclosing.pop()
             self._scopes.pop()
 
     # -- statements --------------------------------------------------------
@@ -2491,6 +2513,7 @@ class LanguageServer:
                     'documentFormattingProvider': True,
                     'inlayHintProvider': True,
                     'codeLensProvider': {'resolveProvider': False},
+                    'callHierarchyProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2542,6 +2565,12 @@ class LanguageServer:
             self._response(msg_id, self._inlay_hints(params))
         elif method == 'textDocument/codeLens':
             self._response(msg_id, self._code_lenses(params))
+        elif method == 'textDocument/prepareCallHierarchy':
+            self._response(msg_id, self._call_hierarchy_prepare(params))
+        elif method == 'callHierarchy/incomingCalls':
+            self._response(msg_id, self._call_hierarchy_incoming(params))
+        elif method == 'callHierarchy/outgoingCalls':
+            self._response(msg_id, self._call_hierarchy_outgoing(params))
         elif method == 'textDocument/semanticTokens/full':
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentSymbol':
@@ -3909,6 +3938,159 @@ class LanguageServer:
                 'paddingRight': False,
             })
         return hints
+
+    # -- call hierarchy ----------------------------------------------------
+
+    def _call_hierarchy_prepare(self, params: dict) -> list[dict]:
+        """The function under the cursor, as a call hierarchy item."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        pos = params.get('position') or {}
+        line = int(pos.get('line', 0))
+        char = int(pos.get('character', 0))
+        project = self._project(doc)
+        module = project.current
+        for decl in module.decls:
+            if decl.kind not in ('func', 'extern_func'):
+                continue
+            range_ = self._decl_name_range(module, decl)
+            if range_ is None:
+                continue
+            if not (range_['start']['line'] <= line <= range_['end']['line']):
+                continue
+            if range_['start']['line'] == line and not (
+                    range_['start']['character'] <= char
+                    <= range_['end']['character']):
+                continue
+            return [self._call_item(project, decl)]
+        return []
+
+    def _call_hierarchy_incoming(self, params: dict) -> list[dict]:
+        """The functions that call the given one."""
+        item = params.get('item') or {}
+        symbol = _symbol_from_item(item)
+        if symbol is None:
+            return []
+        project = self._project_for_item(item)
+        if project is None:
+            return []
+        callers: dict[tuple, list] = {}
+        for ref in self._call_refs(project):
+            if ref.symbol != symbol or ref.enclosing is None:
+                continue
+            callers.setdefault(ref.enclosing, []).append(ref)
+        result: list[dict] = []
+        for enclosing, refs in callers.items():
+            decl = self._decl_for_symbol(project, enclosing)
+            if decl is None:
+                continue
+            ranges = []
+            for ref in refs:
+                location = self._ref_location(project, ref)
+                if location is not None:
+                    ranges.append(location['range'])
+            if not ranges:
+                continue
+            result.append({'from': self._call_item(project, decl),
+                           'fromRanges': ranges})
+        result.sort(key=lambda entry: entry['from']['name'])
+        return result
+
+    def _call_hierarchy_outgoing(self, params: dict) -> list[dict]:
+        """The functions that the given one calls."""
+        item = params.get('item') or {}
+        symbol = _symbol_from_item(item)
+        if symbol is None:
+            return []
+        project = self._project_for_item(item)
+        if project is None:
+            return []
+        callees: dict[tuple, list] = {}
+        for ref in self._call_refs(project):
+            if ref.enclosing != symbol or ref.kind != 'function':
+                continue
+            if ref.declaration:
+                continue
+            callees.setdefault(ref.symbol, []).append(ref)
+        result: list[dict] = []
+        for callee, refs in callees.items():
+            decl = self._decl_for_symbol(project, callee)
+            if decl is None:
+                continue
+            ranges = []
+            for ref in refs:
+                location = self._ref_location(project, ref)
+                if location is not None:
+                    ranges.append(location['range'])
+            if not ranges:
+                continue
+            result.append({'to': self._call_item(project, decl),
+                           'fromRanges': ranges})
+        result.sort(key=lambda entry: entry['to']['name'])
+        return result
+
+    def _call_refs(self, project: _ProjectIndex) -> list:
+        """Every reference in the project, with its enclosing function."""
+        refs: list = []
+        seen: set[tuple[str, int, int]] = set()
+        modules = list(project.cache.values())
+        if project.current not in modules:
+            modules.append(project.current)
+        for module in modules:
+            walker = _ReferenceWalker(module, project)
+            for ref in walker.refs:
+                key = (ref.path, ref.line, ref.col)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(ref)
+        return refs
+
+    def _project_for_item(self, item: dict) -> Optional[_ProjectIndex]:
+        uri = item.get('uri')
+        if not uri:
+            return None
+        doc = self._doc({'textDocument': {'uri': uri}})
+        if doc is None:
+            return None
+        return self._project(doc)
+
+    def _decl_for_symbol(self, project: _ProjectIndex,
+                         symbol: tuple) -> Optional[DeclInfo]:
+        if not symbol or symbol[0] != 'global':
+            return None
+        path = symbol[1]
+        module = project.cache.get(_norm_path(path))
+        if module is None:
+            return None
+        for decl in module.decls:
+            if _global_symbol(decl) == symbol:
+                return decl
+        return None
+
+    def _call_item(self, project: _ProjectIndex,
+                   decl: DeclInfo) -> dict:
+        module = project.cache.get(_norm_path(decl.path))
+        if module is None:
+            module = project.current
+        range_ = self._decl_name_range(module, decl) or {
+            'start': {'line': max(0, decl.line - 1), 'character': 0},
+            'end': {'line': max(0, decl.line - 1), 'character': 0},
+        }
+        try:
+            uri = path_to_uri(decl.path)
+        except (ValueError, OSError):
+            uri = ''
+        return {
+            'name': decl.name,
+            'kind': S_FUNCTION,
+            'detail': decl.detail,
+            'uri': uri,
+            'range': range_,
+            'selectionRange': range_,
+            'data': list(_global_symbol(decl)),
+        }
 
     # -- code lens ---------------------------------------------------------
 

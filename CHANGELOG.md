@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.58.0 - 2026-10-22
+
+- A call hierarchy. The server answers `textDocument/prepareCallHierarchy` and
+  the two follow-up requests, so VS Code can show who calls a function and
+  what a function calls.
+- The hierarchy is scope-aware, because it comes from the same resolver that
+  powers references and rename: a call in another module is a caller, a
+  local with the same name is not, and a function passed around as a value is
+  not a call either.
+- The caller's name and the line of the call are both reported, so the
+  editor can show "main calls helper, at line 12" and jump to it.
+- Tests: 860 in total. New tests cover the capability, the callers of a
+  function, the functions it calls, and a function with neither.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the call hierarchy. The VS
+  Code extension is 0.29.0.
+
 ## v0.57.0 - 2026-10-22
 
 - A code lens above every function that is used somewhere. The editor shows

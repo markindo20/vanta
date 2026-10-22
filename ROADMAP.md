@@ -5,10 +5,18 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.57.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.58.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.58.0
+
+A call hierarchy landed. The editor can show who calls a function and what
+a function calls, using the same scope-aware resolver that powers
+references and rename. 860 tests total.
+
+The next editor work is a type hierarchy.
 
 ## Landed in v0.57.0
 
@@ -16,7 +24,7 @@ A code lens landed. The editor shows how many places use each function, and
 clicking the count opens the list of them. The count is scope-aware and
 matches what Find All References would list. 858 tests total.
 
-The next editor work is a call hierarchy.
+The next editor work is a type hierarchy.
 
 ## Landed in v0.56.0
 
@@ -387,8 +395,8 @@ public declarations. `examples/modules_demo/` is the worked example.
   provide diagnostics, completion, hover, definition, and document symbols.
   Signature help landed in v0.50.0, references and rename in v0.51.0, quick
   fixes in v0.52.0, workspace symbols in v0.53.0, semantic highlighting in
-  v0.54.0, a source formatter in v0.55.0, inlay hints in v0.56.0, and a code
-  lens in v0.57.0.
+  v0.54.0, a source formatter in v0.55.0, inlay hints in v0.56.0, a code
+  lens in v0.57.0, and a call hierarchy in v0.58.0.
   Native debugging shipped in v0.33.0: source-mapped debug builds and a DAP
   adapter over GDB/MI2. Debugger depth shipped in v0.34.0: conditional and
   function breakpoints, hit counts, log points, watch expressions, and

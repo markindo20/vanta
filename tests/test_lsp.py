@@ -124,6 +124,7 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
+        self.assertTrue(caps['callHierarchyProvider'])
         self.assertEqual(caps['semanticTokensProvider']['full'], True)
         self.assertIn('function', caps['semanticTokensProvider']['legend']
                       ['tokenTypes'])
@@ -1401,6 +1402,57 @@ func main() -> i32:
             'textDocument': {'uri': uri},
         })[0]['result']
         self.assertEqual(lenses, [])
+
+    def test_call_hierarchy_shows_callers_and_callees(self):
+        path = self.write('main.vnt', '''\
+func helper() -> i32:
+    return 1
+
+func main() -> i32:
+    let a = helper()
+    return a
+''')
+        uri = self.open(path)
+        items = self.request('textDocument/prepareCallHierarchy', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 6},
+        })[0]['result']
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['name'], 'helper')
+
+        incoming = self.request('callHierarchy/incomingCalls', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual(len(incoming), 1)
+        self.assertEqual(incoming[0]['from']['name'], 'main')
+        self.assertEqual(incoming[0]['fromRanges'][0]['start']['line'], 4)
+
+        outgoing = self.request('callHierarchy/outgoingCalls', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual(outgoing, [])
+
+    def test_call_hierarchy_lists_what_a_function_calls(self):
+        path = self.write('main.vnt', '''\
+func helper() -> i32:
+    return 1
+
+func main() -> i32:
+    let a = helper()
+    return a
+''')
+        uri = self.open(path)
+        items = self.request('textDocument/prepareCallHierarchy', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 3, 'character': 6},
+        })[0]['result']
+        self.assertEqual(items[0]['name'], 'main')
+        outgoing = self.request('callHierarchy/outgoingCalls', {
+            'item': items[0],
+        })[0]['result']
+        self.assertEqual(len(outgoing), 1)
+        self.assertEqual(outgoing[0]['to']['name'], 'helper')
+        self.assertEqual(outgoing[0]['fromRanges'][0]['start']['line'], 4)
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

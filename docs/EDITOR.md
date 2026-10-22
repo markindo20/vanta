@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.57.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.58.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -44,6 +44,7 @@ The server and debug adapter are part of the compiler package, so an installed
   annotation, right where it is written.
 - **A code lens** above every function that is used somewhere, showing how
   many places call it; clicking the count opens the list.
+- **A call hierarchy**: who calls this function, and what does it call.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -231,6 +232,25 @@ what **Find All References** would list.
 A function nobody calls gets no lens, because "0 references" says nothing
 worth reading.
 
+## Call hierarchy
+
+Put the cursor on a function and the editor can show who calls it and what
+it calls:
+
+```vanta
+func helper() -> i32:     # called by main
+    return 1
+
+func main() -> i32:       # calls helper
+    return helper()
+```
+
+The hierarchy is scope-aware, because it comes from the same resolver that
+powers references and rename: a call in another module is a caller, a local
+with the same name in another function is not, and a function passed around
+as a value is not a call either. The line of each call is reported, so the
+editor can jump straight to it.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -261,11 +281,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.28.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.29.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.28.0.vsix
+code --install-extension vanta-language-0.29.0.vsix
 ```
 
 ### Build from source
@@ -274,7 +294,7 @@ code --install-extension vanta-language-0.28.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.28.0.vsix
+code --install-extension vanta-language-0.29.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -386,8 +406,8 @@ vanta lsp
 The server advertises UTF-16 positions, open/close document sync, full
 document changes, completion, signature help, hover, definition, references,
 rename (with prepare support), quick fixes, workspace symbols, semantic tokens,
-formatting, inlay hints, code lenses, and document symbols. It does not
-require a workspace root to start.
+formatting, inlay hints, code lenses, call hierarchy, and document symbols.
+It does not require a workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -429,6 +449,8 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   cannot establish is left out rather than guessed.
 - The code lens counts the uses of a function the project index can reach.
   A function called only from a file the index cannot load shows no lens.
+- The call hierarchy covers the files the project index can reach, and it
+  reports a call, not a mention: a function used as a value is not a caller.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses
