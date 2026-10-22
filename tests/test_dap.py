@@ -385,6 +385,7 @@ class _DapSessionTestCase(unittest.TestCase):
             m.get('command') == 'initialize')
         self.assertTrue(response['success'], response)
         self.expect(lambda m: m.get('event') == 'initialized')
+        return response
 
     def launch(self, **extra):
         arguments = {'program': self.source, 'cwd': self.tempdir}
@@ -1344,6 +1345,86 @@ class DapSessionLogTests(_DapSessionTestCase):
         self.assertIn('gdb> ', text)
         self.assertIn('-break-insert', text)
         self.assertIn('"type":"response"', text)
+
+
+class DapInstructionTests(_DapSessionTestCase):
+    """Instruction stepping and breakpoints on instruction addresses."""
+
+    def instruction_pointer(self) -> str:
+        self.send('stackTrace', {'threadId': 1, 'startFrame': 0, 'levels': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stackTrace')
+        frames = response['body']['stackFrames']
+        self.assertTrue(frames, response)
+        return frames[0]['instructionPointerReference']
+
+    def instructions(self, address: str, count: int = 8):
+        self.send('disassemble', {'address': address, 'instructionOffset': 0,
+                                  'instructionCount': count})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'disassemble')
+        self.assertTrue(response['success'], response)
+        return response['body']['instructions']
+
+    def stopped_at_line_three(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 3}])
+        self.configuration_done()
+        self.stopped_event()
+
+    def test_the_session_advertises_instruction_support(self):
+        capabilities = self.initialize()['body']
+        self.assertTrue(capabilities.get('supportsSetExpression'))
+        self.assertTrue(capabilities.get('supportsSteppingGranularity'))
+        self.assertTrue(capabilities.get('supportsInstructionBreakpoints'))
+
+    def test_a_next_request_can_step_a_single_instruction(self):
+        self.stopped_at_line_three()
+        before = self.instruction_pointer()
+        self.send('next', {'threadId': 1, 'granularity': 'instruction'})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'next')
+        event = self.stopped_event()
+        self.assertEqual(event['body']['reason'], 'step')
+        self.assertNotEqual(self.instruction_pointer(), before)
+
+    def test_a_breakpoint_on_an_instruction_stops_there(self):
+        self.stopped_at_line_three()
+        self.send('next', {'threadId': 1, 'granularity': 'instruction'})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'next')
+        self.stopped_event()
+        target = self.instructions(self.instruction_pointer())[2]['address']
+        self.send('setInstructionBreakpoints', {'breakpoints': [
+            {'instructionReference': target, 'offset': 0}]})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setInstructionBreakpoints')
+        self.assertTrue(response['success'], response)
+        entry = response['body']['breakpoints'][0]
+        self.assertTrue(entry['verified'], entry)
+        self.send('continue', {'threadId': 1})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'continue')
+        event = self.stopped_event()
+        self.assertEqual(event['body']['reason'], 'breakpoint')
+        self.assertEqual(event['body']['hitBreakpointIds'], [entry['id']])
+        self.assertEqual(int(self.instruction_pointer(), 16), int(target, 16))
+
+    def test_a_reference_that_is_not_an_address_is_reported(self):
+        self.stopped_at_line_three()
+        self.send('setInstructionBreakpoints', {'breakpoints': [
+            {'instructionReference': 'not-an-address'}]})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'setInstructionBreakpoints')
+        self.assertTrue(response['success'], response)
+        entry = response['body']['breakpoints'][0]
+        self.assertFalse(entry['verified'], entry)
+        self.assertIn('not an address', entry['message'])
 
 
 class DapGlobalsIntegrationTests(_DapSessionTestCase):

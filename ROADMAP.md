@@ -5,10 +5,21 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.46.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.47.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.47.0
+
+Instruction-level debugging landed. The disassembly view can put a
+breakpoint on a single address, an address breakpoint takes a condition, a
+hit count, and a log message, and stepping has an instruction granularity.
+The session also advertises what it can do, including `setExpression`,
+which worked but was never offered. 776 tests total.
+
+The next debugger milestone is deliberately separate again: reverse debugging
+and MSVC/PDB support. A debug session always uses an unoptimized build.
 
 ## Landed in v0.46.0
 
@@ -245,7 +256,7 @@ program compile unchanged. The resolver rejects private access, ambiguous
 unqualified imports, duplicate module names, and private types exposed by
 public declarations. `examples/modules_demo/` is the worked example.
 
-## Next: language (candidate v0.47.0)
+## Next: language (candidate v0.48.0)
 
 1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
    a package/search-path story were deliberately out of v0.30.0. They become

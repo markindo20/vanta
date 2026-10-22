@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.46.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.47.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -23,7 +23,8 @@ it:
 - watch expressions in a **Watch** scope
 - editing mutable locals
 - data breakpoints that stop when a value changes
-- a registers view, a disassembly view, and raw memory reads
+- a registers view, a disassembly view with instruction breakpoints, and
+  raw memory reads
 - valid breakpoint lines, and jumping to a line ("run to cursor")
 - exception breakpoints
 - attaching to a program that is already running
@@ -91,7 +92,7 @@ reads DWARF and not PDB.
 
 ## Requirements
 
-- Vanta 0.46.0 or newer (`vanta --version`)
+- Vanta 0.47.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -115,7 +116,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.17.0.vsix
+code --install-extension vanta-language-0.18.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -153,7 +154,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.17.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.18.0.vsix`.
 
 ## Breakpoints
 
@@ -354,8 +355,17 @@ read-only.
 The **Variables** view can be switched to the registers view, which lists the
 processor registers with their current values. The adapter also answers the
 DAP `readMemory` request, so an editor that shows raw memory can read it at
-any address the program reports, and it answers the `disassemble` request, so
-an editor can show the machine code of the current instruction.
+any address the program reports.
+
+The **Disassembly view** shows the machine code of the stopped frame. Every
+frame reports its instruction pointer, the `disassemble` request answers with
+the instructions around it, and `setInstructionBreakpoints` puts a breakpoint
+on a single instruction address. An address breakpoint takes a condition, a
+hit count, and a log message, exactly like a source breakpoint.
+
+Stepping has an instruction granularity as well: stepping in or over one
+instruction runs one instruction of the machine code rather than one Vanta
+statement.
 
 ## Restart
 
@@ -469,7 +479,9 @@ vanta build game.vnt --debug -o build/game-debug.exe
 - No reverse debugging.
 - An attached session cannot restart the program; stop it and start a new
   session.
-- No LLDB or MSVC/PDB backend. GDB/MI2 is the only transport.
+- MSVC/PDB is not supported. A debug build needs a GCC or Clang toolchain,
+  and the session is driven over the GDB/MI dialect by GDB, or by `lldb-mi`
+  on macOS when GDB is absent.
 - Multi-threaded programs expose GDB threads and report when a thread starts
   or exits, but the first milestone focuses on the main thread and
   all-thread stops.

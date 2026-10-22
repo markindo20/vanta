@@ -647,6 +647,8 @@ class DapAdapter:
         self._bp_meta: dict[str, dict] = {}
         self._function_requests: list[dict] = []
         self._function_breakpoints: list[str] = []
+        self._instruction_requests: list[dict] = []
+        self._instruction_breakpoints: list[str] = []
         self._data_breakpoints: list[str] = []
         self._catchpoints: list[str] = []
         self._watch_expressions: list[dict] = []
@@ -811,6 +813,7 @@ class DapAdapter:
             'supportsLogPoints': True,
             'supportsEvaluateForHovers': True,
             'supportsSetVariable': True,
+            'supportsSetExpression': True,
             'supportsRestartFrame': False,
             'supportsGotoTargetsRequest': True,
             'supportsCompletionsRequest': False,
@@ -825,8 +828,8 @@ class DapAdapter:
             'supportsCancelRequest': False,
             'supportsBreakpointLocationsRequest': True,
             'supportsClipboardContext': False,
-            'supportsSteppingGranularity': False,
-            'supportsInstructionBreakpoints': False,
+            'supportsSteppingGranularity': True,
+            'supportsInstructionBreakpoints': True,
             'supportsLoadedSourcesRequest': False,
             'supportsRegisterEvaluate': True,
             'exceptionBreakpointFilters': [
@@ -951,6 +954,84 @@ class DapAdapter:
         self._delete_function_breakpoints()
         out = [self._insert_function_breakpoint(bp) for bp in requested]
         self.response(request, {'breakpoints': out})
+
+    def _request_setInstructionBreakpoints(self, request, args):
+        """Breakpoints on disassembly addresses, from the disassembly view."""
+        requested = [dict(bp) for bp in (args.get('breakpoints') or [])]
+        self._instruction_requests = requested
+        if self._gdb is None:
+            self.response(request, {'breakpoints': [
+                {'verified': False, 'message': 'debugger has not started'}
+                for _ in requested
+            ]})
+            return
+        try:
+            result = self._apply_instruction_breakpoints(requested)
+        except Exception as exc:
+            self.error(request, exc)
+            return
+        self.response(request, {'breakpoints': result})
+
+    def _apply_instruction_breakpoints(self, requested):
+        """Insert one GDB breakpoint per instruction address.
+
+        The disassembly view reports an address for every instruction, and a
+        breakpoint there is `break *<address>`.  Conditions, hit counts, and
+        log messages travel through the same meta table the source
+        breakpoints use, so they behave the same way.
+        """
+        assert self._gdb is not None
+        for number in self._instruction_breakpoints:
+            self._bp_meta.pop(str(number), None)
+            try:
+                self._gdb.command(f'-break-delete {number}')
+            except Exception:
+                pass
+        self._instruction_breakpoints = []
+        out = []
+        for bp in requested:
+            reference = str(bp.get('instructionReference') or '').strip()
+            offset = _int_or_none(bp.get('offset')) or 0
+            try:
+                address = int(reference, 16)
+            except (TypeError, ValueError):
+                out.append({'verified': False,
+                            'instructionReference': reference,
+                            'offset': offset,
+                            'message': f'not an address: {reference}'})
+                continue
+            address += offset
+            try:
+                record = self._gdb.command(
+                    '-break-insert ' + _mi_quote(f'*{address:#x}'))
+                bkpt = record.results.get('bkpt') or {}
+                if not isinstance(bkpt, dict):
+                    out.append({'verified': False,
+                                'instructionReference': reference,
+                                'offset': offset,
+                                'message': 'GDB returned no breakpoint'})
+                    continue
+                number = str(bkpt.get('number', ''))
+                meta = self._breakpoint_meta(bp)
+                if number:
+                    self._instruction_breakpoints.append(number)
+                    if meta:
+                        self._bp_meta[number] = meta
+                entry = {
+                    'id': _int_or_none(number) or len(out) + 1,
+                    'verified': bool(bkpt.get('addr')),
+                    'instructionReference': reference,
+                    'offset': offset,
+                }
+                if meta.get('hitConditionError'):
+                    entry['message'] = meta['hitConditionError']
+                out.append(entry)
+            except Exception as exc:
+                out.append({'verified': False,
+                            'instructionReference': reference,
+                            'offset': offset,
+                            'message': str(exc)})
+        return out
 
     def _request_attach(self, request, args):
         """Attach to a program that is already running.
@@ -1378,6 +1459,11 @@ class DapAdapter:
                 self._insert_function_breakpoint(bp)
             except Exception as exc:
                 self.output('console', f'vanta debugger: {exc}\n')
+        if self._instruction_requests:
+            try:
+                self._apply_instruction_breakpoints(self._instruction_requests)
+            except Exception as exc:
+                self.output('console', f'vanta debugger: {exc}\n')
         if self._stop_on_entry:
             try:
                 record = self._gdb.run_command('-break-insert -t vanta_user::fn_main')
@@ -1539,7 +1625,10 @@ class DapAdapter:
         self._resume(request, '-exec-continue', args)
 
     def _request_next(self, request, args):
-        self._resume(request, '-exec-next', args)
+        if args.get('granularity') == 'instruction':
+            self._resume(request, '-exec-next-instruction', args)
+        else:
+            self._resume(request, '-exec-next', args)
 
     def _request_stepIn(self, request, args):
         granularity = args.get('granularity', 'statement')
@@ -1658,6 +1747,11 @@ class DapAdapter:
         for bp in list(self._function_requests):
             try:
                 self._insert_function_breakpoint(bp)
+            except Exception as exc:
+                self.output('console', f'vanta debugger: {exc}\n')
+        if self._instruction_requests:
+            try:
+                self._apply_instruction_breakpoints(self._instruction_requests)
             except Exception as exc:
                 self.output('console', f'vanta debugger: {exc}\n')
         if self._stop_on_entry:

@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.47.0 - 2026-10-22
+
+- Breakpoints on instructions. The disassembly view can put a breakpoint on
+  a single address, and an address breakpoint takes a condition, a hit
+  count, and a log message like a source breakpoint does. The program
+  stops with the same reason and the same breakpoint id.
+- Instruction stepping. Stepping in and over has an instruction
+  granularity, so one instruction of the machine code is run instead of
+  one Vanta statement.
+- The session now advertises what it can actually do. It says it supports
+  `setExpression` (editing a watch value worked but was not offered),
+  stepping granularity, and instruction breakpoints.
+- Docs and tests. `docs/DEBUGGER.md` documents the disassembly workflow and
+  states the toolchain limit accurately. 776 tests total, including
+  instruction stepping, an address breakpoint that stops where it was set,
+  a reference that is not an address, and the advertised capabilities.
+
 ## v0.46.0 - 2026-10-22
 
 - Recording a session. `vanta dap --log session.log` writes every DAP
