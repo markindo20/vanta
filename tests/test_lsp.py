@@ -76,6 +76,8 @@ class LspTests(unittest.TestCase):
         caps = result['capabilities']
         self.assertTrue(caps['hoverProvider'])
         self.assertTrue(caps['definitionProvider'])
+        self.assertTrue(caps['referencesProvider'])
+        self.assertEqual(caps['renameProvider'], {'prepareProvider': True})
         self.assertTrue(caps['documentSymbolProvider'])
         self.assertEqual(caps['textDocumentSync']['change'], 1)
         self.assertIn('.', caps['completionProvider']['triggerCharacters'])
@@ -505,6 +507,366 @@ func main() -> void:
             'position': {'line': 5, 'character': lsp_col},
         })[0]['result']
         self.assertEqual(definition[0]['range']['start']['line'], 0)
+
+    def test_references_local_scope_and_shadowing(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    let x: i32 = 1
+    if x > 0:
+        let x: i32 = 2
+        return x
+    return x
+''')
+        uri = self.open(path)
+
+        def refs(line, char, include_declaration=True):
+            ctx = {'includeDeclaration': include_declaration}
+            result = self.request('textDocument/references', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char},
+                'context': ctx,
+            })[0]['result']
+            return {(loc['range']['start']['line'],
+                     loc['range']['start']['character']) for loc in result}
+
+        # The outer binding does not include the shadowing inner binding.
+        self.assertEqual(refs(1, 8), {(1, 8), (2, 7), (5, 11)})
+        self.assertEqual(refs(1, 8, False), {(2, 7), (5, 11)})
+        self.assertEqual(refs(3, 12), {(3, 12), (4, 15)})
+
+        changes = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 8},
+            'newName': 'y',
+        })[0]['result']['changes']
+        edits = changes[uri]
+        self.assertEqual(
+            [(e['range']['start']['line'], e['range']['start']['character'],
+              e['newText']) for e in edits],
+            [(1, 8, 'y'), (2, 7, 'y'), (5, 11, 'y')])
+
+    def test_references_and_rename_imported_function(self):
+        math_path = self.write('math.vnt', '''\
+module math
+
+pub func add(a: i32, b: i32) -> i32:
+    return a + b
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "math.vnt" as math
+
+func main() -> i32:
+    return math.add(1, 2)
+''')
+        self.open(math_path)
+        uri = self.open(main_path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 16},
+        })[0]['result']
+        math_uri = path_to_uri(math_path)
+        self.assertEqual(
+            {(loc['uri'], loc['range']['start']['line'],
+              loc['range']['start']['character']) for loc in result},
+            {(uri, 5, 16), (math_uri, 2, 9)})
+
+        without_decl = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 16},
+            'context': {'includeDeclaration': False},
+        })[0]['result']
+        self.assertEqual(
+            {(loc['uri'], loc['range']['start']['line']) for loc in without_decl},
+            {(uri, 5)})
+
+        changes = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 16},
+            'newName': 'plus',
+        })[0]['result']['changes']
+        self.assertEqual(sorted(changes), sorted([uri, math_uri]))
+        self.assertEqual(changes[uri][0]['range']['start']['character'], 16)
+        self.assertEqual(changes[uri][0]['newText'], 'plus')
+        self.assertEqual(changes[math_uri][0]['range']['start']['line'], 2)
+        self.assertEqual(changes[math_uri][0]['range']['start']['character'], 9)
+
+    def test_references_struct_field_writes_and_labels(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+    name: i32
+
+func main() -> i32:
+    let e: Enemy = Enemy(hp: 1, name: 2)
+    e.hp = 3
+    return e.hp
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 4},
+        })[0]['result']
+        positions = {(loc['range']['start']['line'],
+                      loc['range']['start']['character']) for loc in result}
+        self.assertEqual(positions, {(1, 4), (5, 25), (6, 6), (7, 13)})
+
+        # Renaming the field also renames the constructor label, and never the
+        # same-named `name` field.
+        edits = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 4},
+            'newName': 'health',
+        })[0]['result']['changes'][uri]
+        self.assertEqual(
+            [(e['range']['start']['line'], e['range']['start']['character'])
+             for e in edits],
+            [(1, 4), (5, 25), (6, 6), (7, 13)])
+        self.assertNotIn('name', [e['newText'] for e in edits])
+
+    def test_references_enum_member_payload_and_match(self):
+        path = self.write('main.vnt', '''\
+enum Color:
+    red
+    green
+    blue(i32)
+
+func main() -> i32:
+    let c: Color = Color.red
+    let b: Color = Color.blue(7)
+    match c:
+        Color.red:
+            return 1
+        Color.blue(n):
+            return n
+        Color.green:
+            return 0
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 3, 'character': 4},
+        })[0]['result']
+        positions = {(loc['range']['start']['line'],
+                      loc['range']['start']['character']) for loc in result}
+        self.assertEqual(positions, {(3, 4), (7, 25), (11, 14)})
+
+        # Renaming from a match pattern renames the declaration and every use.
+        edits = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 11, 'character': 14},
+            'newName': 'azure',
+        })[0]['result']['changes'][uri]
+        self.assertEqual(
+            [(e['range']['start']['line'], e['range']['start']['character'])
+             for e in edits],
+            [(3, 4), (7, 25), (11, 14)])
+
+    def test_references_type_annotations_and_prepare_rename(self):
+        path = self.write('main.vnt', '''\
+struct Point:
+    x: i32
+
+func take(p: Point) -> Point:
+    let q: Point = p
+    return q
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 7},
+        })[0]['result']
+        positions = {(loc['range']['start']['line'],
+                      loc['range']['start']['character']) for loc in result}
+        self.assertEqual(positions, {(0, 7), (3, 13), (3, 23), (4, 11)})
+
+        prepared = self.request('textDocument/prepareRename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 3, 'character': 14},
+        })[0]['result']
+        self.assertEqual(prepared['placeholder'], 'Point')
+        self.assertEqual(prepared['range'], {
+            'start': {'line': 3, 'character': 13},
+            'end': {'line': 3, 'character': 18},
+        })
+
+        edits = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 7},
+            'newName': 'Coord',
+        })[0]['result']['changes'][uri]
+        self.assertEqual(len(edits), 4)
+        self.assertTrue(all(e['newText'] == 'Coord' for e in edits))
+
+    def test_references_module_alias(self):
+        math_path = self.write('math.vnt', '''\
+module math
+
+pub func add(a: i32, b: i32) -> i32:
+    return a + b
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "math.vnt" as m
+
+func main() -> i32:
+    return m.add(1, 2)
+''')
+        self.open(math_path)
+        uri = self.open(main_path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 11},
+        })[0]['result']
+        positions = {(loc['range']['start']['line'],
+                      loc['range']['start']['character']) for loc in result}
+        self.assertEqual(positions, {(2, 21), (5, 11)})
+
+        edits = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 11},
+            'newName': 'math',
+        })[0]['result']['changes'][uri]
+        self.assertEqual(
+            [(e['range']['start']['line'], e['range']['start']['character'])
+             for e in edits],
+            [(2, 21), (5, 11)])
+
+    def test_rename_refuses_builtins_unknown_names_and_keywords(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    print_i32(1)
+    let x: i32 = 1
+    return
+''')
+        uri = self.open(path)
+
+        def rename(line, char, new_name):
+            return self.request('textDocument/rename', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char},
+                'newName': new_name,
+            })[0]['result']
+
+        def prepare(line, char):
+            return self.request('textDocument/prepareRename', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char},
+            })[0]['result']
+
+        self.assertIsNone(rename(1, 4, 'print_u32'))   # builtin
+        self.assertIsNone(prepare(1, 4))
+        self.assertIsNone(rename(2, 8, '1bad'))        # invalid identifier
+        self.assertIsNone(rename(2, 8, 'func'))        # keyword
+        self.assertIsNotNone(rename(2, 8, 'value'))    # local variable
+
+    def test_rename_tolerates_unparsed_buffer(self):
+        path = self.write('main.vnt', '''\
+func main() -> i32:
+    return 1
+func broken(:
+''')
+        uri = self.open(path)
+        prepared = self.request('textDocument/prepareRename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 6},
+        })[0]['result']
+        self.assertEqual(prepared['placeholder'], 'main')
+        changes = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 6},
+            'newName': 'run',
+        })[0]['result']['changes']
+        self.assertEqual(changes[uri][0]['range']['start'],
+                         {'line': 0, 'character': 5})
+        self.assertEqual(changes[uri][0]['newText'], 'run')
+
+    def test_references_enum_through_alias_and_patterns(self):
+        math_path = self.write('math.vnt', '''\
+module math
+
+pub enum Shape:
+    circle(i32)
+    square(i32)
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "math.vnt" as m
+
+func area(s: m.Shape) -> i32:
+    match s:
+        m.Shape.circle(r):
+            return r
+        m.Shape.square(w):
+            return w
+    return 0
+''')
+        self.open(math_path)
+        uri = self.open(main_path)
+        math_uri = path_to_uri(math_path)
+
+        def refs(line, char):
+            result = self.request('textDocument/references', {
+                'textDocument': {'uri': uri},
+                'position': {'line': line, 'character': char},
+            })[0]['result']
+            return {(loc['uri'], loc['range']['start']['line'],
+                     loc['range']['start']['character']) for loc in result}
+
+        self.assertEqual(refs(6, 16), {(math_uri, 3, 4), (uri, 6, 16)})
+        self.assertEqual(refs(6, 10), {
+            (math_uri, 2, 9), (uri, 4, 15), (uri, 6, 10), (uri, 8, 10)})
+        self.assertEqual(refs(6, 8), {
+            (uri, 2, 21), (uri, 4, 13), (uri, 6, 8), (uri, 8, 8)})
+
+        edits = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 6, 'character': 10},
+            'newName': 'Form',
+        })[0]['result']['changes']
+        self.assertEqual(
+            [(e['range']['start']['line'], e['range']['start']['character'])
+             for e in edits[uri]],
+            [(4, 15), (6, 10), (8, 10)])
+        self.assertEqual(len(edits[math_uri]), 1)
+
+    def test_references_nested_imported_field_and_list_element(self):
+        game_path = self.write('game.vnt', '''\
+module game
+
+pub struct Inner:
+    hp: i32
+
+pub struct Outer:
+    inner: Inner
+    items: List<Inner>
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+
+import "game.vnt" as g
+
+func total(o: g.Outer) -> i32:
+    let inner = o.inner
+    let h: i32 = inner.hp
+    for item in o.items:
+        h = item.hp
+    return h
+''')
+        self.open(game_path)
+        uri = self.open(main_path)
+        game_uri = path_to_uri(game_path)
+        result = self.request('textDocument/references', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 8, 'character': 17},
+        })[0]['result']
+        self.assertEqual(
+            {(loc['uri'], loc['range']['start']['line'],
+              loc['range']['start']['character']) for loc in result},
+            {(game_uri, 3, 4), (uri, 6, 23), (uri, 8, 17)})
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

@@ -28,6 +28,7 @@ from . import VERSION
 from . import ast_nodes as A
 from .lexer import LexError, Lexer
 from .loader import LoadError, STDLIB_DIR, load_program
+from .tokens import KEYWORDS
 from .parser import ParseError, Parser
 from .tokens import KEYWORDS
 from .type_checker import CheckError, TypeChecker
@@ -305,6 +306,9 @@ class ModuleInfo:
     is_legacy: bool = True
     decls: list[DeclInfo] = field(default_factory=list)
     imports: list[ImportInfo] = field(default_factory=list)
+    # The parsed program when the buffer parses, else None.  Editor features
+    # that need lexical scopes (references, rename) walk this AST.
+    program: Optional[A.Program] = None
 
     def public_decls(self) -> list[DeclInfo]:
         if self.is_legacy:
@@ -429,6 +433,7 @@ class _ProjectIndex:
                         path=d.path, alias=d.alias,
                         line=d.pos.line, col=d.pos.col))
             mod.imports = ast_imports
+        mod.program = program
         self._finish_ranges(mod.decls, source_lines)
         return mod
 
@@ -847,6 +852,13 @@ def _base_type_name(type_name: str) -> str:
     return type_name.split('<', 1)[0].strip()
 
 
+def _return_type_text(detail: str) -> str:
+    """Extract the return type from a DeclInfo detail string."""
+    if '->' not in detail:
+        return ''
+    return detail.rsplit('->', 1)[1].strip()
+
+
 def _type_expr_text(te: Optional[A.TypeExpr]) -> str:
     if te is None:
         return 'void'
@@ -880,6 +892,698 @@ def _split_top(text: str, sep: str = ',') -> list[str]:
             start = i + 1
     parts.append(text[start:].strip())
     return [p for p in parts if p]
+
+
+# ---------------------------------------------------------------------------
+# Scope-aware references (navigation and rename)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Ref:
+    """One occurrence of a symbol, with a stable workspace symbol key."""
+
+    path: str
+    line: int          # 1-based
+    col: int           # 1-based, Python characters (not UTF-16 units)
+    name: str          # exact source text to replace
+    symbol: tuple      # stable identity, see _ReferenceWalker
+    declaration: bool = False
+
+
+def _global_symbol(decl: 'DeclInfo') -> tuple:
+    return ('global', decl.path, decl.name_line, decl.name_col)
+
+
+def _field_symbol(decl: 'DeclInfo', field: str) -> tuple:
+    return ('field', decl.path, decl.name_line, decl.name_col, field)
+
+
+def _member_symbol(decl: 'DeclInfo', member: str) -> tuple:
+    return ('member', decl.path, decl.name_line, decl.name_col, member)
+
+
+class _ReferenceWalker:
+    """Collect every resolvable identifier occurrence in one module.
+
+    Symbols are identified by stable tuples so occurrences found in different
+    modules (and in separate walks) can be compared:
+
+    ``('global', path, line, col)``          a top-level declaration
+    ``('local', path, line, col)``           a parameter or local binding
+    ``('field', path, line, col, name)``     a struct field
+    ``('member', path, line, col, name)``    an enum member
+    ``('alias', path, import_line, name)``   an import alias
+
+    The walk is deliberately conservative: when a type cannot be established,
+    the occurrence is not recorded rather than guessed.
+    """
+
+    def __init__(self, module: ModuleInfo, index: _ProjectIndex):
+        self.module = module
+        self.index = index
+        self.path = module.path
+        self.lines = _lines(module.source)
+        self.refs: list[_Ref] = []
+        self._scopes: list[dict[str, tuple[str, tuple]]] = []
+        self._aliases: dict[str, ImportInfo] = {
+            imp.alias: imp for imp in module.imports
+            if imp.alias and imp.target is not None
+        }
+        self._seed_declarations()
+        if module.program is not None:
+            self._walk_program(module.program)
+
+    # -- recording ---------------------------------------------------------
+
+    def _add(self, line: int, col: int, name: str, symbol: tuple,
+             declaration: bool = False) -> None:
+        if not name or line <= 0 or col <= 0:
+            return
+        self.refs.append(_Ref(self.path, line, col, name, symbol, declaration))
+
+    def _seed_declarations(self) -> None:
+        for decl in self.module.decls:
+            self._add(decl.name_line, decl.name_col, decl.name,
+                      _global_symbol(decl), True)
+            if decl.kind == 'struct':
+                for f in decl.fields:
+                    self._add(f.line, f.col, f.name,
+                              _field_symbol(decl, f.name), True)
+            elif decl.kind == 'enum':
+                for m in decl.members:
+                    self._add(m.line, m.col, m.name,
+                              _member_symbol(decl, m.name), True)
+        for imp in self.module.imports:
+            if not imp.alias:
+                continue
+            pos = self._alias_decl_pos(imp)
+            if pos is not None:
+                self._add(pos[0], pos[1], imp.alias,
+                          ('alias', self.path, imp.line, imp.alias), True)
+
+    def _alias_decl_pos(self, imp: ImportInfo) -> Optional[tuple[int, int]]:
+        line_text = _line_at(self.lines, imp.line - 1)
+        m = re.search(r'\bas\s+([A-Za-z_]\w*)', line_text)
+        if m and m.group(1) == imp.alias:
+            return imp.line, m.start(1) + 1
+        idx = line_text.find(imp.alias or '')
+        if idx >= 0:
+            return imp.line, idx + 1
+        return None
+
+    # -- scopes ------------------------------------------------------------
+
+    def _lookup(self, name: str) -> Optional[tuple[str, tuple]]:
+        for scope in reversed(self._scopes):
+            hit = scope.get(name)
+            if hit is not None:
+                return hit
+        return None
+
+    def _walk_scoped(self, body: list) -> None:
+        self._scopes.append({})
+        try:
+            self._walk_block(body)
+        finally:
+            self._scopes.pop()
+
+    # -- declarations ------------------------------------------------------
+
+    def _walk_program(self, program: A.Program) -> None:
+        for decl in program.decls:
+            if isinstance(decl, A.FuncDecl):
+                self._walk_function(decl)
+            elif isinstance(decl, A.StructDecl):
+                for _name, ftype, _pos in decl.fields:
+                    self._visit_type(ftype)
+            elif isinstance(decl, A.EnumDecl):
+                for member in decl.members:
+                    for payload_type in (member.payload or []):
+                        self._visit_type(payload_type)
+            elif isinstance(decl, A.ConstDecl):
+                self._visit_type(decl.type_ann)
+                self._visit_expr(decl.value)
+            elif isinstance(decl, A.ExternDecl):
+                for fd in decl.funcs:
+                    for param in fd.params:
+                        self._visit_type(param.type)
+                    self._visit_type(fd.ret)
+
+    def _walk_function(self, func: A.FuncDecl) -> None:
+        scope: dict[str, tuple[str, tuple]] = {}
+        self._scopes.append(scope)
+        try:
+            for param in func.params:
+                symbol = ('local', self.path, param.pos.line, param.pos.col)
+                self._add(param.pos.line, param.pos.col, param.name,
+                          symbol, True)
+                scope[param.name] = (_type_expr_text(param.type), symbol)
+                self._visit_type(param.type)
+            self._visit_type(func.ret)
+            self._walk_block(func.body)
+        finally:
+            self._scopes.pop()
+
+    # -- statements --------------------------------------------------------
+
+    def _walk_block(self, body: list) -> None:
+        for stmt in body or []:
+            self._walk_stmt(stmt)
+
+    def _walk_stmt(self, stmt: Any) -> None:
+        if isinstance(stmt, A.VarDecl):
+            self._visit_type(stmt.type_ann)
+            self._visit_expr(stmt.value)
+            pos = _find_name_pos(self.lines, stmt.pos, stmt.name)
+            symbol = ('local', self.path, pos[0], pos[1])
+            self._add(pos[0], pos[1], stmt.name, symbol, True)
+            type_text = (_type_expr_text(stmt.type_ann)
+                         if stmt.type_ann is not None
+                         else self._expr_type_text(stmt.value))
+            self._scopes[-1][stmt.name] = (type_text, symbol)
+        elif isinstance(stmt, A.AssignStmt):
+            self._visit_expr(stmt.target)
+            self._visit_expr(stmt.value)
+        elif isinstance(stmt, A.ReturnStmt):
+            self._visit_expr(stmt.value)
+        elif isinstance(stmt, A.ExprStmt):
+            self._visit_expr(stmt.expr)
+        elif isinstance(stmt, A.IfStmt):
+            self._visit_expr(stmt.cond)
+            self._walk_scoped(stmt.then_body)
+            for cond, body in stmt.elif_branches or []:
+                self._visit_expr(cond)
+                self._walk_scoped(body)
+            if stmt.else_body is not None:
+                self._walk_scoped(stmt.else_body)
+        elif isinstance(stmt, A.WhileStmt):
+            self._visit_expr(stmt.cond)
+            self._walk_scoped(stmt.body)
+        elif isinstance(stmt, A.ForRangeStmt):
+            self._visit_expr(stmt.start)
+            self._visit_expr(stmt.end)
+            self._visit_expr(stmt.step)
+            self._scopes.append({})
+            try:
+                self._bind_loop_var(stmt.var, stmt.pos, 'i32')
+                self._walk_block(stmt.body)
+            finally:
+                self._scopes.pop()
+        elif isinstance(stmt, A.ForEachStmt):
+            self._visit_expr(stmt.iterable)
+            self._scopes.append({})
+            try:
+                element = self._element_type_text(
+                    self._expr_type_text(stmt.iterable))
+                self._bind_loop_var(stmt.var, stmt.pos, element)
+                self._walk_block(stmt.body)
+            finally:
+                self._scopes.pop()
+        elif isinstance(stmt, A.MatchStmt):
+            self._visit_expr(stmt.value)
+            for arm in stmt.arms:
+                self._scopes.append({})
+                try:
+                    for pattern in arm.patterns:
+                        self._walk_pattern(pattern)
+                    self._walk_block(arm.body)
+                finally:
+                    self._scopes.pop()
+
+    def _bind_loop_var(self, name: str, pos: A.Pos, type_text: str) -> None:
+        line_text = _line_at(self.lines, pos.line - 1)
+        start = max(0, pos.col - 1)
+        m = re.search(r'\bfor\s+([A-Za-z_]\w*)', line_text[start:])
+        if m is not None:
+            col = start + m.start(1) + 1
+        else:
+            col = pos.col
+        symbol = ('local', self.path, pos.line, col)
+        self._add(pos.line, col, name, symbol, True)
+        self._scopes[-1][name] = (type_text, symbol)
+
+    def _walk_pattern(self, pattern: A.MatchPattern) -> None:
+        enum_decl = self._resolve_type_decl(pattern.enum_name)
+        if enum_decl is None or enum_decl.kind != 'enum':
+            return
+        # The qualifier is a type name (`Color.`) or an alias plus a type
+        # (`math.Shape.`); keep both renameable, not just the member.
+        if '.' in pattern.enum_name:
+            qualifier = pattern.enum_name.split('.', 1)[0]
+            imp = self._aliases.get(qualifier)
+            if imp is not None:
+                self._add(pattern.pos.line, pattern.pos.col, qualifier,
+                          ('alias', self.path, imp.line, qualifier))
+            tail = pattern.enum_name.rsplit('.', 1)[-1]
+            pos = self._pattern_segment_pos(pattern, tail)
+            if pos is not None:
+                self._add(pos[0], pos[1], tail, _global_symbol(enum_decl))
+        else:
+            self._add(pattern.pos.line, pattern.pos.col, pattern.enum_name,
+                      _global_symbol(enum_decl))
+        member = next((m for m in enum_decl.members
+                       if m.name == pattern.member), None)
+        if member is None:
+            return
+        pos = self._pattern_member_pos(pattern)
+        if pos is not None:
+            self._add(pos[0], pos[1], pattern.member,
+                      _member_symbol(enum_decl, pattern.member))
+        if not pattern.bindings:
+            return
+        payload = _split_top(member.payload) if member.payload else []
+        owner = self._module_for_path(enum_decl.path)
+        used: set[tuple[int, int]] = set()
+        for i, binding in enumerate(pattern.bindings):
+            if binding == '_':
+                continue
+            pos = self._pattern_binding_pos(pattern, binding, used)
+            if pos is None:
+                continue
+            used.add(pos)
+            type_text = (self._qualify_type_text(payload[i], owner)
+                         if i < len(payload) else '')
+            symbol = ('local', self.path, pos[0], pos[1])
+            self._add(pos[0], pos[1], binding, symbol, True)
+            self._scopes[-1][binding] = (type_text, symbol)
+
+    def _pattern_member_pos(self, pattern: A.MatchPattern) \
+            -> Optional[tuple[int, int]]:
+        line_text = _line_at(self.lines, pattern.pos.line - 1)
+        start = max(0, pattern.pos.col - 1) + len(pattern.enum_name)
+        idx = line_text.find(pattern.member, start)
+        if idx >= 0:
+            return pattern.pos.line, idx + 1
+        idx = line_text.rfind(pattern.member, 0, len(line_text))
+        if idx >= 0:
+            return pattern.pos.line, idx + 1
+        return None
+
+    def _pattern_segment_pos(self, pattern: A.MatchPattern, segment: str) \
+            -> Optional[tuple[int, int]]:
+        line_text = _line_at(self.lines, pattern.pos.line - 1)
+        idx = line_text.find(segment, max(0, pattern.pos.col - 1))
+        if idx >= 0:
+            return pattern.pos.line, idx + 1
+        return None
+
+    def _pattern_binding_pos(self, pattern: A.MatchPattern, name: str,
+                             used: set) -> Optional[tuple[int, int]]:
+        line_text = _line_at(self.lines, pattern.pos.line - 1)
+        start = max(0, pattern.pos.col - 1)
+        paren = line_text.find('(', start)
+        if paren >= 0:
+            start = paren + 1
+        for m in re.finditer(r'\b' + re.escape(name) + r'\b', line_text[start:]):
+            pos = (pattern.pos.line, start + m.start() + 1)
+            if pos not in used:
+                return pos
+        return None
+
+    # -- expressions -------------------------------------------------------
+
+    def _visit_expr(self, expr: Any) -> None:
+        if expr is None:
+            return
+        if isinstance(expr, A.Name):
+            self._visit_name(expr)
+        elif isinstance(expr, A.Member):
+            self._visit_member(expr)
+        elif isinstance(expr, A.Call):
+            self._visit_expr(expr.func)
+            for arg in expr.args or []:
+                self._visit_expr(arg)
+            for type_arg in expr.type_args or []:
+                self._visit_type(type_arg)
+            self._visit_constructor_labels(expr)
+        elif isinstance(expr, A.Index):
+            self._visit_expr(expr.obj)
+            self._visit_expr(expr.index)
+        elif isinstance(expr, A.BinOp):
+            self._visit_expr(expr.left)
+            self._visit_expr(expr.right)
+        elif isinstance(expr, A.UnaryOp):
+            self._visit_expr(expr.operand)
+        elif isinstance(expr, A.ArrayLit):
+            for element in expr.elements:
+                self._visit_expr(element)
+
+    def _visit_name(self, expr: A.Name) -> None:
+        local = self._lookup(expr.name)
+        if local is not None:
+            self._add(expr.pos.line, expr.pos.col, expr.name, local[1])
+            return
+        decl = self._resolve_global(expr.name)
+        if decl is not None:
+            self._add(expr.pos.line, expr.pos.col, expr.name,
+                      _global_symbol(decl))
+            return
+        imp = self._aliases.get(expr.name)
+        if imp is not None:
+            self._add(expr.pos.line, expr.pos.col, expr.name,
+                      ('alias', self.path, imp.line, expr.name))
+
+    def _visit_member(self, expr: A.Member) -> None:
+        self._visit_expr(expr.obj)
+        # `alias.member` where member is a declaration in the imported module:
+        # a function call, constant, type, or enum member constructor.
+        if (isinstance(expr.obj, A.Name)
+                and self._lookup(expr.obj.name) is None
+                and expr.obj.name in self._aliases):
+            imp = self._aliases[expr.obj.name]
+            target: Optional[DeclInfo] = None
+            if imp.target is not None:
+                for decl in imp.target.public_decls():
+                    if decl.name == expr.field:
+                        target = decl
+                        break
+            if target is not None:
+                pos = self._field_pos(expr)
+                if pos is not None:
+                    self._add(pos[0], pos[1], expr.field,
+                              _global_symbol(target))
+                return
+        receiver = self._receiver_decl(expr.obj)
+        if receiver is None:
+            return
+        pos = self._field_pos(expr)
+        if pos is None:
+            return
+        if receiver.kind == 'struct':
+            if any(f.name == expr.field for f in receiver.fields):
+                self._add(pos[0], pos[1], expr.field,
+                          _field_symbol(receiver, expr.field))
+        elif receiver.kind == 'enum':
+            if any(m.name == expr.field for m in receiver.members):
+                self._add(pos[0], pos[1], expr.field,
+                          _member_symbol(receiver, expr.field))
+
+    def _visit_constructor_labels(self, call: A.Call) -> None:
+        decl = self._call_result_decl(call)
+        if decl is None or decl.kind != 'struct' or not call.arg_names:
+            return
+        fields = {f.name for f in decl.fields}
+        for i, label in enumerate(call.arg_names):
+            if not label or label not in fields or i >= len(call.args):
+                continue
+            pos = self._label_pos(call.args[i], label)
+            if pos is not None:
+                self._add(pos[0], pos[1], label,
+                          _field_symbol(decl, label))
+
+    def _field_pos(self, node: A.Member) -> Optional[tuple[int, int]]:
+        if node.pos is None:
+            return None
+        line_text = _line_at(self.lines, node.pos.line - 1)
+        start = max(0, node.pos.col)  # AST Member.pos is the dot token
+        m = re.match(r'\s*([A-Za-z_]\w*)', line_text[start:])
+        if m is not None and m.group(1) == node.field:
+            return node.pos.line, start + m.start(1) + 1
+        idx = line_text.find(node.field, start)
+        if idx >= 0:
+            return node.pos.line, idx + 1
+        return None
+
+    def _label_pos(self, arg: Any, label: str) \
+            -> Optional[tuple[int, int]]:
+        pos = getattr(arg, 'pos', None)
+        if pos is None:
+            return None
+        line_text = _line_at(self.lines, pos.line - 1)
+        prefix = line_text[:max(0, pos.col - 1)]
+        best = None
+        for m in re.finditer(r'\b' + re.escape(label) + r'\s*:', prefix):
+            best = m
+        if best is not None:
+            return pos.line, best.start() + 1
+        for line_no in range(pos.line - 2, max(-1, pos.line - 4), -1):
+            text = _line_at(self.lines, line_no)
+            for m in re.finditer(r'\b' + re.escape(label) + r'\s*:', text):
+                best = m
+            if best is not None:
+                return line_no + 1, best.start() + 1
+        return None
+
+    # -- types -------------------------------------------------------------
+
+    def _visit_type(self, te: Optional[A.TypeExpr]) -> None:
+        if te is None:
+            return
+        if te.kind == 'array':
+            self._visit_type(te.inner)
+            return
+        if te.kind == 'func':
+            for param in te.params or []:
+                self._visit_type(param)
+            self._visit_type(te.inner)
+            return
+        if te.kind in ('ptr', 'list'):
+            self._visit_type(te.inner)
+            return
+        name = te.name or ''
+        if name and te.pos is not None:
+            if '.' in name:
+                qualifier, _, tail = name.rpartition('.')
+                imp = self._aliases.get(qualifier)
+                if imp is not None:
+                    self._add(te.pos.line, te.pos.col, qualifier,
+                              ('alias', self.path, imp.line, qualifier))
+                decl = self._resolve_type_decl(name)
+                if decl is not None:
+                    pos = self._qualified_segment_pos(te, tail)
+                    if pos is not None:
+                        self._add(pos[0], pos[1], tail,
+                                  _global_symbol(decl))
+            else:
+                decl = self._resolve_type_decl(name)
+                if decl is not None:
+                    self._add(te.pos.line, te.pos.col, name,
+                              _global_symbol(decl))
+        for arg in te.args or []:
+            self._visit_type(arg)
+
+    def _qualified_segment_pos(self, te: A.TypeExpr, tail: str) \
+            -> Optional[tuple[int, int]]:
+        line_text = _line_at(self.lines, te.pos.line - 1)
+        idx = line_text.find(tail, max(0, te.pos.col - 1))
+        if idx >= 0:
+            return te.pos.line, idx + 1
+        return None
+
+    # -- symbol resolution -------------------------------------------------
+
+    def _module_aliases(self, module: ModuleInfo) -> dict[str, ImportInfo]:
+        if module is self.module:
+            return self._aliases
+        return {imp.alias: imp for imp in module.imports
+                if imp.alias and imp.target is not None}
+
+    def _module_for_path(self, path: str) -> ModuleInfo:
+        for module in self.index.cache.values():
+            if module.path == path:
+                return module
+        return self.module
+
+    def _qualified_name(self, decl: DeclInfo) -> str:
+        """Name that can be used to refer to decl from the current module."""
+        if self._resolve_global(decl.name) is decl:
+            return decl.name
+        for alias, imp in self._aliases.items():
+            if imp.target is None:
+                continue
+            for candidate in imp.target.public_decls():
+                if candidate is decl:
+                    return f'{alias}.{decl.name}'
+        return decl.name
+
+    def _qualify_type_text(self, type_text: str,
+                           owner: ModuleInfo) -> str:
+        """Qualify a type written in owner so the current module can resolve it."""
+        named = self._named_type_text(type_text)
+        decl = self._resolve_type_decl(named, owner)
+        if decl is None:
+            return type_text
+        qualified = self._qualified_name(decl)
+        if qualified == decl.name:
+            return type_text
+        return type_text.replace(decl.name, qualified, 1)
+
+    def _resolve_global(self, name: str,
+                        module: Optional[ModuleInfo] = None) \
+            -> Optional[DeclInfo]:
+        module = module or self.module
+        for decl in module.decls:
+            if decl.name == name:
+                return decl
+        for imp in module.imports:
+            if imp.alias is not None or imp.target is None:
+                continue
+            for decl in imp.target.public_decls():
+                if decl.name == name:
+                    return decl
+        return None
+
+    def _named_type_text(self, type_text: str) -> str:
+        text = (type_text or '').strip()
+        if text.startswith('List<') and text.endswith('>'):
+            text = text[len('List<'):-1].strip()
+        elif text.startswith('ptr<') and text.endswith('>'):
+            text = text[len('ptr<'):-1].strip()
+        elif text.startswith('[') and text.endswith(']'):
+            parts = _split_top(text[1:-1])
+            text = parts[0] if parts else ''
+        return _base_type_name(text)
+
+    def _resolve_type_decl(self, written: str,
+                           module: Optional[ModuleInfo] = None) \
+            -> Optional[DeclInfo]:
+        module = module or self.module
+        name = self._named_type_text(written)
+        if not name:
+            return None
+        if '.' in name:
+            qualifier, _, tail = name.rpartition('.')
+            imp = self._module_aliases(module).get(qualifier)
+            if imp is None or imp.target is None:
+                return None
+            for decl in imp.target.public_decls():
+                if decl.name == tail and decl.kind in ('struct', 'enum'):
+                    return decl
+            return None
+        decl = self._resolve_global(name, module)
+        if decl is not None and decl.kind in ('struct', 'enum'):
+            return decl
+        return None
+
+    def _element_type_text(self, type_text: str) -> str:
+        text = (type_text or '').strip()
+        if text.startswith('List<') and text.endswith('>'):
+            return text[len('List<'):-1].strip()
+        if text.startswith('[') and text.endswith(']'):
+            parts = _split_top(text[1:-1])
+            if parts:
+                return parts[0]
+        return ''
+
+    def _receiver_decl(self, expr: Any) -> Optional[DeclInfo]:
+        decl = self._type_decl_of_expr(expr)
+        if decl is not None:
+            return decl
+        if isinstance(expr, A.Name):
+            return self._resolve_type_decl(expr.name)
+        return None
+
+    def _type_decl_of_expr(self, expr: Any) -> Optional[DeclInfo]:
+        if expr is None:
+            return None
+        if isinstance(expr, A.Name):
+            local = self._lookup(expr.name)
+            if local is not None and local[0]:
+                return self._resolve_type_decl(local[0])
+            return None
+        if isinstance(expr, A.Call):
+            return self._call_result_decl(expr)
+        if isinstance(expr, A.Member):
+            if isinstance(expr.obj, A.Name) and expr.obj.name in self._aliases:
+                return self._resolve_type_decl(
+                    f'{expr.obj.name}.{expr.field}')
+            base = self._type_decl_of_expr(expr.obj)
+            if base is not None and base.kind == 'struct':
+                owner = self._module_for_path(base.path)
+                for f in base.fields:
+                    if f.name == expr.field:
+                        return self._resolve_type_decl(f.type_name, owner)
+            return None
+        if isinstance(expr, A.Index):
+            element = self._element_type_text(self._expr_type_text(expr.obj))
+            return self._resolve_type_decl(element)
+        return None
+
+    def _call_result_decl(self, call: A.Call) -> Optional[DeclInfo]:
+        if (isinstance(call.func, A.Member)
+                and call.func.field == 'alloc'
+                and call.type_args):
+            return self._resolve_type_decl(_type_expr_text(call.type_args[0]))
+        return self._callee_type_decl(call.func)
+
+    def _callee_type_decl(self, func: Any) -> Optional[DeclInfo]:
+        if isinstance(func, A.Name):
+            decl = self._resolve_global(func.name)
+            if decl is not None:
+                if decl.kind in ('struct', 'enum'):
+                    return decl
+                if decl.kind in ('func', 'system', 'extern_func'):
+                    ret = _return_type_text(decl.detail)
+                    if ret:
+                        owner = self._module_for_path(decl.path)
+                        return self._resolve_type_decl(ret, owner)
+            return self._resolve_type_decl(func.name)
+        if isinstance(func, A.Member) and isinstance(func.obj, A.Name):
+            if func.obj.name in self._aliases:
+                imp = self._aliases[func.obj.name]
+                if imp.target is not None:
+                    for decl in imp.target.public_decls():
+                        if decl.name != func.field:
+                            continue
+                        if decl.kind in ('struct', 'enum'):
+                            return decl
+                        if decl.kind in ('func', 'system', 'extern_func'):
+                            ret = _return_type_text(decl.detail)
+                            if ret:
+                                return self._resolve_type_decl(ret, imp.target)
+                return self._resolve_type_decl(
+                    f'{func.obj.name}.{func.field}')
+        return None
+
+    def _expr_type_text(self, expr: Any) -> str:
+        if expr is None:
+            return ''
+        if isinstance(expr, A.Name):
+            local = self._lookup(expr.name)
+            return local[0] if local is not None else ''
+        if isinstance(expr, A.Call):
+            if (isinstance(expr.func, A.Member)
+                    and expr.func.field == 'alloc'
+                    and expr.type_args):
+                return f'ptr<{_type_expr_text(expr.type_args[0])}>'
+            decl = self._callee_type_decl(expr.func)
+            if decl is None:
+                return ''
+            if (isinstance(expr.func, A.Member)
+                    and isinstance(expr.func.obj, A.Name)
+                    and expr.func.obj.name in self._aliases):
+                return f'{expr.func.obj.name}.{decl.name}'
+            return decl.name
+        if isinstance(expr, A.Member):
+            base = self._type_decl_of_expr(expr.obj)
+            if base is not None and base.kind == 'struct':
+                owner = self._module_for_path(base.path)
+                for f in base.fields:
+                    if f.name == expr.field:
+                        return self._qualify_type_text(f.type_name, owner)
+            return ''
+        if isinstance(expr, A.Index):
+            return self._element_type_text(self._expr_type_text(expr.obj))
+        if isinstance(expr, A.IntLit):
+            return 'i32'
+        if isinstance(expr, A.FloatLit):
+            return 'f32'
+        if isinstance(expr, A.BoolLit):
+            return 'bool'
+        if isinstance(expr, A.StringLit):
+            return 'str'
+        if isinstance(expr, A.ArrayLit) and expr.elements:
+            inner = self._expr_type_text(expr.elements[0])
+            return f'[{inner}, {len(expr.elements)}]' if inner else ''
+        if isinstance(expr, A.BinOp):
+            if expr.op in ('==', '!=', '<', '>', '<=', '>=', 'and', 'or'):
+                return 'bool'
+            return (self._expr_type_text(expr.left)
+                    or self._expr_type_text(expr.right))
+        if isinstance(expr, A.UnaryOp):
+            return self._expr_type_text(expr.operand)
+        return ''
 
 
 _SIGNATURE_RE = re.compile(
@@ -1363,6 +2067,8 @@ class LanguageServer:
                     },
                     'hoverProvider': True,
                     'definitionProvider': True,
+                    'referencesProvider': True,
+                    'renameProvider': {'prepareProvider': True},
                     'documentSymbolProvider': True,
                 },
                 'serverInfo': {
@@ -1388,6 +2094,12 @@ class LanguageServer:
             self._response(msg_id, self._hover(params))
         elif method == 'textDocument/definition':
             self._response(msg_id, self._definition(params))
+        elif method == 'textDocument/references':
+            self._response(msg_id, self._references(params))
+        elif method == 'textDocument/prepareRename':
+            self._response(msg_id, self._prepare_rename(params))
+        elif method == 'textDocument/rename':
+            self._response(msg_id, self._rename(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -1895,6 +2607,162 @@ class LanguageServer:
                                     _line_end(imp.line, imp.col, lines)),
                 }]
         return None
+
+    # -- references and rename ---------------------------------------------
+
+    def _reference_target(self, params: dict) -> Optional[dict]:
+        """Resolve the symbol under the cursor, or None if it cannot be renamed."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return None
+        project = self._project(doc)
+        # Index every open document, so references in sibling files that import
+        # this one are found even when the entry file does not import them.
+        for uri, other in self.documents.items():
+            if other.path and uri != doc.uri:
+                try:
+                    project._load(other.path, [])
+                except Exception:
+                    pass
+        lines = _lines(doc.text)
+        pos = params.get('position') or {}
+        line = max(0, min(int(pos.get('line', 0)), len(lines) - 1))
+        line_text = lines[line]
+        lsp_char = int(pos.get('character', 0))
+        word, start_lsp, end_lsp = _word_at(line_text, lsp_char)
+        if not word:
+            return None
+        py_start = _lsp_to_py_char(line_text, start_lsp)
+        walker = _ReferenceWalker(project.current, project)
+        symbol = None
+        for ref in walker.refs:
+            if ref.line == line + 1 and ref.col == py_start + 1:
+                symbol = ref.symbol
+                break
+        if symbol is None:
+            return None
+        modules: dict[str, ModuleInfo] = {}
+        for module in project.cache.values():
+            modules[_norm_path(module.path)] = module
+        modules[_norm_path(project.current.path)] = project.current
+        return {
+            'doc': doc,
+            'module': project.current,
+            'project': project,
+            'modules': modules,
+            'symbol': symbol,
+            'word': word,
+            'line': line,
+            'start': py_start,
+            'end': _lsp_to_py_char(line_text, end_lsp),
+        }
+
+    def _target_refs(self, target: dict) -> list[_Ref]:
+        symbol = target['symbol']
+        if symbol[0] in ('local', 'alias'):
+            modules = [target['module']]
+        else:
+            modules = list(target['modules'].values())
+        refs: list[_Ref] = []
+        seen: set[tuple[str, int, int]] = set()
+        for module in modules:
+            walker = _ReferenceWalker(module, target['project'])
+            for ref in walker.refs:
+                if ref.symbol != symbol:
+                    continue
+                key = (ref.path, ref.line, ref.col)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(ref)
+        return refs
+
+    def _ref_uri(self, target: dict, path: str) -> Optional[str]:
+        if path == '<untitled>':
+            return target['doc'].uri
+        try:
+            return path_to_uri(path)
+        except (ValueError, OSError):
+            return None
+
+    def _ref_range(self, target: dict, ref: _Ref) -> dict:
+        module = target['modules'].get(_norm_path(ref.path))
+        line_text = ''
+        if module is not None:
+            line_text = _line_at(_lines(module.source), ref.line - 1)
+        start = _py_to_lsp_char(line_text, ref.col - 1)
+        return {
+            'start': {'line': ref.line - 1, 'character': start},
+            'end': {'line': ref.line - 1,
+                    'character': start + _utf16_len(ref.name)},
+        }
+
+    def _references(self, params: dict) -> Optional[list[dict]]:
+        target = self._reference_target(params)
+        if target is None:
+            return None
+        include_declaration = True
+        context = params.get('context')
+        if isinstance(context, dict):
+            include_declaration = context.get('includeDeclaration', True)
+        locations: list[dict] = []
+        seen: set[tuple[str, int, int]] = set()
+        for ref in self._target_refs(target):
+            if not include_declaration and ref.declaration:
+                continue
+            uri = self._ref_uri(target, ref.path)
+            if uri is None:
+                continue
+            key = (uri, ref.line, ref.col)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append({'uri': uri, 'range': self._ref_range(target, ref)})
+        locations.sort(key=lambda loc: (
+            loc['uri'], loc['range']['start']['line'],
+            loc['range']['start']['character']))
+        return locations
+
+    def _prepare_rename(self, params: dict) -> Optional[dict]:
+        target = self._reference_target(params)
+        if target is None:
+            return None
+        line_text = _line_at(_lines(target['doc'].text), target['line'])
+        start = _py_to_lsp_char(line_text, target['start'])
+        end = _py_to_lsp_char(line_text, target['end'])
+        return {
+            'range': {
+                'start': {'line': target['line'], 'character': start},
+                'end': {'line': target['line'], 'character': end},
+            },
+            'placeholder': target['word'],
+        }
+
+    def _rename(self, params: dict) -> Optional[dict]:
+        target = self._reference_target(params)
+        if target is None:
+            return None
+        new_name = params.get('newName') or ''
+        if re.fullmatch(r'[A-Za-z_]\w*', new_name) is None:
+            return None
+        if new_name in KEYWORDS:
+            return None
+        changes: dict[str, list[dict]] = {}
+        for ref in self._target_refs(target):
+            uri = self._ref_uri(target, ref.path)
+            if uri is None:
+                continue
+            edits = changes.setdefault(uri, [])
+            range_ = self._ref_range(target, ref)
+            if any(e['range'] == range_ for e in edits):
+                continue
+            edits.append({'range': range_, 'newText': new_name})
+        if not changes:
+            return None
+        for edits in changes.values():
+            edits.sort(key=lambda e: (
+                e['range']['start']['line'], e['range']['start']['character']))
+        return {'changes': changes}
 
     # -- document symbols --------------------------------------------------
 

@@ -5,10 +5,23 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.50.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.51.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.51.0
+
+References and rename landed. Find All References and Rename Symbol are
+scope-aware: locals respect shadowing, imported declarations are followed into
+their module and back out to every use, and edits span files. Struct fields
+bring constructor labels along, enum members bring `match` patterns along, and
+module aliases rewrite their `as` name and every qualified use. Builtins,
+keywords, and unresolved names are refused instead of guessed. 817 tests
+total.
+
+The next editor milestone is quick fixes: code actions for the diagnostics the
+server already publishes.
 
 ## Landed in v0.50.0
 

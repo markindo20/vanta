@@ -126,8 +126,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    rejects MSVC because GDB cannot read PDB debug information.
 10. `lsp.py` - the Language Server Protocol frontend. It implements JSON-RPC
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
-   diagnostics, completion, signature help, hover, definition, and document
-   symbols. The
+   diagnostics, completion, signature help, hover, definition, references,
+   rename (prepare and edit), and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 11. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -170,6 +170,24 @@ imported functions, builtins, function values, and the explicit method table
 share one format; struct constructors use their fields and enum payload
 members their types. The active parameter is the count of top-level commas
 between the opening parenthesis and the cursor.
+
+References and rename (v0.51.0) share one scope-aware walker over the parsed
+program (`_ReferenceWalker`). Every identifier occurrence resolves to a stable
+symbol tuple - a top-level declaration, a local binding, a struct field, an enum
+member, or an import alias - so two occurrences in different files compare
+equal only when they name the same declaration. The walker tracks lexical
+scopes for parameters, locals, `for` variables, and match-arm bindings;
+argument annotations, constructor calls, loop elements, index expressions, and
+function return types (parsed from the index's declaration detail) feed a small
+type inference used to resolve field and member receivers. `Member.pos` is the
+dot token and `TypeExpr.pos` the type name, so edits land on the exact
+identifier; a qualified type such as `math.Point` contributes a separate
+reference for the alias and for `Point`, a struct constructor contributes its
+`field:` labels, and a match pattern contributes its enum type, its member, and
+its bindings. Rename walks every module in the project index, dedupes by
+(uri, line, column), and returns a `changes` workspace edit with UTF-16 ranges.
+The declaration is recovered from the tolerant line scanner when the buffer
+does not parse, so rename still works mid-edit for the declaration itself.
 
 The VS Code client in `editors/vscode/` is TypeScript compiled with `tsc`. It
 uses `vscode-languageclient` over stdio and resolves the server command from
@@ -373,7 +391,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 807 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 817 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

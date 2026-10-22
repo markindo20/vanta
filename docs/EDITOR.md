@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.50.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.51.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -21,6 +21,11 @@ The server and debug adapter are part of the compiler package, so an installed
   locals, enum members, struct fields, and imported declarations.
 - **Go to definition** for functions, constants, types, parameters, locals,
   imported declarations, enum members, and struct fields.
+- **Find All References** with `Shift+F12` and **Rename Symbol** with `F2`.
+  References are scope-aware: a shadowing inner local is not part of the outer
+  binding, and a field or enum member with the same name as a local is kept
+  apart. Rename edits every file the project index can load, including the
+  declaring module of an imported symbol.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -38,6 +43,34 @@ The server uses full-document text sync. That keeps the first version small and
 makes diagnostics reason about exactly the buffer the editor is showing.
 Completion and navigation use a tolerant source index, so they keep working
 while a line is only half typed.
+
+## References and rename
+
+Put the cursor on a name and press `Shift+F12` to list its references, or `F2`
+to rename it. The server resolves the word to a declaration instead of matching
+text, so shadowing works:
+
+```vanta
+func main() -> i32:
+    let x: i32 = 1
+    if x > 0:
+        let x: i32 = 2
+        return x    # the inner x, not the outer one
+    return x
+```
+
+Rename covers declarations and uses of functions, structs, enums, constants
+and imported declarations; parameters, locals, `for` variables, and match-arm
+bindings; struct fields (including constructor labels); enum members (including
+payload constructors and `match` patterns); module aliases; and type names in
+every annotation, field, return type, and constructor call. A rename returns a
+workspace edit, so files other than the one you are editing change in place
+when the editor applies it.
+
+Builtins, keywords, and names that cannot be resolved are refused. A field or
+member access is renamed only when the receiver's type can be established from
+an annotation, parameter, constructor, loop element, or function return type;
+an unknown receiver is left alone rather than guessed.
 
 ## Install the compiler
 
@@ -69,11 +102,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.21.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.22.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.21.0.vsix
+code --install-extension vanta-language-0.22.0.vsix
 ```
 
 ### Build from source
@@ -82,7 +115,7 @@ code --install-extension vanta-language-0.21.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.21.0.vsix
+code --install-extension vanta-language-0.22.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -192,8 +225,9 @@ vanta lsp
 ```
 
 The server advertises UTF-16 positions, open/close document sync, full
-document changes, completion, signature help, hover, definition, and document
-symbols. It does not require a workspace root to start.
+document changes, completion, signature help, hover, definition, references,
+rename (with prepare support), and document symbols. It does not require a
+workspace root to start.
 
 For debugging, any DAP client can launch:
 
@@ -213,8 +247,13 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - Completion inside an incomplete declaration is recovered from source text
   and is deliberately best-effort. Once the file parses, the AST gives exact
   declaration and local-variable information.
-- There is no rename, code action, formatting, workspace symbol, or semantic
-  tokens support yet.
+- References and rename cover the files the project index can load: the current
+  file, other open documents, and their imports. A file that is neither open
+  nor imported is not searched. A field or member use whose receiver type
+  cannot be established is left untouched rather than risk a wrong edit, and
+  builtins, keywords, and unresolved names are refused.
+- There is no code action, formatting, workspace symbol, or semantic tokens
+  support yet.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

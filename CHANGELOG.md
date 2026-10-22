@@ -2,6 +2,42 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.51.0 - 2026-10-22
+
+- References and rename. The server answers `textDocument/references`,
+  `textDocument/prepareRename`, and `textDocument/rename`; VS Code's **Find All
+  References** and **Rename Symbol** now work on Vanta source.
+- References are scope-aware rather than a text search. A symbol is identified
+  by its declaration, so renaming an outer local leaves a shadowing inner local
+  alone, and renaming a function does not touch a parameter or field that
+  happens to share its name.
+- Rename covers top-level functions, structs, enums, and constants, including
+  imported ones; parameters, locals, `for` variables, and match-arm bindings;
+  struct fields (declaration, reads, writes, and constructor labels such as
+  `Enemy(hp: 1)`); enum members (declaration, `Color.red`, payload
+  constructors, and `match` patterns); module aliases (the `as` name and every
+  `alias.` use, including type annotations and match patterns); and type names
+  in annotations, return types, fields, arrays, lists, pointers, extern
+  declarations, constructor calls, `arena.alloc::<T>()`, and nested member
+  access.
+- Edits span files: renaming an imported function or field changes the
+  declaration in its module and every use in the files the project index can
+  load (open documents and their imports). Field and member references are
+  only renamed when the receiver's type can be established from an annotation,
+  a constructor, a parameter, a loop element, an index, or a function return
+  type; unresolved receivers are left alone rather than guessed.
+- The server refuses to rename builtins, unresolved names, invalid
+  identifiers, and keywords, and `prepareRename` returns the exact word range
+  and placeholder so the editor's rename box opens on the right text.
+- Tests: 817 in total. New tests cover the capabilities, scope and shadowing,
+  imported functions and module aliases, struct fields with writes and
+  constructor labels, enum members with payloads and match patterns through an
+  alias, type annotations, nested imported fields and list elements,
+  `prepareRename`, refusals, and a buffer that does not parse yet.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe references and rename. The VS
+  Code extension is 0.22.0.
+
 ## v0.50.0 - 2026-10-22
 
 - Signature help. An open call now lists its parameters and highlights the one
