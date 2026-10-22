@@ -2,6 +2,19 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.46.0 - 2026-10-22
+
+- Recording a session. `vanta dap --log session.log` writes every DAP
+  message and every line of GDB traffic to a file, one per line, so a
+  session that misbehaves can be read afterwards instead of guessed at. In
+  VS Code, `vanta.debug.logFile` turns the same recording on for the next
+  session. Logging never changes what a session does: if the file cannot
+  be written, the session carries on.
+- Docs and tests. `docs/DEBUGGER.md` documents the recording, and
+  `docs/EDITOR.md` documents the setting. 772 tests total, including a
+  session that records itself and checks that the conversation is in the
+  file. Reverse debugging and MSVC/PDB support remain future work.
+
 ## v0.45.0 - 2026-10-22
 
 - Debugger readiness. `vanta doctor` now reports whether a debug session

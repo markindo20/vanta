@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.45.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.46.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -64,11 +64,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.16.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.17.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.16.0.vsix
+code --install-extension vanta-language-0.17.0.vsix
 ```
 
 ### Build from source
@@ -77,7 +77,7 @@ code --install-extension vanta-language-0.16.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.16.0.vsix
+code --install-extension vanta-language-0.17.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -154,6 +154,10 @@ conditional breakpoints, hit counts, log points, watch expressions, data
 breakpoints, and restart. Conditions and watch expressions are written in
 Vanta terms (`hp > 0`, `len(items) == 3`), and the adapter maps them onto the
 generated names.
+
+A session can be recorded: set `vanta.debug.logFile` to a path and every
+message between the editor and the debugger, and every line of GDB
+traffic, is written there.
 
 A local can be edited from the **Variables** view, but only when Vanta allows
 it: only a binding declared with `mut` may be written, and an immutable

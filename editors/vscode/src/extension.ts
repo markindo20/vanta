@@ -67,11 +67,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             'for the debugger.');
         }
         const env = debugAdapterEnv(workspace);
+        const args = [...server.args];
+        const logSetting =
+          (vscode.workspace.getConfiguration('vanta')
+            .get<string>('debug.logFile') ?? '').trim();
+        if (logSetting) {
+          let logPath = expandConfiguredPath(logSetting, workspace);
+          if (workspace !== undefined && !path.isAbsolute(logPath)) {
+            logPath = path.resolve(workspace, logPath);
+          }
+          args.push('--log', logPath);
+        }
         output.appendLine(
           `Starting Vanta debug adapter: ${server.command} ` +
-          server.args.join(' '));
+          args.join(' '));
         return new vscode.DebugAdapterExecutable(
-          server.command, server.args, { cwd: server.cwd, env });
+          server.command, args, { cwd: server.cwd, env });
       },
     });
   context.subscriptions.push(debugAdapterFactory);

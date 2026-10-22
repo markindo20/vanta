@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.45.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.46.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -61,6 +61,20 @@ vanta debug game.vnt -- --level 2
 `--include-dir`, `--lib-dir`, and `--link` work like they do in
 `vanta build`.
 
+## Recording a session
+
+When a session does something unexpected, record it and read what happened:
+
+```powershell
+vanta dap --log session.log
+```
+
+The log holds every DAP message and every line of GDB traffic, one per
+line, so a failure can be read after the fact instead of guessed at. In
+VS Code, set `vanta.debug.logFile` to a path and the next session is
+written there. The log contains file paths and the program's output, so
+it is worth a look before it is shared.
+
 ## Before the first session
 
 `vanta doctor` says whether a session will work. It prints the debug
@@ -77,7 +91,7 @@ reads DWARF and not PDB.
 
 ## Requirements
 
-- Vanta 0.45.0 or newer (`vanta --version`)
+- Vanta 0.46.0 or newer (`vanta --version`)
 - A GCC or Clang C++17 toolchain that emits DWARF debug information
 - GDB 10 or newer
 
@@ -101,7 +115,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.16.0.vsix
+code --install-extension vanta-language-0.17.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -139,7 +153,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.16.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.17.0.vsix`.
 
 ## Breakpoints
 

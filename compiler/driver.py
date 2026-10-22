@@ -1086,7 +1086,10 @@ def main(argv):
     sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
 
     sub.add_parser('lsp', help='run the Vanta language server on stdin/stdout')
-    sub.add_parser('dap', help='run the Vanta debug adapter on stdin/stdout')
+    p_dap = sub.add_parser(
+        'dap', help='run the Vanta debug adapter on stdin/stdout')
+    p_dap.add_argument('--log',
+                       help='write the session to a file (for a bug report)')
 
     p_build = sub.add_parser('build', help='build a native executable')
     p_build.add_argument('source')
@@ -1153,7 +1156,7 @@ def main(argv):
         return run_stdio()
     if args.cmd == 'dap':
         from .dap import run_stdio
-        return run_stdio()
+        return run_stdio(args.log)
     if args.cmd == 'build':
         return cmd_build(args)
     if args.cmd == 'run':

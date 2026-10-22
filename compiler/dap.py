@@ -344,9 +344,11 @@ class GdbTimeout(GdbError):
 class GdbMi:
     """Small synchronous wrapper around a GDB/MI subprocess."""
 
-    def __init__(self, gdb_path: str, executable: str, env=None, cwd=None):
+    def __init__(self, gdb_path: str, executable: str, env=None, cwd=None,
+                 log=None):
         self.gdb_path = gdb_path
         self.executable = executable
+        self._log = log
         self.events: queue.Queue = queue.Queue()
         self._pending: dict[str, tuple[threading.Event, dict]] = {}
         self._lock = threading.Lock()
@@ -369,9 +371,18 @@ class GdbMi:
         self.stderr_reader = threading.Thread(target=self._read_stderr, daemon=True)
         self.stderr_reader.start()
 
+    def _trace(self, direction: str, text: str):
+        if self._log is None:
+            return
+        try:
+            self._log(direction, text)
+        except Exception:
+            pass
+
     def _read_loop(self):
         try:
             for line in self.process.stdout:
+                self._trace('gdb<', line.rstrip('\r\n'))
                 record = parse_mi_line(line)
                 if record is None:
                     continue
@@ -415,6 +426,7 @@ class GdbMi:
     def write_raw(self, text: str):
         if self.process.stdin is None or self.process.poll() is not None:
             raise GdbError('GDB is not running')
+        self._trace('gdb>', text)
         try:
             self.process.stdin.write(text + '\n')
             self.process.stdin.flush()
@@ -609,10 +621,12 @@ def describe_gdb(path: str) -> str:
 class DapAdapter:
     """A single debug session speaking DAP over a pair of streams."""
 
-    def __init__(self, reader=None, writer=None):
+    def __init__(self, reader=None, writer=None, log=None):
         self.reader = reader or sys.stdin.buffer
         self.writer = writer or sys.stdout.buffer
         self._write_lock = threading.Lock()
+        self._log_file = log
+        self._log_lock = threading.Lock()
         self._inbox: queue.Queue = queue.Queue()
         self._reader_thread = None
         self._running = True
@@ -649,6 +663,31 @@ class DapAdapter:
     def send(self, message: dict):
         with self._write_lock:
             write_dap_message(self.writer, message)
+        self._trace('dap>', message)
+
+    def _trace(self, direction: str, message):
+        """Write one line of the session to the log, if there is one.
+
+        DAP messages are JSON on a single line, so a bug report can be
+        grepped.  Logging must never change what a session does, so every
+        failure here is swallowed.
+        """
+        log = self._log_file
+        if log is None:
+            return
+        if isinstance(message, dict):
+            try:
+                text = json.dumps(message, separators=(',', ':'))
+            except (TypeError, ValueError):
+                text = repr(message)
+        else:
+            text = str(message)
+        with self._log_lock:
+            try:
+                log.write(f'{direction} {text}\n')
+                log.flush()
+            except Exception:
+                pass
 
     def event(self, name: str, body: Optional[dict] = None):
         message = {'type': 'event', 'event': name, 'seq': self._next_seq()}
@@ -746,6 +785,7 @@ class DapAdapter:
             return
         if message.get('type') != 'request':
             return
+        self._trace('dap<', message)
         command = message.get('command', '')
         handler = getattr(self, '_request_' + command.replace('-', '_'), None)
         if handler is None:
@@ -843,7 +883,8 @@ class DapAdapter:
         gdb_path = self._launch_args.get('gdbPath') or self._launch_args.get('miDebuggerPath')
         try:
             gdb_path = find_gdb(gdb_path)
-            gdb = GdbMi(gdb_path, build['exe'], env=build['env'], cwd=cwd)
+            gdb = GdbMi(gdb_path, build['exe'], env=build['env'], cwd=cwd,
+                         log=self._trace)
         except Exception as exc:
             self._cleanup_build()
             self.error(request, str(exc), show_user=True)
@@ -945,7 +986,7 @@ class DapAdapter:
             self._launch_args.get('miDebuggerPath')
         try:
             gdb_path = find_gdb(gdb_path)
-            gdb = GdbMi(gdb_path, executable, cwd=cwd)
+            gdb = GdbMi(gdb_path, executable, cwd=cwd, log=self._trace)
         except Exception as exc:
             self.error(request, str(exc), show_user=True)
             return
@@ -2693,9 +2734,23 @@ def _is_gdb_console_text(text: str) -> bool:
     return stripped.startswith(prefixes)
 
 
-def run_stdio() -> int:
-    """Run the Vanta debug adapter on stdin/stdout."""
-    adapter = DapAdapter()
+def run_stdio(log_path=None) -> int:
+    """Run the Vanta debug adapter on stdin/stdout.
+
+    With *log_path*, the whole session is written to that file: every DAP
+    message and every line of GDB/MI traffic.  A failure that only happens in
+    an editor can then be read afterwards instead of guessed at.
+    """
+    log_file = None
+    if log_path:
+        try:
+            log_file = open(log_path, 'w', encoding='utf-8', newline='\n')
+            log_file.write(f'# vanta {VERSION} debugger session\n')
+            log_file.flush()
+        except OSError as exc:
+            sys.stderr.write(f'error: could not open the log file: {exc}\n')
+            return 1
+    adapter = DapAdapter(log=log_file)
     status = 0
     try:
         adapter.serve()
@@ -2712,6 +2767,9 @@ def run_stdio() -> int:
         try:
             sys.stdout.flush()
             sys.stderr.flush()
+            if log_file is not None:
+                log_file.flush()
+                log_file.close()
         except Exception:
             pass
         os._exit(status)

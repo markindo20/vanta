@@ -2,7 +2,7 @@
   "name": "vanta-language",
   "displayName": "Vanta",
   "description": "Vanta language support: diagnostics, completion, hover, definitions, document symbols, and native debugging.",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "publisher": "vanta",
   "license": "MIT",
   "repository": {
@@ -64,6 +64,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Path to a GDB executable for debugging. Leave empty to use `VANTA_GDB`, a GDB beside the C++ compiler, a WinLibs/MSYS2 installation, or `gdb` on PATH. Vanta debug builds use DWARF, so a GCC or Clang toolchain is required."
+        },
+        "vanta.debug.logFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Write each debug session to this file: every DAP message and every line of GDB traffic. Leave empty to keep no log. Use it to report a problem with the debugger."
         }
       }
     },

@@ -264,6 +264,8 @@ class _DapSessionTestCase(unittest.TestCase):
                '    let y = x + 1\n'
                '    print_i32(y)\n')
 
+    EXTRA_ARGS: tuple = ()
+
     @classmethod
     def setUpClass(cls):
         try:
@@ -328,7 +330,7 @@ class _DapSessionTestCase(unittest.TestCase):
     def start(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.process = subprocess.Popen(
-            [sys.executable, '-m', 'compiler', 'dap'],
+            [sys.executable, '-m', 'compiler', 'dap', *self.EXTRA_ARGS],
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -1312,6 +1314,36 @@ class CommandLineDebugTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('main.vnt', result.stdout)
             self.assertIn('line 3', result.stdout)
+
+
+class DapSessionLogTests(_DapSessionTestCase):
+    """`vanta dap --log` writes the session where a bug report can use it."""
+
+    def setUp(self):
+        super().setUp()
+        self.log_path = os.path.join(self.tempdir, 'session.log')
+        self.EXTRA_ARGS = ('--log', self.log_path)
+
+    def test_the_log_records_the_conversation(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 3}])
+        self.configuration_done()
+        self.stopped_event()
+        self.send('disconnect', {'terminateDebuggee': True})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'disconnect', timeout=20)
+        self.process.wait(timeout=20)
+        with open(self.log_path, encoding='utf-8') as f:
+            text = f.read()
+        lines = text.splitlines()
+        self.assertTrue(lines[0].startswith('# vanta'), lines[:1])
+        self.assertIn('dap< {"seq":1,"type":"request","command":"initialize"',
+                      text)
+        self.assertIn('dap> ', text)
+        self.assertIn('gdb> ', text)
+        self.assertIn('-break-insert', text)
+        self.assertIn('"type":"response"', text)
 
 
 class DapGlobalsIntegrationTests(_DapSessionTestCase):
