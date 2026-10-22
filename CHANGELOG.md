@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.45.0 - 2026-10-22
+
+- Debugger readiness. `vanta doctor` now reports whether a debug session
+  will work: it prints the debug toolchain and the debugger it found, so a
+  machine that would fail a session fails at a command prompt instead:
+  `debug build: ok (g++: /usr/bin/g++)` and `debugger: GDB 16.3
+  (/usr/bin/gdb)`. When either is missing, the line says what is missing.
+- Docs and tests. `docs/DEBUGGER.md` opens with the check. 771 tests total,
+  including a session that runs `vanta doctor` and a test for the debugger
+  description. Reverse debugging and MSVC/PDB support remain future work.
+
 ## v0.44.0 - 2026-10-22
 
 - Program arguments reach the program. `vanta run game.vnt -- --level 2`

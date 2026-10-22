@@ -863,6 +863,23 @@ def cmd_doctor(args):
         print("non-game programs are ready; install SDL2 to run the game kit")
     else:
         print("SDL2 (games): found (SDL2, SDL2_ttf, SDL2_image)")
+
+    # A debug session needs two things beyond a normal build: a compiler that
+    # writes DWARF (GDB cannot read PDB) and a GDB-compatible debugger.
+    debug_name, debug_path = find_debug_compiler()
+    if debug_path is None:
+        print("debug build: unavailable (a GCC or Clang toolchain is required)")
+    elif _is_msvc(debug_name):
+        print(f"debug build: unavailable ({debug_name} writes PDB; GDB reads DWARF)")
+    else:
+        print(f"debug build: ok ({debug_name}: {debug_path})")
+    try:
+        from .dap import describe_gdb, find_gdb
+        gdb_path = find_gdb()
+        print(f"debugger: {describe_gdb(gdb_path)} ({gdb_path})")
+    except Exception as exc:
+        print(f"debugger: not found ({exc})")
+        print("install GDB to debug; see docs/DEBUGGER.md")
     return 0
 
 

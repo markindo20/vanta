@@ -1139,6 +1139,33 @@ class DapDataIntegrationTests(_DapSessionTestCase):
                         response)
 
 
+class DoctorDebuggerTests(unittest.TestCase):
+    """`vanta doctor` says whether a debug session will work."""
+
+    def test_doctor_reports_the_debug_toolchain_and_the_debugger(self):
+        result = subprocess.run(
+            [sys.executable, '-m', 'compiler', 'doctor'],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('debug build:', result.stdout)
+        self.assertIn('debugger:', result.stdout)
+
+    def test_a_description_names_the_debugger(self):
+        from compiler.dap import GdbError, describe_gdb, find_gdb
+        try:
+            path = find_gdb()
+        except GdbError:
+            raise unittest.SkipTest('no working GDB')
+        self.assertRegex(describe_gdb(path), r'^(GDB|LLDB-MI)( \d+\.\d+)?$')
+
+    def test_a_path_that_cannot_run_falls_back_to_its_name(self):
+        from compiler.dap import describe_gdb
+        missing = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'no-such-debugger')
+        self.assertEqual(describe_gdb(missing), 'no-such-debugger')
+
+
 class FloatValueTests(unittest.TestCase):
     def test_floats_read_like_vanta(self):
         from compiler.dap import _format_float

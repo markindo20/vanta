@@ -578,6 +578,29 @@ def find_gdb(explicit=None) -> str:
         'GDB explicitly (VS Code: vanta.debug.gdbPath; CLI: VANTA_GDB).')
 
 
+def describe_gdb(path: str) -> str:
+    """A short name and version for the debugger at *path*.
+
+    `vanta doctor` uses this to tell the user what a session will drive.  The
+    first line of `--version` is either something like "GNU gdb (GDB) 16.3"
+    or "lldb-mi version 19.1.0"; only the name and the number are kept.
+    """
+    try:
+        proc = subprocess.run([path, '--version'], capture_output=True,
+                              text=True, timeout=8,
+                              stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return os.path.basename(path)
+    text = (proc.stdout or '') + (proc.stderr or '')
+    first = text.strip().splitlines()[0].strip() if text.strip() else ''
+    base = os.path.basename(path).lower()
+    name = 'LLDB-MI' if 'lldb' in base or 'LLDB' in first else 'GDB'
+    match = re.search(r'\b(\d+\.\d+(?:\.\d+)?)\b', first)
+    if match:
+        return f'{name} {match.group(1)}'
+    return name
+
+
 # ---------------------------------------------------------------------------
 # DAP adapter
 # ---------------------------------------------------------------------------
