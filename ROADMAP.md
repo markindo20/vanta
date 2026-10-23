@@ -5,10 +5,19 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.69.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.70.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.70.0
+
+Rename safety landed. Cross-module renames propagate across open documents and
+imported modules, and renaming is refused when the new name collides with an
+existing visible declaration. 898 tests total.
+
+The next editor work is go-to-implementation for structs, enums, components,
+and systems.
 
 ## Landed in v0.69.0
 

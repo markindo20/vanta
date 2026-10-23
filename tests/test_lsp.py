@@ -1593,6 +1593,42 @@ func main() -> void:
         self.assertTrue(any(a['title'].startswith('change annotation to str')
                             for a in actions))
 
+    def test_rename_propagates_across_imported_modules(self):
+        self.write('game.vnt', 'module game\n\npub func spawn(x: i32) -> i32:\n'
+                      '    return x\n')
+        main_path = self.write('main.vnt', 'module main\n\nimport "game.vnt" as g\n\n'
+                              'func main() -> i32:\n    return g.spawn(1)\n')
+        uri = self.open(main_path)
+        # Cursor on the name in the call site.
+        result = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 14},
+            'newName': 'launch',
+        })[0]['result']
+        keys = sorted(result['changes'].keys())
+        self.assertEqual(len(keys), 2)
+        main_uri = path_to_uri(main_path)
+        game_uri = path_to_uri(os.path.join(self.tmp, 'game.vnt'))
+        self.assertIn(main_uri, keys)
+        self.assertIn(game_uri, keys)
+        main_edit = result['changes'][main_uri][0]['newText']
+        game_edit = result['changes'][game_uri][0]['newText']
+        self.assertEqual(main_edit, 'launch')
+        self.assertEqual(game_edit, 'launch')
+
+    def test_rename_is_refused_on_a_name_collision(self):
+        self.write('game.vnt', 'module game\n\npub func spawn(x: i32) -> i32:\n'
+                      '    return x\n')
+        main_path = self.write('main.vnt', 'module main\n\nimport "game.vnt" as g\n\n'
+                              'func main() -> i32:\n    return g.spawn(1)\n')
+        uri = self.open(main_path)
+        result = self.request('textDocument/rename', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 5, 'character': 14},
+            'newName': 'main',
+        })[0]['result']
+        self.assertIsNone(result)
+
     def test_inlay_hints_show_inferred_types(self):
         path = self.write('main.vnt', '''\
 struct Enemy:

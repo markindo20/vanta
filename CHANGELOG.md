@@ -2,6 +2,19 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.70.0 - 2026-10-23
+
+- Rename safety. Cross-module renames propagate across every open document and
+  imported module. A rename is refused when the new name collides with an
+  existing declaration visible from the current module.
+- `prepareRename` already returns the exact symbol span, so editors select only
+  the identifier.
+- Tests: 898 in total. New tests cover cross-file propagation and collision
+  refusal.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the change. The VS Code
+  extension is 0.41.0.
+
 ## v0.69.0 - 2026-10-23
 
 - Code actions beyond import fixes. Added a quick fix that changes a

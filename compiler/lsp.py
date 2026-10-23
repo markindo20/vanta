@@ -3470,6 +3470,14 @@ class LanguageServer:
             return None
         if new_name in KEYWORDS:
             return None
+        # Refuse names that would shadow an existing declaration visible from
+        # this module, including anything exposed by an imported non-aliased
+        # module. Prevents a rename from silently colliding with another name.
+        _project = target['project']
+        for decl in (_project.visible_decls()
+                     + list(_project.public_imports())):
+            if decl.name == new_name:
+                return None
         changes: dict[str, list[dict]] = {}
         for ref in self._target_refs(target):
             uri = self._ref_uri(target, ref.path)
