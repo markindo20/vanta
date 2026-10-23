@@ -1352,6 +1352,36 @@ class DapAdapter:
             out.append(entry)
         self.response(request, {'breakpoints': out})
 
+    def _request_dataBreakpointInfo(self, request, args):
+        if self._gdb is None:
+            self.response(request, {'dataId': '', 'description':
+                                    'debugger has not started',
+                                    'canPersist': False})
+            return
+        expr = str((args or {}).get('name') or '').strip()
+        if not expr:
+            self.response(request, {'dataId': '', 'description':
+                                    'no expression', 'canPersist': False})
+            return
+        try:
+            res = self._gdb.command(
+                '-data-evaluate-expression "&(' + expr + ')"')
+            value = str((res.results or {}).get('value', '')).strip()
+        except Exception as exc:
+            self.response(request, {'dataId': '', 'description': str(exc),
+                                    'canPersist': False})
+            return
+        if not value or not value.startswith('0x'):
+            self.response(request, {'dataId': '', 'description':
+                                    'not a watchable address (%s)' % value,
+                                    'canPersist': False})
+            return
+        self.response(request, {'dataId': value,
+                                'description': 'Watch ' + expr,
+                                'accessTypes': ['write', 'readWrite'],
+                                'canPersist': False})
+
+
     def _request_registers(self, request, args):
         if self._gdb is None:
             self.response(request, {'registers': []})
