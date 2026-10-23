@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.71.0 - 2026-10-23
+
+- Go-to-implementation. `textDocument/implementation` jumps from a type
+  declaration (`struct`/`enum`) to its concrete construction sites, or from
+  a function declaration to its call sites.
+- Tests: 900 in total. New tests cover construction and call sites.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the feature. The VS Code
+  extension is 0.42.0.
+
 ## v0.70.0 - 2026-10-23
 
 - Rename safety. Cross-module renames propagate across every open document and

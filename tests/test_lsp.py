@@ -652,6 +652,7 @@ func main() -> void:
         self.assertEqual(result[0]['uri'], uri)
         self.assertEqual(result[0]['range']['start']['line'], 0)
 
+
     def test_type_definition_on_variable(self):
         path = self.write('main.vnt', '''\
 struct Point:
@@ -695,6 +696,39 @@ func main() -> void:
             'position': {'line': 1, 'character': 10},
         })[0]['result']
         self.assertFalse(result)
+
+    def test_implementation_on_type_declaration_returns_construction_sites(self):
+        path = self.write('main.vnt', '''\
+struct Point:
+    x: i32
+
+func main() -> void:
+    let p = Point(1)
+    let q = Point(2)
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/implementation', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 7},
+        })[0]['result']
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]['range']['start']['line'], 4)
+
+    def test_implementation_on_function_declaration_returns_call_sites(self):
+        path = self.write('main.vnt', '''\
+func add(a: i32, b: i32) -> i32:
+    return a + b
+
+func main() -> void:
+    print_i32(add(1, 2))
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/implementation', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 7},
+        })[0]['result']
+        self.assertTrue(result)
+        self.assertEqual(result[0]['range']['start']['line'], 4)
 
     def test_document_symbols_include_struct_and_enum_children(self):
         path = self.write('main.vnt', '''\

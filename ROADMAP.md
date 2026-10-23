@@ -5,10 +5,19 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.70.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.71.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.71.0
+
+Go-to-implementation landed. `textDocument/implementation` jumps from a
+type declaration to its concrete construction sites, or from a function
+declaration to its call sites. 900 tests total.
+
+The next editor work is incremental diagnostics refinement (debounce + range
+dedup).
 
 ## Landed in v0.70.0
 

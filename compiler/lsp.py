@@ -2585,6 +2585,7 @@ class LanguageServer:
                     'foldingRangeProvider': True,
                     'selectionRangeProvider': True,
                     'typeDefinitionProvider': True,
+                    'implementationProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2622,6 +2623,8 @@ class LanguageServer:
             self._response(msg_id, self._definition(params))
         elif method == 'textDocument/typeDefinition':
             self._response(msg_id, self._type_definition(params))
+        elif method == 'textDocument/implementation':
+            self._response(msg_id, self._implementation(params))
         elif method == 'textDocument/references':
             self._response(msg_id, self._references(params))
         elif method == 'textDocument/prepareRename':
@@ -3330,6 +3333,30 @@ class LanguageServer:
                 }]
             return None
         return None
+
+    def _implementation(self, params: dict) -> Optional[list[dict]]:
+        """Concrete implementation / construction sites for a declaration."""
+        target = self._reference_target(params)
+        if target is None:
+            return []
+        locations: list[dict] = []
+        seen: set[tuple[str, int, int]] = set()
+        for ref in self._target_refs(target):
+            if ref.declaration:
+                continue
+            uri = self._ref_uri(target, ref.path)
+            if uri is None:
+                continue
+            key = (uri, ref.line, ref.col)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append({'uri': uri,
+                             'range': self._ref_range(target, ref)})
+        locations.sort(key=lambda loc: (
+            loc['uri'], loc['range']['start']['line'],
+            loc['range']['start']['character']))
+        return locations
 
     # -- references and rename ---------------------------------------------
 
