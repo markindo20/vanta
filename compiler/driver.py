@@ -837,31 +837,48 @@ def cmd_check(args):
     return 0 if failed == 0 else 1
 
 
-def cmd_fmt(args):
+def _fmt_one(path, check_only):
     try:
-        with open(args.source, 'r', encoding='utf-8-sig') as f:
+        with open(path, 'r', encoding='utf-8-sig') as f:
             source = f.read()
     except OSError as e:
-        sys.stderr.write(f"error: cannot read '{args.source}': {e}\n")
-        return 1
+        sys.stderr.write(f"error: cannot read '{path}': {e}\\n")
+        return path, 1
     try:
-        formatted = format_source(source, args.source)
+        formatted = format_source(source, path)
     except FormatError as e:
-        sys.stderr.write(f"error: {args.source}: {e}\n")
-        return 1
-    if args.check:
+        sys.stderr.write(f"error: {path}: {e}\\n")
+        return path, 1
+    if check_only:
         if formatted != source:
-            print(f"{args.source} is not formatted")
-            return 1
-        print(f"{args.source} is formatted")
-        return 0
+            print(f"{path} is not formatted")
+            return path, 1
+        print(f"{path} is formatted")
+        return path, 0
     if formatted == source:
-        print(f"{args.source} is already formatted")
-        return 0
-    with open(args.source, 'w', encoding='utf-8', newline='') as f:
+        print(f"{path} is already formatted")
+        return path, 0
+    with open(path, 'w', encoding='utf-8', newline='') as f:
         f.write(formatted)
-    print(f"formatted {args.source}")
-    return 0
+    print(f"formatted {path}")
+    return path, 0
+
+
+def cmd_fmt(args):
+    target = args.source
+    if os.path.isdir(target):
+        paths = _vnt_files_under(target)
+        if not paths:
+            sys.stderr.write(f"error: no .vnt files under {target}\\n")
+            return 1
+    else:
+        paths = [target]
+    failed = 0
+    for path in paths:
+        _, rc = _fmt_one(path, bool(getattr(args, 'check', False)))
+        if rc != 0:
+            failed += 1
+    return 0 if failed == 0 else 1
 
 
 def _sdl_lib_found(lib, compiler_path):
