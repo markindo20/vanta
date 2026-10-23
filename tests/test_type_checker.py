@@ -2462,5 +2462,13 @@ class TypeCheckerTests(unittest.TestCase):
                 "    A\n")
 
 
+    def test_binop_int_overflow_raises(self):
+        with self.assertRaisesRegex(CheckError, 'integer overflow'):
+            run("func main() -> i32:\n    let x: i32 = 2000000000 + 2000000000\n")
+
+    def test_arithmetic_division_by_zero_raises(self):
+        with self.assertRaisesRegex(CheckError, 'division by zero'):
+            run("func main() -> i32:\n    let x: i32 = 1 / 0\n")
+
 if __name__ == '__main__':
     unittest.main()

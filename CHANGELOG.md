@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.76.0 - 2026-10-23
+
+- Compile-time integer overflow guard. Constant integer additions,
+  subtractions, and multiplications that fall outside their type's range
+  raise `integer overflow in '+'`. Division or modulo by a constant zero
+  likewise raises `division by zero`.
+- Tests: 903 in total. New tests cover integer overflow and division by
+  zero in the type checker.
+- Notes: this is one slice of track 3 (language safety). Build uses 0.76.0;
+  the VS Code extension stays 0.43.0 (no LSP change).
+
 ## v0.72.0 - 2026-10-23
 
 - Performance: a process-global parse cache keyed by `(path, sha256(text))`

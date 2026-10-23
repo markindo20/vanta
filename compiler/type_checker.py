@@ -1137,6 +1137,33 @@ class TypeChecker:
     def _check_binop(self, expr: A.BinOp, lt, rt) -> Type:
         op = expr.op
         lt, rt = self._coerce_binop_lits(expr, lt, rt)
+        # Compile-time integer overflow guard for constant expressions.
+        if (op in ('+', '-', '*') and isinstance(expr.left, A.IntLit)
+                and isinstance(expr.right, A.IntLit) and is_int(lt)
+                and is_int(rt)):
+            a = expr.left.value
+            b = expr.right.value
+            if op == '+':
+                value = a + b
+            elif op == '-':
+                value = a - b
+            else:
+                value = a * b
+            target = lt
+            if target is INT_LIT:
+                target = I32
+            if target is I32:
+                bounds = (-2147483648, 2147483647)
+            elif target is U32:
+                bounds = (0, 4294967295)
+            elif target in NARROW_RANGES:
+                bounds = NARROW_RANGES[target]
+            else:
+                bounds = None
+            if bounds is not None and not (bounds[0] <= value <= bounds[1]):
+                raise CheckError(f"integer overflow in '{op}': {value} "
+                                f"outside {target} range", self.filename,
+                                expr.pos)
         # Reading a narrow integer promotes it to i32 (C's integer
         # promotion); the C++ backend promotes the same way for free.
         lt = I32 if is_narrow(lt) else lt
@@ -1194,6 +1221,11 @@ class TypeChecker:
             if lt != rt:
                 raise CheckError(f"cannot compare {lt} and {rt}", self.filename, expr.pos)
             return BOOL
+        if op in ('/', '%'):
+            if isinstance(expr.right, A.IntLit) and expr.right.value == 0:
+                raise CheckError("division by zero", self.filename, expr.pos)
+            if isinstance(expr.right, A.FloatLit) and expr.right.value == 0.0:
+                raise CheckError("division by zero", self.filename, expr.pos)
         if op in ('+', '-', '*', '/', '%'):
             if is_numeric(lt) and lt == rt:
                 if op == '%' and is_float(lt):
