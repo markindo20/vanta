@@ -43,6 +43,8 @@ Language support and native debugging for Vanta `.vnt` files, powered by the
   comment runs, and import runs.
 - **Selection ranges**: grow a selection from the word under the cursor to
   its line, the enclosing blocks, and the whole file.
+- **Import hover & go-to-definition**: hover an `import` path to see its
+  resolved target; `Go to Definition` jumps to the imported file.
 - **Document symbols** / outline view for functions, structs, enums, fields,
   and enum members.
 - **Debugging** with the `vanta` debugger type: line, function, conditional,
@@ -80,10 +82,10 @@ server as `python -m compiler lsp`.
 
 ### From a VSIX
 
-Download `vanta-language-0.34.0.vsix` from the latest Vanta GitHub release, then:
+Download `vanta-language-0.35.0.vsix` from the latest Vanta GitHub release, then:
 
 ```powershell
-code --install-extension vanta-language-0.34.0.vsix
+code --install-extension vanta-language-0.35.0.vsix
 ```
 
 ### Build it yourself
@@ -94,7 +96,7 @@ Building requires Node 22 or newer.
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.34.0.vsix
+code --install-extension vanta-language-0.35.0.vsix
 ```
 
 ### Run from source

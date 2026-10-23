@@ -3028,11 +3028,17 @@ class LanguageServer:
                                      pos.get('character', 0))
         lines = _lines(doc.text)
         line_text = _line_at(lines, line)
-        word, start, end = _word_at(line_text, _to_lsp(line_text, char))
+        lsp_char = _to_lsp(line_text, char)
+        word, start, end = _word_at(line_text, lsp_char)
         if not word:
             return None
         project = self._project(doc)
-        locals_ = project.local_symbols(line, _to_lsp(line_text, char))
+        # Check if cursor is on an import path.
+        import_hover = self._import_hover(project, line, lsp_char,
+                                          line_text, lines)
+        if import_hover is not None:
+            return import_hover
+        locals_ = project.local_symbols(line, lsp_char)
         detail = self._describe_word(
             project, locals_, line_text, word,
             _lsp_to_py_char(line_text, start))
@@ -3046,6 +3052,37 @@ class LanguageServer:
                 'end': {'line': line, 'character': end},
             },
         }
+
+    def _import_hover(self, project: _ProjectIndex, line: int,
+                      lsp_char: int, line_text: str,
+                      lines: list[str]) -> Optional[dict]:
+        """Hover for an import path: show the resolved target file."""
+        for imp in project.current.imports:
+            if imp.line - 1 != line:
+                continue
+            span = _quoted_span(line_text, imp.path)
+            if span is None:
+                continue
+            start, end = span
+            start_lsp = _py_to_lsp_char(line_text, start)
+            end_lsp = _py_to_lsp_char(line_text, end)
+            if not (start_lsp <= lsp_char <= end_lsp):
+                continue
+            target = imp.target
+            if (target is not None and target.path != '<untitled>'
+                    and os.path.exists(target.path)):
+                contents = f'Resolved import: {target.path}'
+            else:
+                contents = f'Unresolved import: {imp.path}'
+            return {
+                'contents': {'kind': 'markdown',
+                             'value': f'```vanta\n{contents}\n```'},
+                'range': {
+                    'start': {'line': line, 'character': start_lsp},
+                    'end': {'line': line, 'character': end_lsp},
+                },
+            }
+        return None
 
     def _describe_word(self, project: _ProjectIndex,
                        locals_: dict[str, LocalInfo], line_text: str,
@@ -3108,11 +3145,17 @@ class LanguageServer:
                                      pos.get('character', 0))
         lines = _lines(doc.text)
         line_text = _line_at(lines, line)
-        word, start, _ = _word_at(line_text, _to_lsp(line_text, char))
+        lsp_char = _to_lsp(line_text, char)
+        word, start, _ = _word_at(line_text, lsp_char)
         if not word:
             return None
         project = self._project(doc)
-        locals_ = project.local_symbols(line, _to_lsp(line_text, char))
+        # Check if cursor is on an import path.
+        import_def = self._import_definition(project, line, lsp_char,
+                                             line_text, lines)
+        if import_def is not None:
+            return import_def
+        locals_ = project.local_symbols(line, lsp_char)
         object_path = _object_before_dot(
             line_text, _lsp_to_py_char(line_text, start))
         if object_path is not None:
@@ -3163,6 +3206,31 @@ class LanguageServer:
                     'range': _range(imp.line, imp.col, imp.line,
                                     _line_end(imp.line, imp.col, lines)),
                 }]
+        return None
+
+    def _import_definition(self, project: _ProjectIndex, line: int,
+                           lsp_char: int, line_text: str,
+                           lines: list[str]) -> Optional[list[dict]]:
+        """Go-to-definition for an import path: jump to the target file."""
+        for imp in project.current.imports:
+            if imp.line - 1 != line:
+                continue
+            span = _quoted_span(line_text, imp.path)
+            if span is None:
+                continue
+            start, end = span
+            start_lsp = _py_to_lsp_char(line_text, start)
+            end_lsp = _py_to_lsp_char(line_text, end)
+            if not (start_lsp <= lsp_char <= end_lsp):
+                continue
+            target = imp.target
+            if (target is not None and target.path != '<untitled>'
+                    and os.path.exists(target.path)):
+                return [{
+                    'uri': path_to_uri(target.path),
+                    'range': _range(1, 1, 1, 1),
+                }]
+            return None
         return None
 
     # -- references and rename ---------------------------------------------

@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.63.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.64.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -55,6 +55,9 @@ The server and debug adapter are part of the compiler package, so an installed
   comment runs, and import runs.
 - **Selection ranges** to grow a selection from the word under the cursor to
   its line, the enclosing blocks, and the whole file.
+- **Import hover** to see the resolved target of an `import` (or that it is
+  unresolved).
+- **Go to definition** on an `import` path jumps to the imported file.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -368,11 +371,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.34.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.35.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.34.0.vsix
+code --install-extension vanta-language-0.35.0.vsix
 ```
 
 ### Build from source
@@ -381,7 +384,7 @@ code --install-extension vanta-language-0.34.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.34.0.vsix
+code --install-extension vanta-language-0.35.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -554,6 +557,10 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - Selection ranges grow from the word under the cursor through its line and
   each enclosing indentation block; an inconsistent indent file selects
   where the indentation says.
+- Import hover and definition use the tolerant project index (the same
+  resolver as document links). If the file parses, the AST gives exact
+  positions; otherwise the line-scanner recovers the import and the loader
+  resolves the path.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

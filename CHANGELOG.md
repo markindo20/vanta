@@ -2,6 +2,18 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.64.0 - 2026-10-23
+
+- Import hover and go-to-definition. Hovering an `import` path shows the
+  resolved file (or "unresolved"). `Go to Definition` on an import path
+  jumps to the target file.
+- Tests: 883 in total. New tests cover hover on a resolved import, hover on
+  an unresolved import, definition jump to the imported file, and
+  definition returning none for an unresolved import.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe import hover/definition.
+  The VS Code extension is 0.35.0.
+
 ## v0.63.0 - 2026-10-23
 
 - Selection ranges. The server answers `textDocument/selectionRange`, so the

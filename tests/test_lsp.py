@@ -514,6 +514,50 @@ func main() -> void:
         self.assertEqual(definition[0]['range']['start']['line'], 1)
         self.assertEqual(definition[0]['range']['start']['character'], 4)
 
+    def test_hover_shows_resolved_import_target(self):
+        dep = self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "dep.vnt"\n\n'
+                          'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        hover = self.request('textDocument/hover', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 10},
+        })[0]['result']
+        self.assertIn('Resolved import', hover['contents']['value'])
+        self.assertIn('dep.vnt', hover['contents']['value'])
+
+    def test_hover_shows_unresolved_import(self):
+        path = self.write('main.vnt', 'import "missing.vnt"\n\n'
+                          'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        hover = self.request('textDocument/hover', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 10},
+        })[0]['result']
+        self.assertIn('Unresolved import', hover['contents']['value'])
+        self.assertIn('missing.vnt', hover['contents']['value'])
+
+    def test_definition_jumps_to_imported_file(self):
+        dep = self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "dep.vnt"\n\n'
+                          'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        definition = self.request('textDocument/definition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 10},
+        })[0]['result']
+        self.assertEqual(definition[0]['uri'], path_to_uri(dep))
+
+    def test_definition_returns_none_for_unresolved_import(self):
+        path = self.write('main.vnt', 'import "missing.vnt"\n\n'
+                          'func main() -> void:\n    return\n')
+        uri = self.open(path)
+        definition = self.request('textDocument/definition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 10},
+        })[0]['result']
+        self.assertFalse(definition)  # None or [] both mean "no definition"
+
     def test_document_symbols_include_struct_and_enum_children(self):
         path = self.write('main.vnt', '''\
 struct Point:
