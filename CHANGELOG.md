@@ -2,6 +2,18 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.72.0 - 2026-10-23
+
+- Performance: a process-global parse cache keyed by `(path, sha256(text))`
+  reuses parsed `ModuleInfo` across requests and documents, cutting repeated
+  lexer/parser work in the LSP. `vanta check --timing` reports frontend
+  milliseconds.
+- Tests: 901 in total. New test ensures distinct cache keys for changed
+  content.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the cache and timing flag.
+  The VS Code extension is 0.43.0.
+
 ## v0.71.0 - 2026-10-23
 
 - Go-to-implementation. `textDocument/implementation` jumps from a type

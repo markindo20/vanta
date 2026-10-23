@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import hashlib
 import os
 import re
 import sys
@@ -660,6 +661,14 @@ _FUNC_RE = re.compile(
     r'^\s+([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:->\s*(.+?))?\s*:?\s*$')
 
 
+_PARSE_CACHE: dict = {}
+
+
+def _cache_key(path: str, text: str) -> tuple:
+    return (os.path.normpath(path or ''),
+            hashlib.sha256(text.encode('utf-8')).hexdigest())
+
+
 class _ProjectIndex:
     """A source-level view of the current file and its imports.
 
@@ -744,6 +753,10 @@ class _ProjectIndex:
         return mod
 
     def _parse_module(self, path: str, text: str) -> ModuleInfo:
+        key = _cache_key(path, text)
+        cached = _PARSE_CACHE.get(key)
+        if cached is not None:
+            return cached
         source_lines = text.splitlines()
         module_name = None
         imports: list[ImportInfo] = []
@@ -785,6 +798,7 @@ class _ProjectIndex:
             mod.imports = ast_imports
         mod.program = program
         self._finish_ranges(mod.decls, source_lines)
+        _PARSE_CACHE[key] = mod
         return mod
 
     def _from_ast(self, path: str, text: str, source_lines: list[str],

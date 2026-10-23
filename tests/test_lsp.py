@@ -1663,6 +1663,13 @@ func main() -> void:
         })[0]['result']
         self.assertIsNone(result)
 
+    def test_parse_cache_keys_distinguish_changed_content(self):
+        from compiler.lsp import _cache_key
+        path = '/tmp/x.vnt'
+        a = _cache_key(path, 'func main() -> void:\n    return\n')
+        b = _cache_key(path, 'func main() -> void:\n    return 1\n')
+        self.assertNotEqual(a, b)
+
     def test_inlay_hints_show_inferred_types(self):
         path = self.write('main.vnt', '''\
 struct Enemy:

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from . import VERSION
 from .lexer import LexError
@@ -784,14 +785,19 @@ def cmd_new(args):
 
 
 def cmd_check(args):
+    timing = getattr(args, 'timing', False)
     try:
+        started = time.perf_counter()
         program, _ = _frontend_only(args.source)
+        total = time.perf_counter() - started
     except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
         return 1
     if not program.decls:
         sys.stderr.write(f"warning: {args.source} contains no declarations\n")
     print(f"OK: {args.source} type-checks")
+    if timing:
+        print(f"timing: frontend {total * 1000:.1f} ms")
     return 0
 
 
@@ -1145,6 +1151,8 @@ def main(argv):
 
     p_check = sub.add_parser('check', help='type-check a source file')
     p_check.add_argument('source')
+    p_check.add_argument('--timing', action='store_true',
+                        help='print parse/typecheck timing')
 
     p_fmt = sub.add_parser('fmt', help='format a source file in place')
     p_fmt.add_argument('source')
