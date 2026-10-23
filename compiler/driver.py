@@ -1021,7 +1021,52 @@ def cmd_run(args):
     return run.returncode
 
 
-_COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug',
+def _discover_test_files(target):
+    if os.path.isfile(target):
+        return [target]
+    result = []
+    for dirpath, _dirs, files in os.walk(target):
+        for fn in files:
+            if fn.endswith('_test.vnt') or (
+                    fn.startswith('test_') and fn.endswith('.vnt')):
+                result.append(os.path.join(dirpath, fn))
+    return sorted(result)
+
+
+def cmd_test(args):
+    target = args.source if getattr(args, 'source', None) else os.getcwd()
+    if not os.path.exists(target):
+        sys.stderr.write(f"error: not found: {target}\n")
+        return 1
+    files = _discover_test_files(target)
+    if not files:
+        sys.stderr.write(f"no test files found under {target}\n")
+        return 0
+    passed = 0
+    failed = 0
+    for path in files:
+        sys.stdout.write(f"RUN  {path}\n")
+        sys.stdout.flush()
+        run_args = argparse.Namespace(
+            source=path, release=True, prog_args=[], include_dir=[],
+            lib_dir=[], link=[])
+        try:
+            rc = cmd_run(run_args)
+        except Exception as exc:
+            rc = 1
+            sys.stderr.write(f"error running {path}: {exc}\n")
+        if rc == 0:
+            sys.stdout.write(f"PASS {path}\n")
+            passed += 1
+        else:
+            sys.stdout.write(f"FAIL {path} (exit {rc})\n")
+            failed += 1
+    total = len(files)
+    sys.stdout.write(f"\n{passed}/{total} tests passed\n")
+    return 0 if failed == 0 else 1
+
+
+_COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
              'lsp', 'dap')
 
 
@@ -1188,6 +1233,10 @@ def main(argv):
     p_run.add_argument('--release', action='store_true')
     p_run.add_argument('--include-dir', action='append', default=[],
                        help='add include directory for C++ compilation')
+
+    p_test = sub.add_parser('test', help='discover and run *_test.vnt / test_*.vnt files')
+    p_test.add_argument('source', nargs='?', default=None,
+                        help='file or directory to scan (default: current directory)')
     p_run.add_argument('--lib-dir', action='append', default=[],
                        help='add library directory for linking')
     p_run.add_argument('--link', action='append', default=[],
@@ -1239,6 +1288,8 @@ def main(argv):
         return cmd_build(args)
     if args.cmd == 'run':
         return cmd_run(args)
+    if args.cmd == 'test':
+        return cmd_test(args)
     if args.cmd == 'debug':
         return cmd_debug(args)
     return 1

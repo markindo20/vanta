@@ -544,8 +544,12 @@ class CodeGen:
             self._generated_line()
             self.indent += 1
             self.emit('vanta::set_args(argc, argv);')
-            self.emit('vanta_user::fn_main();')
-            self.emit('return 0;')
+            if (main.ret is None or (getattr(main.ret, 'kind', '') == 'named'
+                                     and getattr(main.ret, 'name', '') == 'void')):
+                self.emit('vanta_user::fn_main();')
+                self.emit('return 0;')
+            else:
+                self.emit('return vanta_user::fn_main();')
             self.indent -= 1
             self.emit('}')
         return '\n'.join(self.lines) + '\n'
