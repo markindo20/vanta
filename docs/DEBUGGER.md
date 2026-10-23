@@ -1,6 +1,6 @@
 # Debugging Vanta
 
-Vanta v0.66.0 ships a native debugger. The compiler emits unoptimized C++ with
+Vanta v0.68.0 ships a native debugger. The compiler emits unoptimized C++ with
 `#line` markers that point back to the original Vanta file, and `vanta dap`
 speaks the Debug Adapter Protocol (DAP) to an editor while driving GDB's
 machine interface. You set breakpoints in Vanta source, inspect Vanta locals,
@@ -117,7 +117,7 @@ Install the compiler and the extension from the latest GitHub release:
 
 ```powershell
 pipx install vanta-lang
-code --install-extension vanta-language-0.37.0.vsix
+code --install-extension vanta-language-0.39.0.vsix
 ```
 
 Open a Vanta file, press **F5**, and choose **Vanta** if VS Code asks for an
@@ -155,7 +155,7 @@ The extension launches the debug adapter with the same discovery rules as the
 language server. A configured `vanta.server.path` may be a `vanta` executable
 or a Python interpreter; the adapter is started as `vanta dap` or
 `python -m compiler dap` respectively. If you build the extension from source,
-the generated VSIX is `editors/vscode/vanta-language-0.37.0.vsix`.
+the generated VSIX is `editors/vscode/vanta-language-0.39.0.vsix`.
 
 ## Breakpoints
 

@@ -2705,10 +2705,32 @@ class LanguageServer:
                 self.documents[uri] = doc
             changes = params.get('contentChanges') or []
             if changes:
-                # Full sync: use the final change. If a client sends range
-                # changes anyway, fall back to replacing the whole document
-                # only when text is present.
-                doc.text = _strip_bom(changes[-1].get('text', doc.text))
+                for change in changes:
+                    text_change = _strip_bom(change.get('text', ''))
+                    rng = change.get('range')
+                    if rng is None:
+                        # Full sync (or incremental full content).
+                        doc.text = text_change if 'text' in change \
+                            else doc.text
+                        continue
+                    # Incremental range replacement (LSP coordinates).
+                    start = rng.get('start') or {}
+                    end = rng.get('end') or {}
+                    try:
+                        start_off = _offset_at(doc.text,
+                                                  start.get('line', 0),
+                                                  start.get('character', 0))
+                        end_off = _offset_at(doc.text,
+                                                end.get('line', 0),
+                                                end.get('character', 0))
+                    except (IndexError, ValueError):
+                        start_off = 0
+                        end_off = len(doc.text)
+                    if end_off < start_off:
+                        end_off = start_off
+                    doc.text = doc.text[:start_off] + text_change \
+                        + doc.text[end_off:]
+                doc.text = _strip_bom(doc.text)
             doc.version = td.get('version', doc.version)
             self._validate(uri)
         elif method == 'textDocument/didSave':

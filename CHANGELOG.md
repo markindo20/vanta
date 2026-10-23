@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.68.0 - 2026-10-23
+
+- Incremental diagnostics on `didChange`. Range-based content changes are now
+  applied precisely (LSP byte/character offsets) instead of dropping them,
+  so live typing produces accurate diagnostics after every edit.
+- Tests: 895 in total. New test covers an incremental range edit that turns
+  a valid buffer into a type-mismatch diagnostic.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the change. The VS Code
+  extension is 0.39.0.
+
 ## v0.67.0 - 2026-10-23
 
 - Type definition. `textDocument/typeDefinition` jumps from a variable or

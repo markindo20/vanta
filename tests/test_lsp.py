@@ -165,6 +165,29 @@ class LspTests(unittest.TestCase):
         self.assertEqual(len(published), 1)
         self.assertEqual(published[0]['params']['diagnostics'], [])
 
+    def test_did_change_applies_an_incremental_range_change(self):
+        path = self.write('main.vnt',
+                          'func main() -> void:\n    let x: i32 = 1\n')
+        uri = self.open(path)
+        messages = self.server.handle_message({
+            'jsonrpc': '2.0', 'method': 'textDocument/didChange',
+            'params': {
+                'textDocument': {'uri': uri, 'version': 3},
+                'contentChanges': [{
+                    'range': {'start': {'line': 1, 'character': 17},
+                              'end': {'line': 1, 'character': 18}},
+                    'text': '"oops"',
+                }],
+            },
+        })
+        published = self.diagnostics(messages)
+        self.assertEqual(len(published), 1)
+        diags = published[0]['params']['diagnostics']
+        self.assertEqual(len(diags), 1)
+        # The resulting buffer carries the replacement, not the original.
+        self.assertEqual(self.server.documents[uri].text,
+                         'func main() -> void:\n    let x: i32 = "oops"\n')
+
     def test_diagnostics_use_unsaved_buffer(self):
         path = self.write('main.vnt',
                           'func main() -> void:\n    let x: i32 = 1\n')
