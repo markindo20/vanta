@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import os
 import re
 import shutil
@@ -795,6 +796,23 @@ def _vnt_files_under(target):
     return sorted(result)
 
 
+def _check_one(path, timing):
+    try:
+        started = time.perf_counter()
+        program, _ = _frontend_only(path)
+        total = time.perf_counter() - started
+    except (LexError, ParseError, CheckError, LoadError) as e:
+        _report_error(e)
+        return path, 1, None
+    if not program.decls:
+        sys.stderr.write(f"warning: {path} contains no declarations\n")
+    suffix = ''
+    if timing:
+        suffix = f" ({total * 1000:.1f} ms)"
+    print(f"OK: {path} type-checks{suffix}")
+    return path, 0, total
+
+
 def cmd_check(args):
     timing = getattr(args, 'timing', False)
     if os.path.isdir(args.source):
@@ -804,21 +822,18 @@ def cmd_check(args):
             return 1
     else:
         targets = [args.source]
+    targets = sorted(targets)
+    workers = getattr(args, 'jobs', None)
+    if not workers or workers < 1:
+        workers = min(8, os.cpu_count() or 4)
     failed = 0
-    for path in targets:
-        try:
-            started = time.perf_counter()
-            program, _ = _frontend_only(path)
-            total = time.perf_counter() - started
-        except (LexError, ParseError, CheckError, LoadError) as e:
-            _report_error(e)
-            failed += 1
-            continue
-        if not program.decls:
-            sys.stderr.write(f"warning: {path} contains no declarations\n")
-        print(f"OK: {path} type-checks")
-        if timing:
-            print(f"timing: frontend {total * 1000:.1f} ms")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_check_one, path, timing)
+                    for path in targets]
+        for fut in futures:
+            path, rc, _ = fut.result()
+            if rc != 0:
+                failed += 1
     return 0 if failed == 0 else 1
 
 
@@ -1219,6 +1234,8 @@ def main(argv):
     p_check.add_argument('source')
     p_check.add_argument('--timing', action='store_true',
                         help='print parse/typecheck timing')
+    p_check.add_argument('--jobs', type=int, default=0,
+                         help='parallel workers (0 = auto)')
 
     p_fmt = sub.add_parser('fmt', help='format a source file in place')
     p_fmt.add_argument('source')
