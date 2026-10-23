@@ -135,7 +135,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
    formatting, inlay hints, code lenses, call hierarchy, type hierarchy,
-   document highlighting, document links, and document symbols. The
+   document highlighting, document links, folding ranges, and document
+   symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -294,6 +295,13 @@ module records becomes a link whose range is the quoted path and whose target
 is the file the loader resolved, so a relative, aliased, or `std/` import
 points at the same file the compiler reads. An import the loader could not
 resolve keeps the link but has no target, and its tooltip says so.
+
+Folding ranges (v0.62.0) answer `textDocument/foldingRange`. The server does
+not need the parse tree: it walks the physical lines, opens a block when the
+indentation rises, and closes it on the next line at the same or a lower
+indentation, so folding keeps working while a file is being typed. A range
+ends on the last non-blank line before the dedent. Runs of comment lines and
+consecutive `import` lines become `comment` and `imports` regions.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -510,7 +518,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 870 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 875 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

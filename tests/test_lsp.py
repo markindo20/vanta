@@ -124,6 +124,7 @@ class LspTests(unittest.TestCase):
         self.assertTrue(caps['documentHighlightProvider'])
         self.assertEqual(caps['documentLinkProvider'],
                          {'resolveProvider': False})
+        self.assertTrue(caps['foldingRangeProvider'])
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
@@ -1625,6 +1626,87 @@ func main() -> i32:
         self.assertEqual(len(links), 1)
         self.assertNotIn('target', links[0])
         self.assertIn('unresolved', links[0]['tooltip'])
+
+    def test_folding_range_folds_a_function_body(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    let a = 1
+    let b = 2
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/foldingRange', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual([(r['startLine'], r['endLine']) for r in ranges],
+                         [(0, 2)])
+
+    def test_folding_range_nests_blocks(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    if true:
+        print_str("a")
+    print_str("b")
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/foldingRange', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(
+            {(r['startLine'], r['endLine']) for r in ranges},
+            {(0, 3), (1, 2)})
+
+    def test_folding_range_covers_a_struct_body(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+    name: str
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/foldingRange', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual([(r['startLine'], r['endLine']) for r in ranges],
+                         [(0, 2)])
+
+    def test_folding_range_folds_comments_and_imports(self):
+        path = self.write('main.vnt', '''\
+import "a.vnt"
+import "b.vnt"
+
+# one
+# two
+# three
+
+func main() -> void:
+    return
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/foldingRange', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        got = {(r['startLine'], r['endLine'], r.get('kind', ''))
+               for r in ranges}
+        self.assertIn((0, 1, 'imports'), got)
+        self.assertIn((3, 5, 'comment'), got)
+        self.assertIn((7, 8, ''), got)
+
+    def test_folding_range_trims_blank_lines(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    let a = 1
+
+    let b = 2
+
+func other() -> void:
+    return
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/foldingRange', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(
+            {(r['startLine'], r['endLine']) for r in ranges},
+            {(0, 3), (5, 6)})
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

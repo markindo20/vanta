@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.61.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.62.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -51,6 +51,8 @@ The server and debug adapter are part of the compiler package, so an installed
   in the current file, scope-aware, so a name and its uses light up together.
 - **Document links**: an `import` path opens the file it names; an unresolved
   path is marked.
+- **Folding** for function and struct bodies, nested blocks, `match` arms,
+  comment runs, and import runs.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -315,6 +317,25 @@ relative import, an aliased import, and a `std/` import all point at the file
 the compiler actually reads. A path that does not resolve stays a link with
 no target, and its tooltip says the import is unresolved.
 
+## Folding
+
+Every indented block folds from the line that opens it: a function body, a
+struct or enum body, a nested `if` or loop, and a `match` arm. The fold ends
+on the last non-blank line of the block, so trailing blank lines stay
+outside it.
+
+```vanta
+func main() -> void:
+    if true:
+        print_str("nested")
+    print_str("outer")
+```
+
+Ranges come from indentation rather than from the parse tree, so folding
+keeps working while a line is only half typed. A run of two or more comment
+lines folds as a comment region, and a run of consecutive `import` lines
+folds as an imports region.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -345,11 +366,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.32.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.33.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.32.0.vsix
+code --install-extension vanta-language-0.33.0.vsix
 ```
 
 ### Build from source
@@ -358,7 +379,7 @@ code --install-extension vanta-language-0.32.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.32.0.vsix
+code --install-extension vanta-language-0.33.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -524,6 +545,10 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
 - Document links cover `import` paths only, and the target is resolved when
   the document is loaded. A path that does not resolve has no target until
   the file appears next to the importing one.
+- Folding follows indentation, not the parse tree. A continuation line that
+  is indented deeper than the statement that opened it becomes a fold of its
+  own, and a file with inconsistent indentation folds where the indentation
+  says, not where the parser would.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

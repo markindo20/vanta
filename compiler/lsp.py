@@ -303,6 +303,59 @@ def _quoted_span(line_text: str, value: str) -> Optional[tuple[int, int]]:
     return index, index + len(value)
 
 
+def _comment_folds(lines: list[str]) -> list[dict]:
+    """Fold runs of two or more comment-only lines at one indentation."""
+    ranges: list[dict] = []
+    start = -1
+    last = -1
+    indent = -1
+    for number, text in enumerate(lines):
+        if text.strip().startswith('#'):
+            current = len(text) - len(text.lstrip(' '))
+            if start >= 0 and current == indent:
+                last = number
+                continue
+            if start >= 0 and last > start:
+                ranges.append({'startLine': start, 'endLine': last,
+                               'kind': 'comment'})
+            start = number
+            last = number
+            indent = current
+        else:
+            if start >= 0 and last > start:
+                ranges.append({'startLine': start, 'endLine': last,
+                               'kind': 'comment'})
+            start = -1
+            last = -1
+            indent = -1
+    if start >= 0 and last > start:
+        ranges.append({'startLine': start, 'endLine': last,
+                       'kind': 'comment'})
+    return ranges
+
+
+def _import_folds(lines: list[str]) -> list[dict]:
+    """Fold a run of two or more consecutive import lines."""
+    ranges: list[dict] = []
+    start = -1
+    last = -1
+    for number, text in enumerate(lines):
+        if _IMPORT_RE.match(text):
+            if start < 0:
+                start = number
+            last = number
+        else:
+            if start >= 0 and last > start:
+                ranges.append({'startLine': start, 'endLine': last,
+                               'kind': 'imports'})
+            start = -1
+            last = -1
+    if start >= 0 and last > start:
+        ranges.append({'startLine': start, 'endLine': last,
+                       'kind': 'imports'})
+    return ranges
+
+
 def _word_at(line_text: str, char: int) -> tuple[str, int, int]:
     """Return (word, start, end) for the identifier at a UTF-16 offset."""
     index = _lsp_to_py_char(line_text, char)
@@ -2529,6 +2582,7 @@ class LanguageServer:
                     'codeLensProvider': {'resolveProvider': False},
                     'callHierarchyProvider': True,
                     'typeHierarchyProvider': True,
+                    'foldingRangeProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2598,6 +2652,8 @@ class LanguageServer:
             self._response(msg_id, self._document_highlight(params))
         elif method == 'textDocument/documentLink':
             self._response(msg_id, self._document_links(params))
+        elif method == 'textDocument/foldingRange':
+            self._response(msg_id, self._folding_ranges(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -4449,6 +4505,42 @@ class LanguageServer:
                 link['tooltip'] = 'unresolved import: ' + imp.path
             links.append(link)
         return links
+
+    # -- folding ranges ----------------------------------------------------
+
+    def _folding_ranges(self, params: dict) -> list[dict]:
+        """Fold the indentation blocks, comment runs, and imports."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        lines = _lines(doc.text)
+        ranges: list[dict] = []
+        stack: list[tuple[int, int]] = []
+        last_nonblank = -1
+        for number, text in enumerate(lines):
+            stripped = text.strip()
+            if not stripped:
+                continue
+            indent = len(text) - len(text.lstrip(' '))
+            while stack and stack[-1][0] >= indent:
+                start = stack.pop()[1]
+                if last_nonblank > start:
+                    ranges.append({'startLine': start,
+                                   'endLine': last_nonblank})
+            if not stripped.startswith('#'):
+                stack.append((indent, number))
+            last_nonblank = number
+        while stack:
+            start = stack.pop()[1]
+            if last_nonblank > start:
+                ranges.append({'startLine': start,
+                               'endLine': last_nonblank})
+        ranges.extend(_comment_folds(lines))
+        ranges.extend(_import_folds(lines))
+        ranges.sort(key=lambda item: (item['startLine'],
+                                      item['endLine'],
+                                      item.get('kind', '')))
+        return ranges
 
     # -- document symbols --------------------------------------------------
 

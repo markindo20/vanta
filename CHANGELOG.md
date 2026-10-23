@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.62.0 - 2026-10-23
+
+- Folding ranges. The server answers `textDocument/foldingRange`, so the
+  editor folds a function body, a struct or enum body, a nested block, and a
+  `match` arm from the line that opens it.
+- The ranges are computed from indentation, so they keep working while a line
+  is half typed and a file that does not parse still folds. Blank lines at
+  the end of a block are left out, so a fold ends on the last real line.
+- Runs of comments fold as a `comment` region, and a run of consecutive
+  `import` lines folds as an `imports` region.
+- Tests: 875 in total. New tests cover the capability, a function body,
+  nested blocks, a struct body, comment and import runs, and the blank-line
+  trimming.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe folding ranges. The VS Code
+  extension is 0.33.0.
+
 ## v0.61.0 - 2026-10-22
 
 - Document links. The server answers `textDocument/documentLink`, so an

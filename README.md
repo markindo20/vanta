@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.61.0)
+# Vanta - a game-oriented systems language (v0.62.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -122,7 +122,7 @@ the generated C++. On C++ compilation failure the generated source is saved to
 
 ### Editor support
 
-v0.61.0 ships a language server and a native debugger:
+v0.62.0 ships a language server and a native debugger:
 
 ```powershell
 vanta lsp
@@ -133,7 +133,7 @@ vanta dap
 signature help, hover, go-to-definition, references, rename, quick fixes,
 workspace symbols, semantic highlighting, formatting, inlay hints, code
 lenses, call hierarchy, type hierarchy, document highlighting, document
-links, and document symbols. `vanta dap` speaks the Debug
+links, folding ranges, and document symbols. `vanta dap` speaks the Debug
 Adapter Protocol and drives GDB/MI2: line, function, conditional,
 hit-count, log-point, data, and exception breakpoints, stack traces, locals and
 arguments with structs and lists that expand into their fields and items, a
@@ -232,7 +232,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (870 tests) |
+| `tests/` | `unittest` suite (875 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -373,8 +373,8 @@ are real:
 Editor support covers diagnostics, completion, signature help, hover,
 definition, references, rename, quick fixes, workspace symbols, semantic
 highlighting, formatting, inlay hints, code lenses, call hierarchy, type
-hierarchy, document highlighting, document links, and document symbols
-through `vanta lsp` and the VS Code client.
+hierarchy, document highlighting, document links, folding ranges, and
+document symbols through `vanta lsp` and the VS Code client.
 `vanta dap` adds
 native debugging: line, function, conditional, hit-count, log-point, data, and
 exception breakpoints, stack traces, locals and arguments with structs and
