@@ -784,21 +784,42 @@ def cmd_new(args):
     return 0
 
 
+def _vnt_files_under(target):
+    if os.path.isfile(target):
+        return [target]
+    result = []
+    for dirpath, _dirs, files in os.walk(target):
+        for name in files:
+            if name.endswith('.vnt'):
+                result.append(os.path.join(dirpath, name))
+    return sorted(result)
+
+
 def cmd_check(args):
     timing = getattr(args, 'timing', False)
-    try:
-        started = time.perf_counter()
-        program, _ = _frontend_only(args.source)
-        total = time.perf_counter() - started
-    except (LexError, ParseError, CheckError, LoadError) as e:
-        _report_error(e)
-        return 1
-    if not program.decls:
-        sys.stderr.write(f"warning: {args.source} contains no declarations\n")
-    print(f"OK: {args.source} type-checks")
-    if timing:
-        print(f"timing: frontend {total * 1000:.1f} ms")
-    return 0
+    if os.path.isdir(args.source):
+        targets = _vnt_files_under(args.source) or []
+        if not targets:
+            sys.stderr.write(f"error: no .vnt files under {args.source}\n")
+            return 1
+    else:
+        targets = [args.source]
+    failed = 0
+    for path in targets:
+        try:
+            started = time.perf_counter()
+            program, _ = _frontend_only(path)
+            total = time.perf_counter() - started
+        except (LexError, ParseError, CheckError, LoadError) as e:
+            _report_error(e)
+            failed += 1
+            continue
+        if not program.decls:
+            sys.stderr.write(f"warning: {path} contains no declarations\n")
+        print(f"OK: {path} type-checks")
+        if timing:
+            print(f"timing: frontend {total * 1000:.1f} ms")
+    return 0 if failed == 0 else 1
 
 
 def cmd_fmt(args):
