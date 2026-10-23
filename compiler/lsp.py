@@ -3799,6 +3799,13 @@ class LanguageServer:
 
     def _workspace_symbols(self, params: dict) -> list[dict]:
         query = str(params.get('query') or '')
+        # Filter by SymbolKind if provided.
+        kind_filter = params.get('kind')
+        if kind_filter is not None:
+            if isinstance(kind_filter, list):
+                kind_filter = set(kind_filter)
+            else:
+                kind_filter = {kind_filter}
         scored: list[tuple[int, str, dict]] = []
         for path, module in self._workspace_modules():
             try:
@@ -3818,6 +3825,8 @@ class LanguageServer:
                     entries.append((member.name, S_ENUM_MEMBER,
                                     member.line, member.col, decl.name))
                 for name, kind, line, col, owner in entries:
+                    if kind_filter is not None and kind not in kind_filter:
+                        continue
                     score = _symbol_score(name, query)
                     if score is None:
                         continue
@@ -3957,6 +3966,8 @@ class LanguageServer:
             claimed.add((ref.line, ref.col))
             tokens.append((ref.line - 1, start, length, token_type,
                            modifiers))
+        # Import path string literals.
+        tokens.extend(self._import_string_tokens(module, lines, claimed))
         # Lexical tokens: keywords, strings, numbers, and comments.
         tokens.extend(self._lexical_tokens(doc.text, lines))
         # Builtins the walker cannot resolve, because they are not declared
@@ -4006,6 +4017,33 @@ class LanguageServer:
                 continue
             tokens.append((token.line - 1, start, length, token_type,
                            ST_MOD_DEFAULT_LIBRARY))
+        return tokens
+
+    def _import_string_tokens(self, module: ModuleInfo,
+                              lines: list[str],
+                              claimed: set[tuple[int, int]]) \
+            -> list[tuple[int, int, int, int, int]]:
+        """Semantic tokens for import path string literals."""
+        tokens: list[tuple[int, int, int, int, int]] = []
+        for imp in module.imports:
+            # ImportInfo has line (1-based) and col (1-based) pointing at the
+            # opening quote. The lexer already emits a STRING token for this.
+            # We just need to find it and emit a semantic token.
+            line_text = _line_at(lines, imp.line - 1)
+            # The import path is at imp.col (1-based). Find the quoted string.
+            start_idx = imp.col - 1
+            if start_idx < 0 or start_idx >= len(line_text):
+                continue
+            # Skip if this position is already claimed by the reference walker.
+            if (imp.line, imp.col) in claimed:
+                continue
+            # The token is a string literal; use 'string' type (index 16).
+            token_type = ST_STRING
+            length = _utf16_len(imp.path)
+            if length <= 0:
+                continue
+            start_lsp = _py_to_lsp_char(line_text, start_idx)
+            tokens.append((imp.line - 1, start_lsp, length, token_type, 0))
         return tokens
 
     def _lexical_tokens(self, text: str, lines: list[str]) \

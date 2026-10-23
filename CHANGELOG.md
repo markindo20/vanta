@@ -2,6 +2,19 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.65.0 - 2026-10-23
+
+- Semantic tokens for import paths. The `import "path"` string literal is now
+  classified as a string token, so the editor can style it distinctly.
+- Workspace symbol filtering. The `workspace/symbol` request accepts a `kind`
+  parameter (an array of LSP `SymbolKind` values) to restrict results to
+  functions, structs, enums, fields, etc.
+- Tests: 885 in total. New tests cover import path semantic tokens and
+  workspace symbol kind filtering.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the new features. The VS
+  Code extension is 0.36.0.
+
 ## v0.64.0 - 2026-10-23
 
 - Import hover and go-to-definition. Hovering an `import` path shows the

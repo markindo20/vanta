@@ -80,8 +80,11 @@ class LspTests(unittest.TestCase):
         })[0]
         return response['result']
 
-    def workspace_symbols(self, query):
-        return self.request('workspace/symbol', {'query': query})[0]['result']
+    def workspace_symbols(self, query, kind=None):
+        params = {'query': query}
+        if kind is not None:
+            params['kind'] = kind
+        return self.request('workspace/symbol', params)[0]['result']
 
     def semantic_tokens(self, uri):
         return self.request('textDocument/semanticTokens/full', {
@@ -1362,6 +1365,60 @@ func main() -> i32:
         self.assertTrue(tokens)
         kinds = {kind for _line, _char, _length, kind, _mods in tokens}
         self.assertIn('variable', kinds)
+
+    def test_semantic_tokens_include_import_paths(self):
+        path = self.write('main.vnt', '''\
+import "dep.vnt"
+import "other.vnt" as o
+
+func main() -> void:
+    return
+''')
+        uri = self.open(path)
+        tokens = self.decode_tokens(self.semantic_tokens(uri))
+        kinds = {(line, char): (kind, mods)
+                  for line, char, _length, kind, mods in tokens}
+        # Import paths should be tokenized as 'string'.
+        self.assertEqual(kinds[(0, 7)][0], 'string')
+        self.assertEqual(kinds[(1, 7)][0], 'string')
+
+    def test_workspace_symbols_filter_by_kind(self):
+        self.write('game.vnt', '''\
+module game
+
+pub struct Enemy:
+    hp: i32
+
+pub enum Color:
+    Red
+
+pub func spawn() -> i32:
+    return 1
+''')
+        main_path = self.write('main.vnt', '''\
+module main
+import "game.vnt"
+
+func main() -> void:
+    return
+''')
+        self.open(main_path)
+        self.server.root_path = self.tmp
+        self.server.root_uri = path_to_uri(self.tmp)
+
+        # Filter by Function (12)
+        funcs = self.workspace_symbols('', kind=[12])
+        self.assertEqual(sorted([s['name'] for s in funcs]), ['main', 'spawn'])
+        # Filter by Struct (23) and Enum (10)
+        types = self.workspace_symbols('', kind=[23, 10])
+        names = sorted([s['name'] for s in types])
+        self.assertEqual(names, ['Color', 'Enemy'])
+        # Filter by Field (8)
+        fields = self.workspace_symbols('', kind=[8])
+        self.assertEqual([s['name'] for s in fields], ['hp'])
+        # No filter returns everything
+        all_symbols = self.workspace_symbols('')
+        self.assertTrue(len(all_symbols) >= 5)
 
     def test_formatting_rewrites_the_document(self):
         path = self.write('main.vnt', 'func main() -> void:\n'

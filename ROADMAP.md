@@ -5,19 +5,26 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.64.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.65.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.65.0
+
+Semantic tokens for import paths and workspace symbol kind filtering landed.
+Import paths are now classified as strings for syntax highlighting. The
+`workspace/symbol` request accepts a `kind` filter to narrow results by
+symbol type (function, struct, enum, field, enum member). 885 tests total.
+
+The next editor work is signature help for imported functions and
+completion for `import` paths.
 
 ## Landed in v0.64.0
 
 Import hover and go-to-definition landed. Hovering an `import` path shows
 the resolved file (or "unresolved"); `Go to Definition` on an import jumps
 to the target file. 883 tests total.
-
-The next editor work is semantic tokens for `import` paths (and
-`workspaceSymbol` filtering by kind).
 
 ## Landed in v0.63.0
 
