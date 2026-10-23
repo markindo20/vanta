@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.62.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.63.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -53,6 +53,8 @@ The server and debug adapter are part of the compiler package, so an installed
   path is marked.
 - **Folding** for function and struct bodies, nested blocks, `match` arms,
   comment runs, and import runs.
+- **Selection ranges** to grow a selection from the word under the cursor to
+  its line, the enclosing blocks, and the whole file.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -366,11 +368,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.33.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.34.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.33.0.vsix
+code --install-extension vanta-language-0.34.0.vsix
 ```
 
 ### Build from source
@@ -379,7 +381,7 @@ code --install-extension vanta-language-0.33.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.33.0.vsix
+code --install-extension vanta-language-0.34.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -549,6 +551,9 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   is indented deeper than the statement that opened it becomes a fold of its
   own, and a file with inconsistent indentation folds where the indentation
   says, not where the parser would.
+- Selection ranges grow from the word under the cursor through its line and
+  each enclosing indentation block; an inconsistent indent file selects
+  where the indentation says.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

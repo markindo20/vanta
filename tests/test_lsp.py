@@ -125,6 +125,7 @@ class LspTests(unittest.TestCase):
         self.assertEqual(caps['documentLinkProvider'],
                          {'resolveProvider': False})
         self.assertTrue(caps['foldingRangeProvider'])
+        self.assertTrue(caps['selectionRangeProvider'])
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
@@ -1707,6 +1708,73 @@ func other() -> void:
         self.assertEqual(
             {(r['startLine'], r['endLine']) for r in ranges},
             {(0, 3), (5, 6)})
+
+    def test_selection_range_nests_blocks(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    if true:
+        print_str("x")
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/selectionRange', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 2, 'character': 8},
+        })[0]['result']
+        got = [(r['start']['line'], r['start']['character'],
+                r['end']['line'], r['end']['character']) for r in ranges]
+        self.assertEqual(got, [
+            (2, 8, 2, 17),   # the word
+            (2, 0, 2, 22),   # the line
+            (1, 0, 2, 22),   # the if block
+            (0, 0, 2, 22),   # the func block
+            (0, 0, 3, 0),    # the whole file (EOF)
+        ])
+
+    def test_selection_range_covers_the_if_header(self):
+        path = self.write('main.vnt', '''\
+func main() -> void:
+    if true:
+        print_str("x")
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/selectionRange', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 4},
+        })[0]['result']
+        got = [(r['start']['line'], r['start']['character'],
+                r['end']['line'], r['end']['character']) for r in ranges]
+        self.assertEqual(got, [
+            (1, 4, 1, 6),    # the word
+            (1, 0, 1, 12),   # the line
+            (0, 0, 2, 22),   # the func block
+            (0, 0, 3, 0),    # the whole file (EOF)
+        ])
+
+    def test_selection_range_on_a_blank_line(self):
+        path = self.write('main.vnt', '''\
+func a():
+    return
+
+func b():
+    return
+''')
+        uri = self.open(path)
+        ranges = self.request('textDocument/selectionRange', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 2, 'character': 0},
+        })[0]['result']
+        got = [(r['start']['line'], r['start']['character'],
+                r['end']['line'], r['end']['character']) for r in ranges]
+        self.assertEqual(got, [(0, 0, 5, 0)])
+
+    def test_selection_range_on_an_empty_document(self):
+        path = self.write('main.vnt', '')
+        uri = self.open(path)
+        ranges = self.request('textDocument/selectionRange', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 0},
+        })[0]['result']
+        self.assertEqual(ranges, [])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

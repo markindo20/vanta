@@ -135,8 +135,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
    formatting, inlay hints, code lenses, call hierarchy, type hierarchy,
-   document highlighting, document links, folding ranges, and document
-   symbols. The
+   document highlighting, document links, folding ranges, selection
+   ranges, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -302,6 +302,11 @@ indentation rises, and closes it on the next line at the same or a lower
 indentation, so folding keeps working while a file is being typed. A range
 ends on the last non-blank line before the dedent. Runs of comment lines and
 consecutive `import` lines become `comment` and `imports` regions.
+
+Selection ranges (v0.63.0) answer `textDocument/selectionRange`. From the
+word under the cursor the server returns the line, then each enclosing
+indentation block out to the whole file, walking physical lines the same way
+folding does.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -518,7 +523,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 875 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 879 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

@@ -2583,6 +2583,7 @@ class LanguageServer:
                     'callHierarchyProvider': True,
                     'typeHierarchyProvider': True,
                     'foldingRangeProvider': True,
+                    'selectionRangeProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2654,6 +2655,8 @@ class LanguageServer:
             self._response(msg_id, self._document_links(params))
         elif method == 'textDocument/foldingRange':
             self._response(msg_id, self._folding_ranges(params))
+        elif method == 'textDocument/selectionRange':
+            self._response(msg_id, self._selection_ranges(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -4541,6 +4544,65 @@ class LanguageServer:
                                       item['endLine'],
                                       item.get('kind', '')))
         return ranges
+
+    # -- selection ranges ----------------------------------------------------
+
+    def _selection_ranges(self, params: dict) -> list[dict]:
+        """Selection ranges: word, line, enclosing blocks, whole file."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        pos = params.get('position') or {}
+        line = max(0, min(int(pos.get('line', 0)),
+                          len(_lines(doc.text)) - 1))
+        char = max(0, int(pos.get('character', 0)))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        last_line = len(lines) - 1
+        ranges: list[dict] = []
+        word, wstart, wend = _word_at(line_text, char)
+        if word:
+            ranges.append({'start': {'line': line, 'character': wstart},
+                           'end': {'line': line, 'character': wend}})
+        line_end = _py_to_lsp_char(line_text, len(line_text))
+        if line_end:
+            line_range = {'start': {'line': line, 'character': 0},
+                          'end': {'line': line, 'character': line_end}}
+            if not ranges or ranges[-1] != line_range:
+                ranges.append(line_range)
+        cursor_indent = len(line_text) - len(line_text.lstrip(' '))
+        block_min = cursor_indent
+        for i in range(line - 1, -1, -1):
+            if not lines[i].strip():
+                continue
+            indent_i = len(lines[i]) - len(lines[i].lstrip(' '))
+            if indent_i < block_min:
+                block_min = indent_i
+                end = self._block_end(lines, i, indent_i)
+                brange = {'start': {'line': i, 'character': 0},
+                          'end': {'line': end,
+                                  'character': _py_to_lsp_char(lines[end],
+                                                             len(lines[end]))}}
+                if not ranges or ranges[-1] != brange:
+                    ranges.append(brange)
+        file_range = {'start': {'line': 0, 'character': 0},
+                      'end': {'line': last_line,
+                              'character': _py_to_lsp_char(
+                                  lines[last_line], len(lines[last_line]))}}
+        if not ranges or ranges[-1] != file_range:
+            ranges.append(file_range)
+        return ranges
+
+    @staticmethod
+    def _block_end(lines: list[str], header: int, indent: int) -> int:
+        end = header
+        for i in range(header + 1, len(lines)):
+            if not lines[i].strip():
+                continue
+            if len(lines[i]) - len(lines[i].lstrip(' ')) <= indent:
+                break
+            end = i
+        return end
 
     # -- document symbols --------------------------------------------------
 

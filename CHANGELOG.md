@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.63.0 - 2026-10-23
+
+- Selection ranges. The server answers `textDocument/selectionRange`, so the
+  editor can expand a selection from the word under the cursor to its line,
+  the enclosing indentation blocks, and the whole file.
+- Tests: 879 in total. New tests cover nested blocks, the `if` header, a
+  blank line, and an empty document.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe selection ranges. The VS
+  Code extension is 0.34.0.
+
 ## v0.62.0 - 2026-10-23
 
 - Folding ranges. The server answers `textDocument/foldingRange`, so the

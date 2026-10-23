@@ -5,10 +5,19 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.62.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.63.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.63.0
+
+Selection ranges landed. The editor can expand a selection from the word
+under the cursor to its line, the enclosing indentation blocks, and the
+whole file. 879 tests total.
+
+The next editor work is a hover peek for `import` targets (and a go-to
+definition for imports through it).
 
 ## Landed in v0.62.0
 
@@ -16,8 +25,6 @@ Folding ranges landed. A function, struct, enum, nested block, comment run,
 and import run fold from the line that opens it; the ranges come from
 indentation, so they survive a file that is still being typed. 875 tests
 total.
-
-The next editor work is selection ranges.
 
 ## Landed in v0.61.0
 
