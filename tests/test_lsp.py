@@ -372,6 +372,57 @@ func main() -> void:
                          'Enemy(hp: i32, name: str)')
         self.assertEqual(result['activeParameter'], 1)
 
+    def test_signature_help_for_an_imported_function(self):
+        self.write('game.vnt', 'module game\n\npub func spawn(x: i32, y: f32) '
+                      '-> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'module main\n\nimport "game.vnt"\n\n'
+                          'func main() -> void:\n    spawn(')
+        uri = self.open(path)
+        result = self.signature(uri, 5, len('    spawn('))
+        self.assertEqual(result['signatures'][0]['label'],
+                          'func spawn(x: i32, y: f32) -> i32')
+        self.assertEqual(result['activeParameter'], 0)
+
+    def test_signature_help_for_an_aliased_import_call(self):
+        self.write('game.vnt', 'module game\n\npub func spawn(x: i32, y: f32) '
+                      '-> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'module main\n\nimport "game.vnt" as g\n\n'
+                          'func main() -> void:\n    g.spawn(1,')
+        uri = self.open(path)
+        result = self.signature(uri, 5, len('    g.spawn(1,'))
+        self.assertEqual(result['signatures'][0]['label'],
+                          'func spawn(x: i32, y: f32) -> i32')
+        self.assertEqual(result['activeParameter'], 1)
+
+    def test_completion_suggests_sibling_files_for_import(self):
+        self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "d')
+        uri = self.open(path)
+        labels = self.completion_labels(uri, 0, len('import "d'))
+        self.assertIn('dep.vnt', labels)
+
+    def test_completion_suggests_std_modules_for_import(self):
+        # std/option.vnt is shipped with the compiler
+        path = self.write('main.vnt', 'import "std/o')
+        uri = self.open(path)
+        labels = self.completion_labels(uri, 0, len('import "std/o'))
+        self.assertIn('std/option.vnt', labels)
+
+    def test_completion_import_replaces_the_partial_path(self):
+        self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "d')
+        uri = self.open(path)
+        items = self.request('textDocument/completion', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': len('import "d')},
+        })[0]['result']
+        # The completion edit should replace the partial path "d" with the
+        # full suggestion.
+        completion = next(i for i in items if i['label'] == 'dep.vnt')
+        edit = completion['textEdit']['newText'] if 'textEdit' in completion \
+            else items[0]['label']
+        self.assertEqual(completion['label'], 'dep.vnt')
+
     def test_signature_help_for_builtin_function_and_method(self):
         path = self.write('main.vnt', '''\
 func take(xs: List<i32>) -> void:

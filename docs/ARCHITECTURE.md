@@ -136,8 +136,9 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
    formatting, inlay hints, code lenses, call hierarchy, type hierarchy,
    document highlighting, document links, folding ranges, selection
-   ranges, import hover/go-to-def, semantic tokens for imports, workspace
-   symbol filters, and document symbols. The
+   ranges, import hover/go-to-def, completions for import paths,
+   signature help for imported functions, semantic tokens for imports,
+   workspace symbol filters, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -320,6 +321,11 @@ literal as a `string` token, so editors can highlight import paths
 differently. Workspace symbol filtering (v0.65.0) accepts a `kind` array in
 the `workspace/symbol` request to restrict results to specific
 `SymbolKind` values (Function, Struct, Enum, Field, EnumMember, etc.).
+
+Import completion (v0.66.0) completes sibling `.vnt` files and `std/...`
+modules against the partial path typed inside `import "..."`. Signature help
+(v0.66.0) resolves imported functions through the tolerant project index,
+including unqualified calls and calls through an alias.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -536,7 +542,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 885 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 890 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

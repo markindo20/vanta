@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.65.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.66.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -62,6 +62,10 @@ The server and debug adapter are part of the compiler package, so an installed
   is classified as a string for distinct highlighting.
 - **Workspace symbol filter**: the symbol search can be restricted by kind
   (function, struct, enum, field, enum member).
+- **Import completion**: typing inside `import "..."` suggests sibling `.vnt`
+  files and `std/...` modules, and commits the chosen path.
+- **Signature help** for imported functions covers both unqualified calls and
+  calls through an alias.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -375,11 +379,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.36.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.37.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.36.0.vsix
+code --install-extension vanta-language-0.37.0.vsix
 ```
 
 ### Build from source
@@ -388,7 +392,7 @@ code --install-extension vanta-language-0.36.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.36.0.vsix
+code --install-extension vanta-language-0.37.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press

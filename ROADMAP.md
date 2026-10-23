@@ -5,10 +5,18 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise — priorities move
 as the games show what actually hurts.
 
-Current release: **v0.65.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v0.66.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v0.66.0
+
+Import path completion and signature help for imported functions landed. The
+editor completes sibling files and `std/...` under `import "..."`. Signature
+help covers imported functions both unqualified and through an alias. 890 tests total.
+
+The next editor work is type definition (`textDocument/typeDefinition`).
 
 ## Landed in v0.65.0
 
@@ -16,9 +24,6 @@ Semantic tokens for import paths and workspace symbol kind filtering landed.
 Import paths are now classified as strings for syntax highlighting. The
 `workspace/symbol` request accepts a `kind` filter to narrow results by
 symbol type (function, struct, enum, field, enum member). 885 tests total.
-
-The next editor work is signature help for imported functions and
-completion for `import` paths.
 
 ## Landed in v0.64.0
 

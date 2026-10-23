@@ -1,8 +1,8 @@
 {
   "name": "vanta-language",
   "displayName": "Vanta",
-  "description": "Vanta language support: diagnostics, completion, hover, definitions, references, rename, quick fixes, workspace symbols, semantic highlighting, formatting, inlay hints, code lenses, call hierarchy, type hierarchy, document highlighting, document links, folding ranges, selection ranges, import hover/go-to-def, semantic tokens for imports, workspace symbol filters, document symbols, and native debugging.",
-  "version": "0.36.0",
+  "description": "Vanta language support: diagnostics, completion, hover, definitions, references, rename, quick fixes, workspace symbols, semantic highlighting, formatting, inlay hints, code lenses, call hierarchy, type hierarchy, document highlighting, document links, folding ranges, selection ranges, import hover/go-to-def, completions for import paths, signature help for imported functions, semantic tokens for imports, workspace symbol filters, document symbols, and native debugging.",
+  "version": "0.37.0",
   "publisher": "vanta",
   "license": "MIT",
   "repository": {

@@ -2,6 +2,18 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.66.0 - 2026-10-23
+
+- Completion for import paths. Inside `import "..."` the editor offers
+  sibling `.vnt` files plus everything under `std/` (filtered by prefix).
+- Signature help now works for imported functions, both unqualified (`spawn(...)`)
+  and through an alias (`g.spawn(...)`).
+- Tests: 890 in total. New tests cover completion of sibling and std-module
+  paths, the path-replacing text edit, and signature help on imported names.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the additions. The VS
+  Code extension is 0.37.0.
+
 ## v0.65.0 - 2026-10-23
 
 - Semantic tokens for import paths. The `import "path"` string literal is now

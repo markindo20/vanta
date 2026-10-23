@@ -2822,11 +2822,16 @@ class LanguageServer:
                                      pos.get('character', 0))
         lines = _lines(doc.text)
         line_text = _line_at(lines, line)
+        lsp_char = _to_lsp(line_text, char)
+        # Inside an import path the only useful completions are file names.
+        imported = self._import_completions(doc, line, lsp_char, line_text)
+        if imported is not None:
+            return imported
         index = _completion_word_start(line_text, char)
         word_start = _py_to_lsp_char(line_text, index)
         object_path = _object_before_dot(line_text, index)
         project = self._project(doc)
-        locals_ = project.local_symbols(line, _to_lsp(line_text, char))
+        locals_ = project.local_symbols(line, lsp_char)
 
         items: list[dict] = []
         if object_path is not None:
@@ -2836,6 +2841,74 @@ class LanguageServer:
             items.extend(self._general_completions(
                 project, locals_, line, line_text, word_start))
         return _dedupe_completion(items)
+
+    def _import_completions(self, doc, line: int, lsp_char: int,
+                            line_text: str) -> Optional[list[dict]]:
+        """Complete the quoted path of an `import` line."""
+        # _IMPORT_RE requires a closing quote, which does not exist while the
+        # user is still typing. Accept a line that starts with `import "` and
+        # handle a missing closing quote separately.
+        if not line_text.startswith('import '):
+            return None
+        quote = line_text.find('"')
+        if quote < 0:
+            return None
+        tail = line_text[quote + 1:]
+        if '"' in tail:
+            open_py = quote
+            close_py = line_text.index('"', quote + 1)
+        else:
+            # Unterminated string while typing: replace to the line end.
+            open_py = quote
+            close_py = len(line_text)
+        open_lsp = _py_to_lsp_char(line_text, open_py)
+        close_lsp = _py_to_lsp_char(line_text, close_py)
+        if not (open_lsp <= lsp_char <= close_lsp):
+            return None
+        cursor_py = _lsp_to_py_char(line_text, lsp_char)
+        typed = line_text[open_py + 1:cursor_py].lower()
+        suggestions = self._import_candidates(doc)
+        edit = {'range': {
+            'start': {'line': line,
+                      'character': _py_to_lsp_char(line_text, open_py + 1)},
+            'end': {'line': line,
+                    'character': _py_to_lsp_char(line_text, close_py)},
+        }}
+        items: list[dict] = []
+        for label, target in suggestions:
+            if typed and not label.lower().startswith(typed):
+                continue
+            items.append(_item(label, K_MODULE, target, edit,
+                               sort=f'0_{label.lower()}'))
+        return items
+
+    @staticmethod
+    def _import_candidates(doc) -> list[tuple[str, str]]:
+        """Sibling .vnt files and std modules as (label, target) pairs."""
+        suggestions: list[tuple[str, str]] = []
+        base_dir = os.path.dirname(doc.path) if doc.path else None
+        own_name = os.path.basename(doc.path) if doc.path else ''
+        if base_dir:
+            try:
+                for name in sorted(os.listdir(base_dir)):
+                    if not name.endswith('.vnt') or name == own_name:
+                        continue
+                    full = os.path.join(base_dir, name)
+                    if os.path.isfile(full):
+                        suggestions.append((name, full))
+            except OSError:
+                pass
+        if STDLIB_DIR and os.path.isdir(STDLIB_DIR):
+            for root, dirs, files in os.walk(STDLIB_DIR):
+                dirs.sort()
+                for name in sorted(files):
+                    if not name.endswith('.vnt'):
+                        continue
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, STDLIB_DIR)
+                    rel = rel.replace(os.sep, '/')
+                    suggestions.append(('std/' + rel, full))
+        return suggestions
 
     def _general_completions(self, project: _ProjectIndex,
                              locals_: dict[str, LocalInfo], line: int,
