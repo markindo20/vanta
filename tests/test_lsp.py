@@ -122,6 +122,8 @@ class LspTests(unittest.TestCase):
                          {'codeActionKinds': ['quickfix']})
         self.assertTrue(caps['workspaceSymbolProvider'])
         self.assertTrue(caps['documentHighlightProvider'])
+        self.assertEqual(caps['documentLinkProvider'],
+                         {'resolveProvider': False})
         self.assertTrue(caps['documentFormattingProvider'])
         self.assertTrue(caps['inlayHintProvider'])
         self.assertEqual(caps['codeLensProvider'], {'resolveProvider': False})
@@ -1518,8 +1520,10 @@ func main() -> i32:
             'textDocument': {'uri': uri},
             'position': {'line': 2, 'character': 8},
         })[0]['result']
-        lines = sorted({h['range']['start']['line'] for h in result})
-        self.assertEqual(lines, [1, 2, 3, 4])
+        self.assertEqual(len(result), 4)
+        # The declaration is text; each use is a read.
+        kinds = {h['range']['start']['line']: h['kind'] for h in result}
+        self.assertEqual(kinds, {1: 1, 2: 2, 3: 2, 4: 2})
 
     def test_document_highlight_does_not_mix_shadowing_names(self):
         path = self.write('main.vnt', '''\
@@ -1549,6 +1553,78 @@ func main() -> i32:
         })[0]['result']
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['range']['start']['line'], 1)
+
+    def test_document_highlight_tracks_a_struct_field(self):
+        path = self.write('main.vnt', '''\
+struct Enemy:
+    hp: i32
+
+func heal(e: Enemy) -> void:
+    e.hp = e.hp + 1
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 5},
+        })[0]['result']
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            sorted(h['range']['start']['line'] for h in result),
+            [1, 4, 4])
+
+    def test_document_highlight_highlights_a_function(self):
+        path = self.write('main.vnt', '''\
+func helper() -> i32:
+    return 1
+
+func main() -> i32:
+    return helper() + helper()
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/documentHighlight', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 0, 'character': 7},
+        })[0]['result']
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            sorted(h['range']['start']['line'] for h in result),
+            [0, 4, 4])
+
+    def test_document_link_points_at_an_imported_file(self):
+        dep = self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "dep.vnt"\n\n'
+                          'func main() -> i32:\n    return helper()\n')
+        uri = self.open(path)
+        links = self.request('textDocument/documentLink', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]['target'], path_to_uri(dep))
+        self.assertEqual(links[0]['range']['start'],
+                         {'line': 0, 'character': 7})
+        self.assertEqual(links[0]['range']['end'],
+                         {'line': 0, 'character': 16})
+
+    def test_document_link_covers_an_aliased_import(self):
+        dep = self.write('dep.vnt', 'func helper() -> i32:\n    return 1\n')
+        path = self.write('main.vnt', 'import "dep.vnt" as util\n\n'
+                          'func main() -> i32:\n    return util.helper()\n')
+        uri = self.open(path)
+        links = self.request('textDocument/documentLink', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]['target'], path_to_uri(dep))
+
+    def test_document_link_marks_an_unresolved_import(self):
+        path = self.write('main.vnt', 'import "missing.vnt"\n')
+        uri = self.open(path)
+        links = self.request('textDocument/documentLink', {
+            'textDocument': {'uri': uri},
+        })[0]['result']
+        self.assertEqual(len(links), 1)
+        self.assertNotIn('target', links[0])
+        self.assertIn('unresolved', links[0]['tooltip'])
 
     def test_uri_round_trip(self):
         path = self.write('a b.vnt', 'func main() -> void:\n    return\n')

@@ -2,6 +2,42 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.61.0 - 2026-10-22
+
+- Document links. The server answers `textDocument/documentLink`, so an
+  `import` path is a link: the editor can follow it to the file it names.
+- The target is the file the loader resolved, so a relative import, an
+  `import "std/..."` from the standard library, and an aliased import all
+  point at the real file rather than at a guessed path.
+- A path that does not resolve stays a link with no target and a tooltip
+  that says so, so a typo is visible without opening the Problems panel.
+- Tests: 870 in total. New tests cover the capability, a relative import,
+  an aliased import, an unresolved import, and the highlighting of a struct
+  field and of a function.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe document links. The VS Code
+  extension is 0.32.0.
+
+## v0.60.0 - 2026-10-22
+
+- Document highlighting. The server answers `textDocument/documentHighlight`,
+  so the editor highlights every occurrence of the symbol under the cursor in
+  the file that is open.
+- The occurrences are scope-aware, from the same resolver that powers
+  references and rename: a shadowing local with the same name is not
+  highlighted, a field is highlighted only where the receiver has the
+  declaring struct's type, and a declaration is distinguished from its uses.
+- The declaration is reported as text and each use as a read, so the editor
+  can colour them differently. A word that resolves to nothing falls back to
+  every textual occurrence of that word, which keeps the feature useful while
+  a line is still being typed.
+- Tests: 865 in total. New tests cover the capability, a local with its
+  declaration and uses, a shadowing local that is not mixed in, and the
+  fallback for an unknown word.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe document highlighting. The
+  VS Code extension is 0.31.0.
+
 ## v0.59.0 - 2026-10-22
 
 - A type hierarchy. The server answers `textDocument/prepareTypeHierarchy` and

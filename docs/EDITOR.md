@@ -1,6 +1,6 @@
 # Editor support
 
-Vanta v0.60.0 ships a language server, a native debugger, and a VS Code client.
+Vanta v0.61.0 ships a language server, a native debugger, and a VS Code client.
 The server and debug adapter are part of the compiler package, so an installed
 `vanta` command and a source checkout provide the same editor features.
 
@@ -47,6 +47,10 @@ The server and debug adapter are part of the compiler package, so an installed
 - **A call hierarchy**: who calls this function, and what does it call.
 - **A type hierarchy**: which structs hold this type, and which types this
   struct holds.
+- **Document highlighting**: every occurrence of the symbol under the cursor
+  in the current file, scope-aware, so a name and its uses light up together.
+- **Document links**: an `import` path opens the file it names; an unresolved
+  path is marked.
 - **Document symbols** for the outline view, including struct fields and enum
   members under their containing declaration.
 - **Native debugging** through a `vanta` debug configuration: line,
@@ -272,6 +276,45 @@ count, because a pointer does not embed the struct - it only refers to it.
 The relation is resolved by name across modules, so a struct in another
 file is found.
 
+## Document highlighting
+
+Put the cursor on a name and the editor highlights every occurrence of the
+same symbol in the current file:
+
+```vanta
+struct Enemy:
+    hp: i32
+
+func heal(target: Enemy, amount: i32) -> void:
+    target.hp = target.hp + amount   # all three 'hp' names highlight
+```
+
+Highlighting is scope-aware, because it comes from the same resolver that
+powers references and rename: a shadowing local with the same name is not
+highlighted, and a field is highlighted only where the receiver has the
+declaring struct's type. The declaration is reported as text and each use as
+a read. A word that resolves to nothing still highlights every textual
+occurrence of that word, so an unfinished line keeps the feature.
+
+Unlike **Find All References**, the highlights stay in the current file and
+need no second click; they follow the cursor. That is also the limit: a use
+in another module is not highlighted, even when the file is imported.
+
+## Document links
+
+An `import` path is a link. Hover it to see the file it resolves to and
+follow it to open that file:
+
+```vanta
+import "std/option.vnt"
+import "enemy.vnt" as enemy
+```
+
+The target comes from the loader, not from a second guess at the path, so a
+relative import, an aliased import, and a `std/` import all point at the file
+the compiler actually reads. A path that does not resolve stays a link with
+no target, and its tooltip says the import is unresolved.
+
 ## Install the compiler
 
 The server is launched through the `vanta` command:
@@ -302,11 +345,11 @@ source.
 
 ### From a release
 
-Download `vanta-language-0.31.0.vsix` from the latest Vanta GitHub release and
+Download `vanta-language-0.32.0.vsix` from the latest Vanta GitHub release and
 install it:
 
 ```powershell
-code --install-extension vanta-language-0.31.0.vsix
+code --install-extension vanta-language-0.32.0.vsix
 ```
 
 ### Build from source
@@ -315,7 +358,7 @@ code --install-extension vanta-language-0.31.0.vsix
 cd editors/vscode
 npm install
 npm run package
-code --install-extension vanta-language-0.31.0.vsix
+code --install-extension vanta-language-0.32.0.vsix
 ```
 
 To work on the extension itself, open `editors/vscode` in VS Code and press
@@ -474,6 +517,13 @@ optional `gdbPath`. See [`docs/DEBUGGER.md`](DEBUGGER.md).
   reports a call, not a mention: a function used as a value is not a caller.
 - The type hierarchy holds a struct only when the field is by value. A
   `ptr<T>` or `List<T>` field is a reference, not a holding.
+- Document highlighting stays inside the current file. A use in another
+  module is not highlighted, and every use is reported as a read: an
+  assignment target is highlighted but not distinguished as a write. A name
+  the resolver cannot place falls back to textual matches of the same word.
+- Document links cover `import` paths only, and the target is resolved when
+  the document is loaded. A path that does not resolve has no target until
+  the file appears next to the importing one.
 - The debugger is intentionally a first milestone: no remote debugging; no
   reverse debugging; no LLDB or MSVC/PDB support. Breakpoint conditions, hit
   counts, and log points are evaluated by the adapter, so the program pauses

@@ -134,8 +134,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    framing over stdin/stdout, full-document sync, UTF-16 position conversion,
    diagnostics, completion, signature help, hover, definition, references,
    rename (prepare and edit), quick fixes, workspace symbols, semantic tokens,
-   formatting, inlay hints, code lenses, call hierarchy, type hierarchy, and
-   document symbols. The
+   formatting, inlay hints, code lenses, call hierarchy, type hierarchy,
+   document highlighting, document links, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -280,6 +280,20 @@ is the one the language has: a struct that holds another by value. The
 server resolves each field's written type name to a declaration, across
 modules, and skips `ptr<T>`, `List<T>`, and array fields, because a
 reference does not embed the struct it names.
+
+Document highlighting (v0.60.0) answers `textDocument/documentHighlight`.
+The server resolves the symbol under the cursor with the reference walker and
+returns the occurrences recorded for the same symbol in the current document,
+so shadowing and field receivers behave exactly as they do for references.
+The declaration is marked as text and the uses as reads. When no symbol
+resolves, the handler falls back to every textual occurrence of the
+identifier word, so an unfinished line still highlights.
+
+Document links (v0.61.0) answer `textDocument/documentLink`. Each import the
+module records becomes a link whose range is the quoted path and whose target
+is the file the loader resolved, so a relative, aliased, or `std/` import
+points at the same file the compiler reads. An import the loader could not
+resolve keeps the link but has no target, and its tooltip says so.
 
 `compiler/formatter.py` is the source formatter (`vanta fmt`, and
 `textDocument/formatting`). It lexes the file and groups the tokens into
@@ -496,7 +510,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 865 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 870 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

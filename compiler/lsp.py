@@ -291,6 +291,18 @@ def _range(line: int, col: int, end_line: int, end_col: int) -> dict:
     }
 
 
+def _quoted_span(line_text: str, value: str) -> Optional[tuple[int, int]]:
+    """Return the (start, end) of a quoted string on the line."""
+    token = '"' + value + '"'
+    index = line_text.find(token)
+    if index >= 0:
+        return index, index + len(token)
+    index = line_text.find(value)
+    if index < 0:
+        return None
+    return index, index + len(value)
+
+
 def _word_at(line_text: str, char: int) -> tuple[str, int, int]:
     """Return (word, start, end) for the identifier at a UTF-16 offset."""
     index = _lsp_to_py_char(line_text, char)
@@ -2513,6 +2525,7 @@ class LanguageServer:
                     'documentFormattingProvider': True,
                     'inlayHintProvider': True,
                     'documentHighlightProvider': True,
+                    'documentLinkProvider': {'resolveProvider': False},
                     'codeLensProvider': {'resolveProvider': False},
                     'callHierarchyProvider': True,
                     'typeHierarchyProvider': True,
@@ -2583,8 +2596,8 @@ class LanguageServer:
             self._response(msg_id, self._semantic_tokens(params))
         elif method == 'textDocument/documentHighlight':
             self._response(msg_id, self._document_highlight(params))
-        elif method == 'textDocument/documentHighlight':
-            self._response(msg_id, self._document_highlight(params))
+        elif method == 'textDocument/documentLink':
+            self._response(msg_id, self._document_links(params))
         elif method == 'textDocument/documentSymbol':
             self._response(msg_id, self._document_symbols(params))
         elif method in ('workspace/didChangeConfiguration',
@@ -4354,51 +4367,39 @@ class LanguageServer:
         doc = self._doc(params)
         if doc is None or not doc.text:
             return []
-        project = self._project(doc)
-        for uri, other in self.documents.items():
-            if other.path and uri != doc.uri:
-                try:
-                    project._load(other.path, [])
-                except Exception:
-                    pass
-        lines = _lines(doc.text)
-        pos = params.get('position') or {}
-        line = max(0, min(int(pos.get('line', 0)), len(lines) - 1))
-        char = max(0, int(pos.get('character', 0)))
-        line_text = lines[line]
-        word, _, _ = _word_at(line_text, char)
-        if not word:
-            return []
-        # Resolve the symbol under the cursor; if it exists, take the
-        # occurrences the reference walker found in this document.
         target = self._reference_target(params)
         if target is not None:
-            symbol = target['symbol']
+            doc_path = _norm_path(doc.path)
             highlights: list[dict] = []
             seen: set[tuple[int, int]] = set()
-            # Walk this document with the same index so we get its refs.
-            module = doc_path = project.current if (
-                project.current.path == doc.path or project.current is not None) else project.current
-            walker = _ReferenceWalker(module, project)
+            walker = _ReferenceWalker(target['module'], target['project'])
             for ref in walker.refs:
-                if ref.symbol != symbol:
+                if ref.symbol != target['symbol']:
+                    continue
+                if _norm_path(ref.path) != doc_path:
                     continue
                 key = (ref.line, ref.col)
                 if key in seen:
                     continue
                 seen.add(key)
-                range_ = self._ref_range(target, ref)
                 highlights.append({
-                    'range': range_,
+                    'range': self._ref_range(target, ref),
                     'kind': 1 if ref.declaration else 2,
                 })
             if highlights:
                 return highlights
-        # Fall back to highlighting every occurrence of the word as text.
+        # Fall back to every textual occurrence of the word under the cursor.
+        lines = _lines(doc.text)
+        pos = params.get('position') or {}
+        line = max(0, min(int(pos.get('line', 0)), len(lines) - 1))
+        char = max(0, int(pos.get('character', 0)))
+        word, _, _ = _word_at(lines[line], char)
+        if not word:
+            return []
+        pattern = re.compile(r'\b' + re.escape(word) + r'\b')
         highlights = []
         for line_number, text in enumerate(lines):
-            for match in re.finditer(r'\b' + re.escape(word) + r'\b',
-                                    text):
+            for match in pattern.finditer(text):
                 start = _py_to_lsp_char(text, match.start())
                 end = _py_to_lsp_char(text, match.end())
                 highlights.append({
@@ -4410,6 +4411,44 @@ class LanguageServer:
                     'kind': 1,
                 })
         return highlights
+
+    # -- document links ----------------------------------------------------
+
+    def _document_links(self, params: dict) -> list[dict]:
+        """Make every import path a link to the file it names."""
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return []
+        project = self._project(doc)
+        lines = _lines(doc.text)
+        links: list[dict] = []
+        for imp in project.current.imports:
+            line_text = _line_at(lines, imp.line - 1)
+            span = _quoted_span(line_text, imp.path)
+            if span is None:
+                continue
+            start, end = span
+            start_char = _py_to_lsp_char(line_text, start)
+            end_char = _py_to_lsp_char(line_text, end)
+            link: dict = {
+                'range': {
+                    'start': {'line': imp.line - 1,
+                              'character': start_char},
+                    'end': {'line': imp.line - 1,
+                            'character': end_char},
+                },
+            }
+            target = imp.target
+            if target is not None and target.path != '<untitled>':
+                try:
+                    link['target'] = path_to_uri(target.path)
+                except (ValueError, OSError):
+                    pass
+                link['tooltip'] = target.path
+            else:
+                link['tooltip'] = 'unresolved import: ' + imp.path
+            links.append(link)
+        return links
 
     # -- document symbols --------------------------------------------------
 
