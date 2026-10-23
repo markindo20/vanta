@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.66.0)
+# Vanta - a game-oriented systems language (v0.67.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
@@ -122,7 +122,7 @@ the generated C++. On C++ compilation failure the generated source is saved to
 
 ### Editor support
 
-v0.66.0 ships a language server and a native debugger:
+v0.67.0 ships a language server and a native debugger:
 
 ```powershell
 vanta lsp
@@ -233,7 +233,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (890 tests) |
+| `tests/` | `unittest` suite (894 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -377,8 +377,8 @@ highlighting, formatting, inlay hints, code lenses, call hierarchy, type
 hierarchy, document highlighting, document links, folding ranges,
 selection ranges, import hover/go-to-def, completions for import paths,
 signature help for imported functions, semantic tokens for imports, workspace
-symbol filters, and document symbols through `vanta lsp` and the VS Code
-client.
+symbol filters, type definition, and document symbols through `vanta lsp`
+and the VS Code client.
 `vanta dap` adds
 native debugging: line, function, conditional, hit-count, log-point, data, and
 exception breakpoints, stack traces, locals and arguments with structs and

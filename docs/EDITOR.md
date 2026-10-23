@@ -62,6 +62,8 @@ The server and debug adapter are part of the compiler package, so an installed
   is classified as a string for distinct highlighting.
 - **Workspace symbol filter**: the symbol search can be restricted by kind
   (function, struct, enum, field, enum member).
+- **Type definition**: `Go to Type Definition` on a variable or field jumps
+  to the struct/enum declaration it names.
 - **Import completion**: typing inside `import "..."` suggests sibling `.vnt`
   files and `std/...` modules, and commits the chosen path.
 - **Signature help** for imported functions covers both unqualified calls and

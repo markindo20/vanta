@@ -2584,6 +2584,7 @@ class LanguageServer:
                     'typeHierarchyProvider': True,
                     'foldingRangeProvider': True,
                     'selectionRangeProvider': True,
+                    'typeDefinitionProvider': True,
                     'semanticTokensProvider': {
                         'legend': {
                             'tokenTypes': SEMANTIC_TOKEN_TYPES,
@@ -2619,6 +2620,8 @@ class LanguageServer:
             self._response(msg_id, self._hover(params))
         elif method == 'textDocument/definition':
             self._response(msg_id, self._definition(params))
+        elif method == 'textDocument/typeDefinition':
+            self._response(msg_id, self._type_definition(params))
         elif method == 'textDocument/references':
             self._response(msg_id, self._references(params))
         elif method == 'textDocument/prepareRename':
@@ -4689,6 +4692,70 @@ class LanguageServer:
         return links
 
     # -- folding ranges ----------------------------------------------------
+
+    def _type_definition(self, params: dict) -> Optional[list[dict]]:
+        doc = self._doc(params)
+        if doc is None or not doc.text:
+            return None
+        pos = params.get('position') or {}
+        line, char = _position_to_py(doc.text, pos.get('line', 0),
+                                     pos.get('character', 0))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        lsp_char = _to_lsp(line_text, char)
+        word, start, _ = _word_at(line_text, lsp_char)
+        if not word:
+            return None
+        project = self._project(doc)
+        locals_ = project.local_symbols(line, lsp_char)
+        decl = None
+        type_decl = project.type_by_name(word)
+        if type_decl is not None:
+            decl = type_decl
+        elif word in locals_:
+            type_name = _base_type_name(locals_[word].type_name)
+            if type_name:
+                decl = project.type_by_name(type_name)
+        else:
+            object_path = _object_before_dot(
+                line_text, _lsp_to_py_char(line_text, start))
+            if object_path is not None:
+                # Resolve the type that owns the member under the cursor.
+                owner_name = object_path[0]
+                local_type = locals_.get(owner_name, None).type_name if (
+                    owner_name in locals_) else None
+                type_name = (_base_type_name(local_type)
+                            if local_type else owner_name)
+                owner = project.type_by_name(type_name)
+                for comp in object_path[1:]:
+                    if owner is None or owner.kind not in ('struct', 'enum'):
+                        owner = None
+                        break
+                    matched = None
+                    for fld in owner.fields:
+                        if fld.name == comp:
+                            matched = fld
+                            break
+                    if matched is None:
+                        owner = None
+                        break
+                    tn = _base_type_name(matched.type_name)
+                    owner = project.type_by_name(tn) if tn else None
+                if owner is not None and owner.kind in ('struct', 'enum'):
+                    for fld in owner.fields:
+                        if fld.name == word:
+                            tn = _base_type_name(fld.type_name)
+                            cand = project.type_by_name(tn) if tn else None
+                            if cand is not None:
+                                decl = cand
+                            break
+        if decl is None:
+            return None
+        return [{
+            'uri': path_to_uri(decl.path),
+            'range': _range(decl.line, decl.col, decl.line,
+                             decl.col + len(decl.name)),
+        }]
 
     def _folding_ranges(self, params: dict) -> list[dict]:
         """Fold the indentation blocks, comment runs, and imports."""

@@ -137,8 +137,8 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    formatting, inlay hints, code lenses, call hierarchy, type hierarchy,
    document highlighting, document links, folding ranges, selection
    ranges, import hover/go-to-def, completions for import paths,
-   signature help for imported functions, semantic tokens for imports,
-   workspace symbol filters, and document symbols. The
+   signature help for imported functions, type definition, semantic
+   tokens for imports, workspace symbol filters, and document symbols. The
    `lsp` subcommand in `driver.py` imports and runs it, and `compiler/__main__.py`
    provides the `python -m compiler lsp` fallback.
 12. `dap.py` - the Debug Adapter Protocol frontend and GDB/MI2 bridge. The
@@ -542,7 +542,7 @@ Broader ownership analysis is out of scope.
 
 ## Tests
 
-`tests/` holds 890 `unittest` cases across the lexer, parser, loader, type
+`tests/` holds 894 `unittest` cases across the lexer, parser, loader, type
 checker, code generator, language server, debug adapter, and end-to-end
 integration. The GDB tests skip when no working GDB is found; one verifies
 source-mapped breakpoints directly, another runs a complete stdio DAP session

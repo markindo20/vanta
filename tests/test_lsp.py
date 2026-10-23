@@ -612,6 +612,67 @@ func main() -> void:
         })[0]['result']
         self.assertFalse(definition)  # None or [] both mean "no definition"
 
+    def test_type_definition_on_type_name(self):
+        path = self.write('main.vnt', '''\
+struct Point:
+    x: i32
+
+func main() -> void:
+    let p: Point = Point(1)
+    print_i32(p.x)
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/typeDefinition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 4, 'character': 10},
+        })[0]['result']
+        self.assertEqual(result[0]['uri'], uri)
+        self.assertEqual(result[0]['range']['start']['line'], 0)
+
+    def test_type_definition_on_variable(self):
+        path = self.write('main.vnt', '''\
+struct Point:
+    x: i32
+
+func main() -> void:
+    let p: Point = Point(1)
+    print_i32(p.x)
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/typeDefinition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 4, 'character': 8},
+        })[0]['result']
+        self.assertEqual(result[0]['range']['start']['line'], 0)
+
+    def test_type_definition_on_field_of_user_type(self):
+        path = self.write('main.vnt', '''\
+struct Vec:
+    energy: Point
+
+struct Point:
+    x: i32
+
+func main() -> void:
+    let v: Vec = Vec(Point(1))
+    print_i32(v.energy.x)
+''')
+        uri = self.open(path)
+        result = self.request('textDocument/typeDefinition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 8, 'character': 17},
+        })[0]['result']
+        self.assertEqual(result[0]['range']['start']['line'], 3)
+
+    def test_type_definition_on_builtin_returns_none(self):
+        path = self.write('main.vnt', 'func main() -> void:\n    let x: i32 = 1\n')
+        uri = self.open(path)
+        result = self.request('textDocument/typeDefinition', {
+            'textDocument': {'uri': uri},
+            'position': {'line': 1, 'character': 10},
+        })[0]['result']
+        self.assertFalse(result)
+
     def test_document_symbols_include_struct_and_enum_children(self):
         path = self.write('main.vnt', '''\
 struct Point:

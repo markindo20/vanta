@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.67.0 - 2026-10-23
+
+- Type definition. `textDocument/typeDefinition` jumps from a variable or
+  field access to the declaration of the type it names (e.g. `let p: Point`
+  or `v.energy` -> `struct Point`).
+- Tests: 894 in total. New tests cover a type name, a variable, a field of
+  a user type, and a builtin returning none.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe type definition. The VS
+  Code extension is 0.38.0.
+
 ## v0.66.0 - 2026-10-23
 
 - Completion for import paths. Inside `import "..."` the editor offers
