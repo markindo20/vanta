@@ -3597,7 +3597,30 @@ class LanguageServer:
                                      match.group(1))
         if message == 'invalid assignment target':
             return self._mutability_fixes(diagnostic, doc, project)
+        match = re.search(r'cannot assign (\S+) to (\S+)', message)
+        if match is not None:
+            return self._type_annotation_fixes(
+                diagnostic, doc, project, match.group(1), match.group(2))
         return []
+
+    def _type_annotation_fixes(self, diagnostic: dict, doc: Document,
+                               project: _ProjectIndex, actual_type: str,
+                               expected_type: str) -> list[dict]:
+        range_ = diagnostic.get('range') or {}
+        start = range_.get('start') or {}
+        line = int(start.get('line', 0))
+        lines = _lines(doc.text)
+        line_text = _line_at(lines, line)
+        colon = line_text.find(':')
+        if colon < 0:
+            return []
+        index = line_text.find(expected_type, colon)
+        if index < 0:
+            return []
+        word_range = self._word_range(line_text, line, index, expected_type)
+        return [self._action(
+            f"change annotation to {actual_type}",
+            doc.uri, word_range, actual_type, diagnostic, preferred=True)]
 
     def _name_fixes(self, diagnostic: dict, doc: Document,
                     project: _ProjectIndex, name: str) -> list[dict]:

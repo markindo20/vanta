@@ -1580,6 +1580,19 @@ func main() -> void:
         })
         self.assertEqual(self.server.outbox[-1]['result'], [])
 
+    def test_code_action_changes_annotation_for_initializer_mismatch(self):
+        path = self.write('main.vnt', 'func main() -> void:\n    let x: i32 = "hi"\n')
+        uri = self.open(path)
+        published = self.diagnostics(self.server.outbox)
+        diags = published[0]['params']['diagnostics']
+        actions = self.request('textDocument/codeAction', {
+            'textDocument': {'uri': uri},
+            'range': diags[0]['range'],
+            'context': {'diagnostics': diags},
+        })[0]['result']
+        self.assertTrue(any(a['title'].startswith('change annotation to str')
+                            for a in actions))
+
     def test_inlay_hints_show_inferred_types(self):
         path = self.write('main.vnt', '''\
 struct Enemy:

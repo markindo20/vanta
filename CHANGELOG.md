@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.69.0 - 2026-10-23
+
+- Code actions beyond import fixes. Added a quick fix that changes a
+  `let x: T = value` annotation when the initializer type does not match
+  (e.g. `let x: i32 = "hi"` offers `change annotation to str`).
+- Tests: 896 in total. New test covers the annotation-change action.
+- Docs: `docs/EDITOR.md`, `editors/vscode/README.md`, README, ROADMAP,
+  `docs/ARCHITECTURE.md`, and this file describe the new action. The VS
+  Code extension is 0.40.0.
+
 ## v0.68.0 - 2026-10-23
 
 - Incremental diagnostics on `didChange`. Range-based content changes are now
