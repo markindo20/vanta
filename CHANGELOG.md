@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.95.0 - 2026-10-24
+
+- **Phase II.B host supervisor (Phase 1)**: new `vanta hot <file>` command (and `--hot` on `run`)
+  loads each rebuilt shared unit's `vanta_run_main` into the host Python process
+  via `ctypes.CDLL` (Windows/Linux host), then migrates state with the stub
+  `vanta_migrate`. On source change it rebuilds through the incremental cache
+  and hot-swaps the unit, keeping the OS-level parent alive.
+  Phase II.C (surviving process state/Arena) is the next step — see ADR-03.
+- Tests: 930 in total (unchanged — hot-loader smoke against the shared
+  artifacts).
+
 ## v0.94.2 - 2026-10-24
 
 - `vanta build --shared` produces a shared library (`.dll`/`.so`/`.dylib`)

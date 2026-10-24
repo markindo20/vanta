@@ -1138,6 +1138,76 @@ def cmd_run_hot(args):
             return 0
     return 0
 
+def cmd_hot(args):
+    """Phase II.B.1: load the shared unit in this process and reload it.
+
+    The generated library exports `vanta_run_main` and `vanta_migrate`.
+    We `ctypes.CDLL` each rebuilt artifact into the same Python process,
+    call the migration hook (currently a no-op), then run. A program that
+    returns immediately is reloaded only after its next source change;
+    programs with an event loop keep running until they exit on their own.
+    """
+    import ctypes
+    if not getattr(args, 'source', None) or not os.path.exists(args.source):
+        sys.stderr.write("error: not found: %s\n" % getattr(args, 'source', None))
+        return 1
+    workdir = tempfile.mkdtemp(prefix='vanta_hot_')
+    last_digest = None
+    generation = 0
+    previous = None
+    sys.stdout.write("vanta hot: in-process loader for %s (Ctrl+C to stop)\n" % args.source)
+    sys.stdout.flush()
+    while True:
+        try:
+            digest = _source_digest(_watched_files(args.source))
+        except Exception as exc:
+            sys.stderr.write("error scanning: %s\n" % exc)
+            digest = None
+        if digest is not None and digest != last_digest:
+            generation += 1
+            ext = '.dll' if os.name == 'nt' else '.so'
+            lib_path = os.path.join(workdir, 'unit_%d%s' % (generation, ext))
+            build_args = argparse.Namespace(
+                source=args.source, output=lib_path,
+                release=getattr(args, 'release', False), debug=False,
+                bundle=False, emit_cpp=None,
+                include_dir=[], lib_dir=[], link=[], shared=True,
+                checked=getattr(args, 'checked', False))
+            sys.stdout.write("\n--- build #%d ---\n" % generation)
+            sys.stdout.flush()
+            try:
+                rc = cmd_build(build_args)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                sys.stderr.write("build error: %s\n" % exc)
+                rc = 1
+            if rc == 0:
+                try:
+                    library = ctypes.CDLL(os.path.abspath(lib_path))
+                    if previous is not None:
+                        try:
+                            library.vanta_migrate(None)
+                        except Exception as exc:
+                            sys.stderr.write("migrate error: %s\n" % exc)
+                    run = library.vanta_run_main
+                    run.restype = ctypes.c_int
+                    code = run()
+                    previous = library
+                    if code not in (0, None):
+                        sys.stdout.write("(exit %d)\n" % code)
+                except Exception as exc:
+                    sys.stderr.write("load error: %s\n" % exc)
+            last_digest = digest
+        try:
+            time.sleep(0.5)
+        except KeyboardInterrupt:
+            sys.stdout.write("\nvanta hot stopped\n")
+            sys.stdout.flush()
+            shutil.rmtree(workdir, ignore_errors=True)
+            return 0
+
+
 def cmd_run(args):
     name, path = find_cxx_compiler()
     if path is None:
@@ -1360,7 +1430,7 @@ def cmd_test(args):
 
 
 _COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
-             'lsp', 'dap', 'watch', 'repl')
+             'lsp', 'dap', 'watch', 'repl', 'hot')
 
 
 def _normalize_argv(argv):
@@ -1726,6 +1796,12 @@ def main(argv):
     sub.add_parser(
         'repl', help='interactive read-compile-run loop (end a program with a blank line)')
 
+    p_hot = sub.add_parser('hot',
+                            help='build shared lib and load it in-process; reload on change')
+    p_hot.add_argument('source')
+    p_hot.add_argument('--release', action='store_true')
+    p_hot.add_argument('--checked', action='store_true')
+
     p_debug = sub.add_parser(
         'debug', help='build with Vanta source locations and debug with GDB')
     p_debug.add_argument('source')
@@ -1781,6 +1857,8 @@ def main(argv):
         return cmd_repl(args)
     if args.cmd == 'test':
         return cmd_test(args)
+    if args.cmd == 'hot':
+        return cmd_hot(args)
     if args.cmd == 'debug':
         return cmd_debug(args)
     return 1
