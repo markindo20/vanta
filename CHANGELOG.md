@@ -2,6 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.98.0 - 2026-10-24
+
+- Shared-state hot path: new `examples/stateful_hot.vnt` demonstrates an
+  `Arena(262144, name)` that maps a shared segment whose pointer survives
+  across `--reload` rotations, and a short ADR documenting the contract.
+- Tests: 930 in total (unchanged).
+
 ## v0.97.0 - 2026-10-24
 
 - Hot-reload phase II.C: host passes previous unit handle into `vanta_migrate(prev)`; ADR-05 documents state contract and limitations.

@@ -1,0 +1,6 @@
+func main() -> void:
+    let world = Arena(262144, "stateful-hot-arena")
+    let counter = world.alloc::<i32>(1)
+    counter[0] = counter[0] + 1
+    print_i32(counter[0])
+    print_str("survives as a named shared segment name across reloads")
