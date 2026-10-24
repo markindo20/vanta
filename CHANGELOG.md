@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.0.1 - 2026-10-24
+
+- **Phase II.B finished**: `vanta hot` loads the rebuilt shared unit in-process, invokes `vanta_migrate(prev)` before `vanta_run_main`, and keeps the host alive across iterations; ADR-06 documents the path.
+- Tests: 930.
+- Roadmap: ADR-05/ADR-06 remain the schema-state contract.
+
 ## v1.0.0 - 2026-10-24
 
 - String interpolation: `"Hello {expr}"` transforms to `str_fmt("Hello {}", expr)`
