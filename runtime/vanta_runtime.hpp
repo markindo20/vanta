@@ -728,6 +728,32 @@ inline void str_pool_reset() {}
 inline Str str_concat(Str a, Str b) {
     return Str::concat(a, b);
 }
+
+// Substring predicates, written `str_contains`, `str_starts_with`, and
+// `str_ends_with` in Vanta source.
+inline bool str_contains(Str haystack, Str needle) {
+    if (needle.size() <= 0) return true;
+    if (needle.size() > haystack.size()) return false;
+    const char* h = haystack.c_str();
+    const char* n = needle.c_str();
+    size_t hn = haystack.size();
+    size_t nn = needle.size();
+    for (size_t i = 0; i + nn <= hn; i++) {
+        if (std::memcmp(h + i, n, nn) == 0) return true;
+    }
+    return false;
+}
+inline bool str_starts_with(Str s, Str prefix) {
+    if (prefix.size() > s.size()) return false;
+    if (prefix.size() == 0) return true;
+    return std::memcmp(s.c_str(), prefix.c_str(), prefix.size()) == 0;
+}
+inline bool str_ends_with(Str s, Str suffix) {
+    if (suffix.size() > s.size()) return false;
+    if (suffix.size() == 0) return true;
+    return std::memcmp(s.c_str() + (s.size() - suffix.size()),
+                       suffix.c_str(), suffix.size()) == 0;
+}
 inline Str to_str_i32(int32_t v) {
     char buf[24];
     int n = std::snprintf(buf, sizeof buf, "%d", (int)v);

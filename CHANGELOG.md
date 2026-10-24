@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.86.0 - 2026-10-24
+
+- String predicates join `str_concat`/`str_len`: `str_contains(s, sub)`,
+  `str_starts_with(s, prefix)`, and `str_ends_with(s, suffix)` return bool.
+- Tests: 929 in total (unchanged; runtime coverage exercised via example).
+
 ## v0.85.0 - 2026-10-24
 
 - Runtime overflow checks for integer arithmetic. The compiler now emits
