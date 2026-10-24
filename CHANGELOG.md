@@ -2,6 +2,14 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.87.0 - 2026-10-24
+
+- `vanta watch` now scans every `.vnt` beneath the source file's directory
+  and treats any of them as a triggering change, so editing an imported
+  module rebuilds the program. Prints the file count in each rebuild
+  banner; unchanged mtime leaves the loop quiet.
+- Tests: 929 in total (unchanged; watcher extended).
+
 ## v0.86.0 - 2026-10-24
 
 - String predicates join `str_concat`/`str_len`: `str_contains(s, sub)`,

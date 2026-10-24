@@ -1349,40 +1349,69 @@ def _split_program_args(argv):
     return 1
 
 
+def _source_digest(paths):
+    import hashlib
+    h = hashlib.sha256()
+    for path in sorted(paths):
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+        except OSError:
+            data = b''
+        h.update(path.encode('utf-8'))
+        h.update(b'\x00')
+        h.update(data)
+    return h.hexdigest()
+
+
+def _watched_files(source):
+    """Source file plus every .vnt beneath its directory."""
+    base = os.path.dirname(os.path.abspath(source)) or os.getcwd()
+    found = [source]
+    for dirpath, _dirs, files in os.walk(base):
+        for name in sorted(files):
+            if not name.endswith('.vnt'):
+                continue
+            path = os.path.join(dirpath, name)
+            if path not in found:
+                found.append(path)
+    return found
+
+
 def cmd_watch(args):
     if not getattr(args, 'source', None) or not os.path.exists(args.source):
         sys.stderr.write(
-            f"error: not found: {getattr(args, 'source', None)}\n")
+            "error: not found: " + str(getattr(args, 'source', None)) + "\n")
         return 1
     out = sys.stdout
-    out.write(f"watching {args.source} (Ctrl+C to stop)\n")
+    out.write("watching " + str(args.source) +
+              " plus its directory's .vnt files\n(Ctrl+C to stop)\n")
     out.flush()
-    last_mtime = 0.0
+    last_digest = None
     while True:
         try:
-            mtime = os.path.getmtime(args.source)
-        except OSError:
-            mtime = 0.0
-        if mtime > last_mtime:
-            out.write(f"\n--- rebuild {time.strftime('%H:%M:%S')} ---\n")
+            files = _watched_files(args.source)
+            digest = _source_digest(files)
+        except Exception as exc:
+            sys.stderr.write("error scanning sources: " + str(exc) + "\n")
+            digest = None
+        if digest is not None and digest != last_digest:
+            out.write("\n--- rebuild (" + str(len(files)) +
+                      " files) " + time.strftime('%H:%M:%S') + " ---\n")
             out.flush()
             try:
                 rc = cmd_run(args)
-            except (KeyboardInterrupt, Exception) as exc:
+            except KeyboardInterrupt:
+                out.write("\nwatch stopped\n")
+                out.flush()
+                return 0
+            except Exception as exc:
                 rc = 1
-                if not isinstance(exc, KeyboardInterrupt):
-                    sys.stderr.write(f"error: {exc}\n")
-                else:
-                    out.write("\nwatch stopped\n")
-                    out.flush()
-                    return 0
+                sys.stderr.write("error: " + str(exc) + "\n")
             if rc not in (0, None):
-                out.write(f"(exit {rc})\n")
+                out.write("(exit " + str(rc) + ")\n")
             out.flush()
-            try:
-                last_mtime = max(mtime, os.path.getmtime(args.source))
-            except OSError:
-                last_mtime = mtime
+            last_digest = digest
         try:
             time.sleep(0.5)
         except KeyboardInterrupt:
@@ -1390,14 +1419,9 @@ def cmd_watch(args):
             out.flush()
             return 0
 
-
-    pass
-
-
 def cmd_repl(args):
     out = sys.stdout
-    out.write(
-        "Vanta REPL - type a program, then a blank line to run; EOF/Ctrl+C to quit.\n")
+    out.write("Vanta REPL - type a program, then a blank line to run; EOF/Ctrl+C to quit.\n")
     while True:
         lines = []
         out.write(">>> ")
@@ -1438,7 +1462,7 @@ def cmd_repl(args):
         try:
             cmd_run(run_args)
         except Exception as exc:
-            sys.stderr.write(f"error: {exc}\n")
+            sys.stderr.write("error: " + str(exc) + "\n")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
