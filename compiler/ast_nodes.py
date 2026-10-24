@@ -50,6 +50,16 @@ class Param:
 
 
 @dataclass
+class LambdaExpr:
+    # An anonymous function literal with no captures. It desugars to a fresh
+    # top-level function whose name is assigned by the type checker.
+    params: List[Param]
+    ret: Optional[TypeExpr]
+    body: List[Any]
+    pos: Pos
+    name: str = ''  # filled in by the checker
+
+@dataclass
 class FuncDecl:
     name: str
     params: List[Param]
@@ -58,6 +68,8 @@ class FuncDecl:
     is_system: bool
     pos: Pos
     is_public: bool = False
+    # Type parameters for a generic function, e.g. ['T'] for identity<T>.
+    type_params: List[str] = field(default_factory=list)
     # Type parameters for a generic function, e.g. ['T'] for identity<T>.
     type_params: List[str] = field(default_factory=list)
 

@@ -973,6 +973,8 @@ class CodeGen:
         raise RuntimeError(f"invalid lvalue {type(expr).__name__}")
 
     def _expr(self, e) -> str:
+        if isinstance(e, A.LambdaExpr):
+            return f'vanta_user::fn_{e.name}'
         if isinstance(e, A.IntLit):
             t = getattr(e, 'type', I32)
             if t is F32: return f'{e.value}.0f'

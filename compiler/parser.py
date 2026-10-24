@@ -353,15 +353,17 @@ class Parser:
             ann = self.parse_type()
         self.expect(TT.ASSIGN)
         val = self.parse_expr()
-        self.expect(TT.NEWLINE)
+        if self.check(TT.NEWLINE):
+            self.advance()
         return A.VarDecl(name, ann, mutable, val, A.Pos(tok.line, tok.col))
 
     def parse_return(self):
         tok = self.advance()
         val = None
-        if not self.check(TT.NEWLINE):
+        if not self.check(TT.NEWLINE) and not self.check(TT.DEDENT):
             val = self.parse_expr()
-        self.expect(TT.NEWLINE)
+        if self.check(TT.NEWLINE):
+            self.advance()
         return A.ReturnStmt(val, A.Pos(tok.line, tok.col))
 
     def parse_if(self):
@@ -484,7 +486,8 @@ class Parser:
             val = self.parse_expr()
             self.expect(TT.NEWLINE)
             return A.AssignStmt(expr, val, A.Pos(tok.line, tok.col))
-        self.expect(TT.NEWLINE)
+        if self.check(TT.NEWLINE):
+            self.advance()
         return A.ExprStmt(expr, A.Pos(tok.line, tok.col))
 
     def parse_expr(self, min_prec=0):
@@ -562,6 +565,28 @@ class Parser:
 
     def parse_primary(self):
         t = self.peek()
+        if t.type == TT.FUNC and self.peek(1).type == TT.LPAREN:
+            self.advance()  # func
+            self.expect(TT.LPAREN)
+            params = []
+            if not self.check(TT.RPAREN):
+                while True:
+                    pn = self.expect(TT.IDENT)
+                    self.expect(TT.COLON)
+                    pt = self.parse_type()
+                    params.append(
+                        A.Param(pn.value, pt, A.Pos(pn.line, pn.col)))
+                    if self.match(TT.COMMA):
+                        continue
+                    break
+            self.expect(TT.RPAREN)
+            ret = None
+            if self.match(TT.ARROW):
+                ret = self.parse_type()
+            self.expect(TT.COLON)
+            body = self.parse_block()
+            return A.LambdaExpr(params, ret, body,
+                                A.Pos(t.line, t.col))
         if t.type == TT.INT:
             self.advance(); return A.IntLit(t.value, A.Pos(t.line, t.col))
         if t.type == TT.FLOAT:

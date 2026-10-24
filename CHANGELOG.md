@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.91.0 - 2026-10-24
+
+- Non-capturing lambda literals: `func (x: i32) -> i32: return ...` may
+  appear in expression position. Each literal desugars to a fresh top-level
+  function (`__lambda_0`, …) with no environment capture; the expression
+  is a normal function value, so it can be passed to
+  `func(...) -> ...` callbacks. Lambda capturing (closing over locals) is
+  deliberately deferred to a later release.
+- Tests: 930 in total (unchanged; lambda exercised via examples).
+
 ## v0.90.0 - 2026-10-24
 
 - Match arms may carry a guard: `Enum.Member(...) if expr:`. The guard is

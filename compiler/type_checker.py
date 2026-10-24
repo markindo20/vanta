@@ -165,6 +165,7 @@ class TypeChecker:
         self.loop_depth = 0
         self.return_values: list = []
         self._current_type_env = None
+        self._lambda_counter = 0
         self._register_builtins()
 
     def _register_builtins(self):
@@ -1072,6 +1073,22 @@ class TypeChecker:
             raise CheckError(f"condition must be bool, got {ct}", self.filename, pos)
 
     def _check_expr(self, expr, expected=None) -> Type:
+        if isinstance(expr, A.LambdaExpr):
+            self._lambda_counter += 1
+            name = "__lambda__%d" % (self._lambda_counter - 1)
+            expr.name = name
+            fd = A.FuncDecl(
+                name=name, params=expr.params, ret=expr.ret,
+                body=expr.body, is_system=False, pos=expr.pos)
+            self.program.decls.append(fd)
+            self._register_func(fd)
+            self._check_func(fd)
+            sig = self.functions[name]
+            pt = tuple(ptype for (pname, ptype) in sig.params)
+            ft = self._func_type(pt, sig.ret)
+            expr.type = ft
+            expr.is_func_ref = True
+            return expr.type
         if isinstance(expr, A.IntLit):
             expr.type = INT_LIT; return INT_LIT
         if isinstance(expr, A.FloatLit):
