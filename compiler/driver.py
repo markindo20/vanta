@@ -432,7 +432,7 @@ def _report_compile_failure(proc, libs, compiler_name, compiler_path):
 
 
 def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=None,
-                  libs=None, debug=False, checked=False):
+                  libs=None, debug=False, checked=False, shared=False):
     include_dirs = include_dirs or []
     lib_dirs = lib_dirs or []
     libs = libs or []
@@ -462,6 +462,8 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
         flags.extend(['-O3' if release else '-O0', '-g' if not release else '-g0'])
     if checked:
         flags.append('-DVANTA_CHECKED_ARITH')
+    if shared:
+        flags.extend(['-shared', '-fPIC'])
     for d in include_dirs:
         flags.extend(['-I', d])
     flags.extend(['-I', RUNTIME_DIR, src, '-o', out])
@@ -472,9 +474,9 @@ def _compiler_cmd(name, path, src, out, release, include_dirs=None, lib_dirs=Non
     return [path] + flags
 
 
-def _emit_source(program, tc, path, debug=False, checked=False):
+def _emit_source(program, tc, path, debug=False, checked=False, shared=False):
     cpp = CodeGen(program, tc, debug=debug, debug_filename=path if debug else None,
-                  checked=checked).generate()
+                  checked=checked, shared=shared).generate()
     with open(path, 'w', encoding='utf-8') as f:
         f.write(cpp)
     return cpp
@@ -1008,7 +1010,9 @@ def cmd_build(args):
     tmpdir = tempfile.mkdtemp(prefix='vanta_build_')
     cpp_path = os.path.join(tmpdir, 'main.cpp')
     checked = getattr(args, 'checked', False) or not getattr(args, 'release', False)
-    _emit_source(program, tc, cpp_path, debug=args.debug, checked=checked)
+    checked = checked
+    _emit_source(program, tc, cpp_path, debug=args.debug,
+                 checked=checked, shared=getattr(args, 'shared', False))
 
     if args.emit_cpp:
         os.makedirs(os.path.dirname(args.emit_cpp) or '.', exist_ok=True)
@@ -1019,7 +1023,8 @@ def cmd_build(args):
                         args.include_dir, lib_dirs, libs,
                         debug=args.debug,
                         checked=getattr(args, 'checked', False)
-                        or not args.release)
+                        or not args.release,
+                        shared=getattr(args, 'shared', False))
     proc = subprocess.run(cmd, capture_output=True, text=True,
                           env=_runtime_env(path, lib_dirs))
     if proc.returncode != 0:
@@ -1668,12 +1673,14 @@ def main(argv):
                         help='skip the build cache and rebuild')
     p_build.add_argument('--fresh', action='store_true',
                         help='ignore an existing cache entry for this build')
+    p_build.add_argument('--debug', action='store_true',
+                        help='emit Vanta source locations for native debugging')
     p_build.add_argument('--checked', action='store_true',
                         help='enable runtime overflow checks (default for debug)')
-    p_build.add_argument('--debug', action='store_true',
-                         help='emit Vanta source locations for native debugging')
     p_build.add_argument('--bundle', action='store_true',
-                         help='copy runtime DLLs and example assets beside the executable (Windows)')
+                        help='copy runtime DLLs and example assets beside the executable (Windows)')
+    p_build.add_argument('--shared', action='store_true',
+                        help='build a shared library (.dll/.so) instead of an executable')
     p_build.add_argument('--emit-cpp')
     p_build.add_argument('--include-dir', action='append', default=[],
                          help='add include directory for C++ compilation')
@@ -1690,7 +1697,7 @@ def main(argv):
     p_run.add_argument('--fresh', action='store_true',
                         help='ignore an existing cache entry for this build')
     p_run.add_argument('--hot', action='store_true',
-                        help='enable runtime overflow checks (default for debug)')
+                        help='watch and hot-restart the program on source change')
     p_run.add_argument('--include-dir', action='append', default=[],
                        help='add include directory for C++ compilation')
 

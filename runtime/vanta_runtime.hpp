@@ -13,6 +13,7 @@
 # include <unistd.h>
 #endif
 #include <array>
+#include <string>
 #include <new>
 #include <type_traits>
 #include <vector>

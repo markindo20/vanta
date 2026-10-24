@@ -2,6 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.94.2 - 2026-10-24
+
+- `vanta build --shared` produces a shared library (`.dll`/`.so`/`.dylib`)
+  exporting `vanta_run_main` and `vanta_migrate`, the entry points the II.B
+  supervisor will load. Builder debug flag and `--bundle` restored.
+- 930 tests.
+
 ## v0.94.1 - 2026-10-24
 
 - Bugfix: runtime shared Arena no longer references a member function's

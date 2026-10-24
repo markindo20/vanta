@@ -172,12 +172,13 @@ def _escape_cpp_string(s: str) -> str:
 
 class CodeGen:
     def __init__(self, program: A.Program, tc, debug=False, debug_filename=None,
-                 checked=False):
+                 checked=False, shared=False):
         self.program = program
         self.tc = tc
         self.debug = debug
         self.debug_filename = debug_filename
         self.checked = checked
+        self.shared = shared
         self.lines = []
         self.indent = 0
         self.temp_counter = 0
@@ -548,7 +549,36 @@ class CodeGen:
         self.emit('}  // namespace vanta_user')
         self.emit('')
         main = next((f for f in funcs if f.name == 'main'), None)
-        if main is not None:
+        if self.shared:
+            self.emit('')
+            self.emit('#ifndef VANTA_EXPORT')
+            self.emit('#  if defined(_WIN32)')
+            self.emit('#    define VANTA_EXPORT __declspec(dllexport)')
+            self.emit('#  else')
+            self.emit('#    define VANTA_EXPORT')
+            self.emit('#  endif')
+            self.emit('#endif')
+            self.emit('extern "C" VANTA_EXPORT int vanta_run_main(void) {')
+            self.indent += 1
+            self._generated_line()
+            if (main is not None and (main.ret is None or (getattr(main.ret, 'kind', '') == 'named'
+                                                          and getattr(main.ret, 'name', '') == 'void'))):
+                self.emit('vanta_user::fn_main();')
+                self.emit('return 0;')
+            elif main is not None:
+                self.emit('return vanta_user::fn_main();')
+            else:
+                self.emit('return 0;')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('extern "C" VANTA_EXPORT void vanta_migrate(void* prev) {')
+            self.indent += 1
+            self._generated_line()
+            self.emit('(void)prev;')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('')
+        if main is not None and not self.shared:
             self._entry_line(main)
             self.emit('int main(int argc, char** argv) {')
             # Only the entry point itself belongs to the Vanta file; the
