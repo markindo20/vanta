@@ -981,3 +981,27 @@ inline uint32_t ck_u32_mul(uint32_t a, uint32_t b) {
 #define VANTA_CK_U32_MUL(a,b) ((a)*(b))
 #endif
 #endif
+
+
+
+namespace vanta {
+// ---------- Signals / event bus (minimal) ----------
+// `signal_emit(name, value)` invokes every handler registered for that
+// signal name. `signal_on(name, handler)` registers a top-level Vanta
+// function of type `func(i32) -> void`.
+typedef void (*signal_handler_t)(int32_t);
+inline std::vector<std::pair<Str, signal_handler_t>>& signal_registry() {
+    static std::vector<std::pair<Str, signal_handler_t>> r;
+    return r;
+}
+inline void signal_on(Str name, signal_handler_t handler) {
+    signal_registry().push_back({name, handler});
+}
+inline void signal_emit(Str name, int32_t value) {
+    for (const auto& vp : signal_registry()) {
+        if (vanta::str_eq(vp.first, name) && vp.second)
+            vp.second(value);
+    }
+}
+
+} // end vanta namespace

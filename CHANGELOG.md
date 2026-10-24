@@ -2,6 +2,14 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.88.0 - 2026-10-24
+
+- Minimal signal/event bus: `signal_on(name, handler)` registers a Vanta
+  function of type `func(i32) -> void`, and `signal_emit(name, value)`
+  invokes every registered handler for that signal name. Independent
+  runtime-side registration so any place with a Str can emit.
+- Tests: 929 in total (unchanged; signals exercised via example).
+
 ## v0.87.0 - 2026-10-24
 
 - `vanta watch` now scans every `.vnt` beneath the source file's directory
