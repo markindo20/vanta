@@ -142,6 +142,7 @@ class Parser:
     def parse_func_decl(self):
         tok = self.advance()  # consume FUNC
         name = self.expect(TT.IDENT).value
+        type_params = self._parse_type_params()
         self.expect(TT.LPAREN)
         params = []
         if not self.check(TT.RPAREN):
@@ -163,6 +164,7 @@ class Parser:
     def parse_func(self, is_system):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
+        type_params = self._parse_type_params()
         self.expect(TT.LPAREN)
         params = []
         if not self.check(TT.RPAREN):
@@ -174,13 +176,14 @@ class Parser:
                 if self.match(TT.COMMA):
                     continue
                 break
-        self.expect(TT.RPAREN)
+        self.expect(TT.RPAREN)  
         ret = None
         if self.match(TT.ARROW):
             ret = self.parse_type()
-        self.expect(TT.COLON)
+        self.expect(TT.COLON)  
         body = self.parse_block()
-        return A.FuncDecl(name, params, ret, body, is_system, A.Pos(tok.line, tok.col))
+        return A.FuncDecl(name, params, ret, body, is_system, A.Pos(tok.line, tok.col),
+                          type_params=type_params)
 
     def _parse_type_params(self):
         """Parse an optional `<T, U>` list after a declaration name."""

@@ -2525,5 +2525,28 @@ class TypeCheckerTests(unittest.TestCase):
                 "    print_i32(1)\n")
 
 
+    def test_generic_func_infers_from_argument(self):
+        _, tc = run("func identity<T>(x: T) -> T:\n"
+                    "    return x\n"
+                    "func main() -> void:\n"
+                    "    let a = identity(5)\n")
+        names = [n for n in tc.functions if n.startswith('identity__g')]
+        self.assertEqual(len(names), 1)
+
+    def test_generic_func_requires_all_type_params(self):
+        with self.assertRaisesRegex(CheckError, 'expects 2 type'):
+            run("func mk<T, U>(a: T) -> T:\n"
+                "    return a\n"
+                "func main() -> void:\n"
+                "    let a = mk::<i32>(1)\n")
+
+    def test_generic_func_reserved_type_parameter(self):
+        with self.assertRaisesRegex(
+                CheckError, "type parameter name 'List' is reserved"):
+            run("func bad<List>(x: List) -> List:\n"
+                "    return x\n"
+                "func main() -> void:\n"
+                "    print_i32(1)\n")
+
 if __name__ == '__main__':
     unittest.main()

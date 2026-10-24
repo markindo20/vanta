@@ -393,12 +393,13 @@ true
   an arm the checker proves it and no `else` is needed.
 - `enum` is a reserved keyword.
 
-## Generic enums and structs (v0.31.0, v0.80.0)
+## Generic enums, structs, and functions (v0.31.0, v0.80.0, v0.84.0)
 
 A generic declaration takes type parameters after its name. The parameters
-are in scope in that declaration's payload or field types and are replaced by
-concrete types when the declaration is used. Enums have been generic since
-v0.31.0; structs joined them in v0.80.0. Generic functions are still to come.
+are in scope in that declaration's payload, field, parameter, or return
+types and are replaced by concrete types when the declaration is used.
+Enums have been generic since v0.31.0, structs since v0.80.0, and
+functions since v0.84.0.
 
 ```vanta
 enum Option<T>:
@@ -516,6 +517,43 @@ func main() -> void:
   generic struct name may not be used without arguments.
 - Generic functions are not part of this slice; they are the next step on
   the language track.
+
+### Generic functions (v0.84.0)
+
+A function declaration takes type parameters between its name and the
+parameter list. The parameters are in scope in its parameter and return
+types and may be referenced in the body.
+
+```vanta
+func identity<T>(x: T) -> T:
+    return x
+
+func swap<T, U>(a: T, b: U) -> U:
+    return b
+
+func main() -> void:
+    let a = identity::<i32>(5)
+    let b = identity(2.5)
+    print_i32(a)
+    print_f32(b)
+    print_i32(swap::<str, i32>("hi", 42))
+```
+
+```
+5
+2.500000
+42
+```
+
+- Type arguments follow the same rules as generic enums and structs:
+  expected type first, explicit `::<...>` always works, inference from
+  the arguments otherwise, with integer and float literals defaulting to
+  `i32` / `f32`.
+- Each distinct set of arguments monomorphizes one C++ function under an
+  internal name such as `identity__g0`; diagnostics keep the source
+  spelling `identity<i32>`.
+- Generic function values (passing `identity` as a parameter, taking its
+  address, returning it) are not yet supported and stay on the backlog.
 
 ## Match (v0.13.0)
 

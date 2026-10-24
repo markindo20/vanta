@@ -525,7 +525,7 @@ class CodeGen:
             self.emit('')
 
         self._gen_equality(struct_types, enums)
-        funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl)]
+        funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl) and not getattr(d, 'type_params', ())]
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
         self.emit('')
@@ -1070,6 +1070,10 @@ class CodeGen:
             # a struct field, an indexed element, or another call.
             args = ', '.join(self._expr(a) for a in c.args)
             return f'{self._expr(f)}({args})'
+        instance_name = getattr(c, 'generic_func_instance', None)
+        if isinstance(f, A.Name) and instance_name:
+            args = ', '.join(self._expr(a) for a in c.args)
+            return f'vanta_user::fn_{instance_name}({args})'
         if isinstance(f, A.Name):
             name = f.name
             if name == 'len':

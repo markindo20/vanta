@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.84.0 - 2026-10-24
+
+- Generic functions close the generics arc. A declaration such as
+  `func identity<T>(x: T) -> T` takes type parameters in scope in its
+  parameter and return types, and each concrete call monomorphizes one
+  C++ function (for instance `identity__g0`). Explicit arguments use
+  `identity::<i32>(5)`; inference then defaults integer and float
+  literals to `i32` / `f32`.
+- Codegen skips the un-instantiated generic declaration and emits one
+  function per instantiated combination.
+- Tests: 929 in total (prior 924 + 5 new tests).
+- Docs: LANGUAGE_REFERENCE gains a Generic functions subsection. Build
+  uses 0.84.0; extension stays 0.43.0.
+
 ## v0.83.0 - 2026-10-24
 
 - Debugger polish:

@@ -1072,5 +1072,28 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('Node__g0 v_n = Node__g0{1, nullptr};', cpp)
 
 
+    # ---------- generic functions (v0.84.0) ----------
+
+    def test_generic_func_monomorphized_emit(self):
+        cpp = gen("func identity<T>(x: T) -> T:\n"
+                  "    return x\n"
+                  "func main() -> void:\n"
+                  "    let a = identity::<i32>(5)\n"
+                  "    print_i32(a)\n")
+        self.assertIn('int32_t fn_identity__g0(', cpp)
+        self.assertIn('vanta_user::fn_identity__g0(5)', cpp)
+
+    def test_generic_func_distinct_for_distinct_args(self):
+        cpp = gen("func identity<T>(x: T) -> T:\n"
+                  "    return x\n"
+                  "func main() -> void:\n"
+                  "    let a = identity(5)\n"
+                  "    let b = identity(2.5)\n"
+                  "    print_i32(a)\n"
+                  "    print_f32(b)\n")
+        self.assertIn('fn_identity__g0', cpp)
+        self.assertIn('fn_identity__g1', cpp)
+
+
 if __name__ == '__main__':
     unittest.main()

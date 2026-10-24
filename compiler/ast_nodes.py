@@ -58,6 +58,8 @@ class FuncDecl:
     is_system: bool
     pos: Pos
     is_public: bool = False
+    # Type parameters for a generic function, e.g. ['T'] for identity<T>.
+    type_params: List[str] = field(default_factory=list)
 
 
 @dataclass

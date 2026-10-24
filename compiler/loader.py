@@ -455,10 +455,11 @@ class _Resolver:
 
     def _resolve_decl_types(self, d, mod):
         if isinstance(d, A.FuncDecl):
+            type_params = set(getattr(d, 'type_params', ()))
             for p in d.params:
-                self._resolve_type(p.type, mod)
+                self._resolve_type(p.type, mod, type_params=type_params)
             if d.ret is not None:
-                self._resolve_type(d.ret, mod)
+                self._resolve_type(d.ret, mod, type_params=type_params)
         elif isinstance(d, A.StructDecl):
             type_params = set(getattr(d, 'type_params', ()))
             for (_name, ftype, _pos) in d.fields:
