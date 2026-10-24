@@ -459,8 +459,12 @@ class Parser:
                 A.Pos(tn.line, tn.col)))
             if not self.match(TT.COMMA):
                 break
+        guard = None
+        if self.match(TT.IF):
+            guard = self.parse_expr()
         self.expect(TT.COLON)
-        return A.MatchArm(patterns, False, self.parse_block(), A.Pos(t.line, t.col))
+        return A.MatchArm(patterns, False, self.parse_block(), A.Pos(t.line, t.col),
+                          guard=guard)
 
     def parse_expr_or_assign(self):
         tok = self.peek()

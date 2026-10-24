@@ -2,6 +2,15 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.90.0 - 2026-10-24
+
+- Match arms may carry a guard: `Enum.Member(...) if expr:`. The guard is
+  type-checked as bool in the arm's scope and compiled into the arm
+  condition (`tag == Tag && expr`). Repeats of the same member behind
+  different guards are allowed, so e.g. `State.Busy if n > 5:` and an
+  unguarded `State.Busy:` can both cover the same tag.
+- Tests: +1.
+
 ## v0.89.0 - 2026-10-24
 
 - Incremental build cache: `vanta run` and `vanta build` use a content-

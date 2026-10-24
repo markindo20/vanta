@@ -2548,5 +2548,9 @@ class TypeCheckerTests(unittest.TestCase):
                 "func main() -> void:\n"
                 "    print_i32(1)\n")
 
+    def test_match_guard_must_be_bool(self):
+        with self.assertRaises(CheckError):
+            run("enum S:\n    A\n    B\nfunc f(s: S, n: i32) -> void:\n    match s:\n        S.A if n:\n            print_i32(0)\n")
+
 if __name__ == '__main__':
     unittest.main()

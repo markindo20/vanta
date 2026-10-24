@@ -916,6 +916,9 @@ class CodeGen:
                         for pat in arm.patterns)
                 if len(arm.patterns) > 1:
                     cond = f'({cond})'
+                if getattr(arm, 'guard', None) is not None:
+                    guard_expr = self._expr(arm.guard)
+                    cond = f'({cond}) && {guard_expr}'
                 if i == 0:
                     self.emit(f'if ({cond}) {{')
                 else:

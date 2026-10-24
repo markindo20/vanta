@@ -174,6 +174,8 @@ class MatchArm:
     is_else: bool
     body: List[Any]
     pos: Pos
+    # Optional `if expr` guard evaluated after the tag check.
+    guard: Any = None
 
 
 @dataclass

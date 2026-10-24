@@ -1010,11 +1010,13 @@ class TypeChecker:
                         raise CheckError(f"enum '{vt.name}' has no member "
                                          f"'{pat.member}'",
                                          self.filename, pat.pos)
-                    if pat.member in covered:
+                    guarded = getattr(arm, 'guard', None) is not None
+                    if pat.member in covered and not guarded:
                         raise CheckError(
                             f"duplicate match arm '{vt.name}.{pat.member}'",
                             self.filename, pat.pos)
-                    covered.append(pat.member)
+                    if not guarded:
+                        covered.append(pat.member)
                     payload = vt.payload_of(pat.member)
                     if pat.bindings is None:
                         if payload:
@@ -1046,6 +1048,12 @@ class TypeChecker:
             self._push()
             for bname, btype, bpos in bindings:
                 self._declare(bname, btype, False, bpos)
+            if getattr(arm, 'guard', None) is not None:
+                gtype = self._check_expr(arm.guard)
+                if gtype is not BOOL:
+                    raise CheckError(
+                        f"match guard must be bool, got {gtype}",
+                        self.filename, arm.pos)
             for s in arm.body:
                 self._check_stmt(s)
             self._pop()
