@@ -2,6 +2,14 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.89.0 - 2026-10-24
+
+- Incremental build cache: `vanta run` and `vanta build` use a content-
+  addressed cache under `.vanta/cache/<key>/` keyed by source + dependency
+  `.vnt` files + flags + version. A second run reuses the cached executable
+  instead of recompiling; `--no-cache` / `--fresh` force rebuilds.
+- Tests: 929 in total (unchanged).
+
 ## v0.88.0 - 2026-10-24
 
 - Minimal signal/event bus: `signal_on(name, handler)` registers a Vanta

@@ -1052,6 +1052,27 @@ def cmd_run(args):
     if path is None:
         sys.stderr.write("error: no C++17 compiler found\n")
         return 1
+    no_cache = getattr(args, 'no_cache', False)
+    fresh = getattr(args, 'fresh', False)
+    source = args.source
+    release = getattr(args, 'release', False)
+    debug = getattr(args, 'debug', False)
+    checked = getattr(args, 'checked', False) or not release
+    if not no_cache and not fresh:
+        key = _build_cache_key(source, release, debug, checked,
+                              getattr(args, 'include_dir', None),
+                              getattr(args, 'lib_dir', None),
+                              getattr(args, 'link', None))
+        cdir = os.path.join(_build_cache_root(source), key)
+        cache_exe = os.path.join(cdir,
+                                 'prog.exe' if os.name == 'nt' else 'prog')
+        if os.path.exists(cache_exe):
+            lib_dirs = _dedupe_paths(list(getattr(args, 'lib_dir', None) or []))
+            env = _runtime_env(path, lib_dirs)
+            proc = subprocess.run([cache_exe] +
+                                  list(getattr(args, 'prog_args', None) or []),
+                                  env=env)
+            return proc.returncode
     try:
         program, tc = _frontend_only(args.source)
     except (LexError, ParseError, CheckError, LoadError) as e:
@@ -1079,6 +1100,19 @@ def cmd_run(args):
         _report_compile_failure(proc, libs, name, path)
         return 1
     run = subprocess.run([exe] + list(args.prog_args), env=env)
+    if not getattr(args, 'no_cache', False):
+        try:
+            _ckeys = _build_cache_key(source, release, debug, checked,
+                                      getattr(args, 'include_dir', None),
+                                      getattr(args, 'lib_dir', None),
+                                      getattr(args, 'link', None))
+            _cdir = os.path.join(_build_cache_root(source), _ckeys)
+            os.makedirs(_cdir, exist_ok=True)
+            _cache_exe = os.path.join(_cdir,
+                                      'prog.exe' if os.name == 'nt' else 'prog')
+            shutil.copyfile(exe, _cache_exe)
+        except OSError:
+            pass
     shutil.rmtree(tmpdir, ignore_errors=True)
     return run.returncode
 
@@ -1364,6 +1398,43 @@ def _source_digest(paths):
     return h.hexdigest()
 
 
+def _build_cache_root(source):
+    base = os.path.dirname(os.path.abspath(source)) or os.getcwd()
+    root = os.path.join(base, '.vanta', 'cache')
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError:
+        root = os.path.join(tempfile.gettempdir(), 'vanta_cache')
+        os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _build_cache_key(source, release, debug, checked,
+                    include_dir, lib_dir, link):
+    import hashlib
+    parts = [os.path.normcase(os.path.abspath(source))]
+    try:
+        with open(source, 'rb') as f:
+            parts.append(f.read().hex())
+    except OSError:
+        pass
+    for p in _watched_files(source):
+        if p == source:
+            continue
+        try:
+            with open(p, 'rb') as f:
+                parts.append(os.path.relpath(p, os.path.dirname(source))
+                            + ':' + f.read().hex())
+        except OSError:
+            pass
+    parts.append(f"release={release} debug={debug} checked={checked}")
+    parts.append("include=" + ",".join(include_dir or []))
+    parts.append("libdir=" + ",".join(lib_dir or []))
+    parts.append("link=" + ",".join(link or []))
+    parts.append("version=" + VERSION)
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:24]
+
+
 def _watched_files(source):
     """Source file plus every .vnt beneath its directory."""
     base = os.path.dirname(os.path.abspath(source)) or os.getcwd()
@@ -1507,6 +1578,10 @@ def main(argv):
     p_build.add_argument('source')
     p_build.add_argument('-o', '--output')
     p_build.add_argument('--release', action='store_true')
+    p_build.add_argument('--no-cache', action='store_true',
+                        help='skip the build cache and rebuild')
+    p_build.add_argument('--fresh', action='store_true',
+                        help='ignore an existing cache entry for this build')
     p_build.add_argument('--checked', action='store_true',
                         help='enable runtime overflow checks (default for debug)')
     p_build.add_argument('--debug', action='store_true',
@@ -1524,6 +1599,10 @@ def main(argv):
     p_run = sub.add_parser('run', help='build and run')
     p_run.add_argument('source')
     p_run.add_argument('--release', action='store_true')
+    p_run.add_argument('--no-cache', action='store_true',
+                        help='skip the build cache and rebuild')
+    p_run.add_argument('--fresh', action='store_true',
+                        help='ignore an existing cache entry for this build')
     p_run.add_argument('--checked', action='store_true',
                         help='enable runtime overflow checks (default for debug)')
     p_run.add_argument('--include-dir', action='append', default=[],
