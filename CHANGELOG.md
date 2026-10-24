@@ -2,6 +2,14 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.93.0 - 2026-10-24
+
+- Hot-reload phase I: `vanta run --hot` supervises the program and, on any
+  source or sibling `.vnt` change, rebuilds through the incremental cache
+  and relaunches a new child. ADR-03 documents the state-preservation work
+  deferred to phases II.A/II.B (shared-memory Arena, lib reload).
+- Tests: 930 in total (unchanged).
+
 ## v0.92.0 - 2026-10-24
 
 - Richer signals: string-payload channels (`signal_emit_str` /

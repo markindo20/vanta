@@ -1047,6 +1047,92 @@ def cmd_build(args):
     return 0
 
 
+def cmd_run_hot(args):
+    """Supervised (hot-restart) runner: rebuild-and-relaunch on change.
+
+    Phase 1 of hot-reload: changes are rebuilt from the incremental
+    cache (near-instant when cache hits) and the child process is
+    relaunched.  State is not yet preserved across reloads; see
+    docs/ADR-03-hot-reload-state-preservation.md.
+    """
+    if not getattr(args, 'source', None) or not os.path.exists(args.source):
+        sys.stderr.write('error: not found: %s\n' % args.source)
+        return 1
+    out = sys.stdout
+    child = None
+    last_digest = None
+    out.write('hot reload: supervising %s (Ctrl+C to stop)\n' % args.source)
+    out.flush()
+    while True:
+        try:
+            files = _watched_files(args.source)
+            digest = _source_digest(files)
+        except Exception as exc:
+            sys.stderr.write('error scanning: %s\n' % exc)
+            digest = None
+        if digest is not None and digest != last_digest:
+            if child is not None:
+                try:
+                    child.terminate()
+                    child.wait(timeout=5)
+                except Exception:
+                    try: child.kill()
+                    except Exception: pass
+            out.write('\n--- rebuild (' + str(len(files)) + ' files) ' +
+                      time.strftime('%H:%M:%S') + ' ---\n')
+            out.flush()
+            try:
+                import subprocess as _subp
+                rc = cmd_run(args)
+                last_digest = digest
+                if rc not in (0, None):
+                    out.write('(build failed; child not started)\n')
+                    out.flush()
+                    time.sleep(1.0)
+                    continue
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                sys.stderr.write('error: %s\n' % exc)
+                time.sleep(1.0)
+                continue
+            # Launch what cmd_run built by re-running via cache; if
+            # the build succeeded the cached exe now exists.
+            try:
+                key = _build_cache_key(args.source, args.release,
+                                      getattr(args, 'debug', False),
+                                      getattr(args, 'checked', False)
+                                      or not args.release,
+                                      getattr(args, 'include_dir', None),
+                                      getattr(args, 'lib_dir', None),
+                                      getattr(args, 'link', None))
+                cdir = os.path.join(_build_cache_root(args.source), key)
+                exe = os.path.join(cdir, 'prog.exe' if os.name == 'nt' else 'prog')
+                if os.path.exists(exe):
+                    lib_dirs = _dedupe_paths(list(args.lib_dir or []))
+                    env = _runtime_env(find_cxx_compiler()[1], lib_dirs)
+                    child = subprocess.Popen([exe] + list(args.prog_args or []),
+                                            env=env)
+            except Exception as exc:
+                sys.stderr.write('launch error: %s\n' % exc)
+                child = None
+        # If there is a running child, wait briefly and re-check sources.
+        if child is not None:
+            ret = child.poll()
+            if ret is not None:
+                # Program exited on its own; restart only on source change
+                child = None
+        try:
+            time.sleep(0.5)
+        except KeyboardInterrupt:
+            out.write('\nhot reload stopped\n')
+            out.flush()
+            if child is not None:
+                try: child.terminate()
+                except Exception: pass
+            return 0
+    return 0
+
 def cmd_run(args):
     name, path = find_cxx_compiler()
     if path is None:
@@ -1603,7 +1689,7 @@ def main(argv):
                         help='skip the build cache and rebuild')
     p_run.add_argument('--fresh', action='store_true',
                         help='ignore an existing cache entry for this build')
-    p_run.add_argument('--checked', action='store_true',
+    p_run.add_argument('--hot', action='store_true',
                         help='enable runtime overflow checks (default for debug)')
     p_run.add_argument('--include-dir', action='append', default=[],
                        help='add include directory for C++ compilation')
@@ -1677,7 +1763,10 @@ def main(argv):
         return cmd_build(args)
     if args.cmd == 'run' and getattr(args, 'watch', False):
         return cmd_watch(args)
+    if args.cmd == 'run' and getattr(args, 'hot', False):
+        return cmd_run_hot(args)
     if args.cmd == 'run':
+        return cmd_run(args)
         return cmd_run(args)
     if args.cmd == 'watch':
         return cmd_watch(args)
