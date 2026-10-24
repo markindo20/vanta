@@ -2,7 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
-## v0.94.0 - 2026-10-24
+## v0.94.1 - 2026-10-24
+
+- Bugfix: runtime shared Arena no longer references a member function's
+  instance data from a static helper, fixing `vanta doctor` smoke on Linux.
+- 930 tests; behavior identical.
+
+## v0.94.0 - 2026-10-24:
 
 - Arena gains a second constructor `Arena(size, name)` that attaches to a
   named shared-memory segment on POSIX; plain `Arena(size)` remains private.

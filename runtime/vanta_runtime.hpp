@@ -423,7 +423,6 @@ private:
         int fd = shm_open(path.c_str(), O_CREAT | O_RDWR, 0666);
         if (fd < 0) return -1;
         if (ftruncate(fd, bytes) < 0) { close(fd); return -1; }
-        sharedNameStore_ = path;
         return fd;
 #else
         (void)name; (void)bytes;
@@ -433,7 +432,6 @@ private:
     bool owned_ = true;
     bool shared_ = false;
     std::string sharedName_ = "";
-    std::string sharedNameStore_ = "";
     char* data_;
     uint32_t size_;
     uint32_t offset_;
