@@ -23,6 +23,7 @@ from compiler.driver import (
     cmd_doctor,
     cmd_fmt,
     cmd_new,
+    cmd_repl,
     cmd_test,
     cmd_watch,
     find_cxx_compiler,
@@ -273,6 +274,27 @@ class CliTests(unittest.TestCase):
         self.assertIn('watching', out.getvalue())
         self.assertIn('rebuild', out.getvalue())
 
+
+    def test_repl_evaluates_a_one_line_program(self):
+        if find_cxx_compiler()[1] is None:
+            self.skipTest('no C++ compiler on PATH')
+        builtins = __import__('builtins')
+        orig_input = builtins.input
+        rows = iter(['print_i32(1)', ''])
+        def fake_input(prompt=''):
+            try:
+                return next(rows)
+            except StopIteration:
+                raise EOFError()
+        builtins.input = fake_input
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cmd_repl(None)
+        finally:
+            builtins.input = orig_input
+        self.assertEqual(rc, 0)
+        self.assertIn('>>>', out.getvalue())
 
 if __name__ == '__main__':
     unittest.main()

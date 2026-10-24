@@ -1226,7 +1226,7 @@ def cmd_test(args):
 
 
 _COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
-             'lsp', 'dap', 'watch')
+             'lsp', 'dap', 'watch', 'repl')
 
 
 def _normalize_argv(argv):
@@ -1382,10 +1382,62 @@ def cmd_watch(args):
             return 0
 
 
+    pass
+
+
+def cmd_repl(args):
+    out = sys.stdout
+    out.write(
+        "Vanta REPL - type a program, then a blank line to run; EOF/Ctrl+C to quit.\n")
+    while True:
+        lines = []
+        out.write(">>> ")
+        out.flush()
+        try:
+            while True:
+                try:
+                    line = input()
+                except EOFError:
+                    raise
+                if line.strip() == "" and lines:
+                    break
+                lines.append(line)
+                out.write("... ")
+                out.flush()
+        except (EOFError, KeyboardInterrupt):
+            out.write("\n")
+            out.flush()
+            return 0
+        src = "\n".join(lines).strip()
+        if not src:
+            continue
+        top_level = ("func ", "struct ", "enum ", "import ", "const ",
+                     "component ")
+        if any(ln.lstrip().startswith(top_level) for ln in lines):
+            if "func main" not in src:
+                src = src + "\nfunc main() -> void:\n    print_i32(0)\n"
+        else:
+            body = "\n".join("    " + ln for ln in lines)
+            src = "func main() -> void:\n" + body + "\n"
+        tmp = tempfile.mkdtemp(prefix="vanta_repl_")
+        path = os.path.join(tmp, "session.vnt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(src)
+        run_args = argparse.Namespace(
+            source=path, release=True, prog_args=[], include_dir=[],
+            lib_dir=[], link=[])
+        try:
+            cmd_run(run_args)
+        except Exception as exc:
+            sys.stderr.write(f"error: {exc}\n")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main(argv):
     argv = _normalize_argv(argv)
     program_args = []
-    if argv and argv[0] in ('run', 'debug', 'watch'):
+    if argv and argv[0] in ('run', 'debug', 'watch', 'repl'):
         argv, program_args = _split_program_args(argv)
     ap = argparse.ArgumentParser(
         prog='vanta', description='Vanta language compiler',
@@ -1462,6 +1514,9 @@ def main(argv):
     p_watch.add_argument('--include-dir', action='append', default=[],
                         help='add include directory for C++ compilation')
 
+    sub.add_parser(
+        'repl', help='interactive read-compile-run loop (end a program with a blank line)')
+
     p_debug = sub.add_parser(
         'debug', help='build with Vanta source locations and debug with GDB')
     p_debug.add_argument('source')
@@ -1479,7 +1534,7 @@ def main(argv):
     p_debug.add_argument('prog_args', nargs='*',
                          help='arguments passed through to the program')
 
-    if argv and argv[0] in ('run', 'debug', 'watch'):
+    if argv and argv[0] in ('run', 'debug', 'watch', 'repl'):
         # Anything the compiler does not know belongs to the program.
         args, extra = ap.parse_known_args(argv)
         if extra:
@@ -1510,6 +1565,8 @@ def main(argv):
         return cmd_run(args)
     if args.cmd == 'watch':
         return cmd_watch(args)
+    if args.cmd == 'repl':
+        return cmd_repl(args)
     if args.cmd == 'test':
         return cmd_test(args)
     if args.cmd == 'debug':

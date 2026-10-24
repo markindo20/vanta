@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.82.0 - 2026-10-24
+
+- `vanta repl` starts an interactive read-compile-run loop. Each program is
+  read until a blank line, then type-checked and run. A lone sequence of
+  statements is wrapped into `func main()`, and a full program (with
+  declarations) is taken verbatim and given a no-op main when it lacks one.
+  EOF or Ctrl+C ends the session. This is a first interactive slice of the
+  feedback-loop track.
+- Tests: 918 in total (917 + 1 new test).
+
 ## v0.81.0 - 2026-10-24
 
 - `vanta watch file.vnt` rebuilds and reruns on source change. `vanta run
