@@ -989,19 +989,59 @@ namespace vanta {
 // `signal_emit(name, value)` invokes every handler registered for that
 // signal name. `signal_on(name, handler)` registers a top-level Vanta
 // function of type `func(i32) -> void`.
-typedef void (*signal_handler_t)(int32_t);
-inline std::vector<std::pair<Str, signal_handler_t>>& signal_registry() {
-    static std::vector<std::pair<Str, signal_handler_t>> r;
+typedef void (*signal_handler_i32_t)(int32_t);
+typedef void (*signal_handler_str_t)(Str);
+
+struct SignalEntry {
+    Str name;
+    int kind;  // 0 = i32, 1 = str
+    bool once;
+    signal_handler_i32_t i32h;
+    signal_handler_str_t strh;
+};
+
+inline std::vector<SignalEntry>& signal_registry() {
+    static std::vector<SignalEntry> r;
     return r;
 }
-inline void signal_on(Str name, signal_handler_t handler) {
-    signal_registry().push_back({name, handler});
+
+inline void signal_on(Str name, signal_handler_i32_t handler) {
+    SignalEntry e; e.name = name; e.kind = 0; e.once = false;
+    e.i32h = handler; e.strh = nullptr;
+    signal_registry().push_back(e);
 }
+
+inline void signal_on_str(Str name, signal_handler_str_t handler) {
+    SignalEntry e; e.name = name; e.kind = 1; e.once = false;
+    e.i32h = nullptr; e.strh = handler;
+    signal_registry().push_back(e);
+}
+
+inline void signal_on_once(Str name, signal_handler_i32_t handler) {
+    SignalEntry e; e.name = name; e.kind = 0; e.once = true;
+    e.i32h = handler; e.strh = nullptr;
+    signal_registry().push_back(e);
+}
+
 inline void signal_emit(Str name, int32_t value) {
-    for (const auto& vp : signal_registry()) {
-        if (vanta::str_eq(vp.first, name) && vp.second)
-            vp.second(value);
+    auto& reg = signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (vanta::str_eq(reg[i].name, name) && reg[i].kind == 0 && reg[i].i32h) {
+            reg[i].i32h(value);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
     }
 }
 
-} // end vanta namespace
+inline void signal_emit_str(Str name, Str value) {
+    auto& reg = signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (vanta::str_eq(reg[i].name, name) && reg[i].kind == 1 && reg[i].strh) {
+            reg[i].strh(value);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+}

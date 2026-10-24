@@ -2,6 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.92.0 - 2026-10-24
+
+- Richer signals: string-payload channels (`signal_emit_str` /
+  `signal_on_str`) and one-shot subscriptions (`signal_on_once`) that
+  auto-unsubscribe after the first emit.
+- Tests: 930 in total (unchanged; signals exercised via example).
+
 ## v0.91.0 - 2026-10-24
 
 - Non-capturing lambda literals: `func (x: i32) -> i32: return ...` may
