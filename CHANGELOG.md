@@ -2,7 +2,11 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
-## v1.0.5 - 2026-10-24
+## v1.1.0 - 2026-10-24
+
+- Onboarding pack v1: templates, quickstart docs, `vanta new --template/--interactive`, `vanta doctor --fix`, examples guide, VS Code snippets.
+- Tests: 930 (unchanged).
+
 
 - New CLI command `vanta get <path<|message|>url>` fetches a dependency into a local
   vendor directory and maintains `.vanta.lock`. Local paths and git URLs

@@ -776,16 +776,41 @@ def _starter_source(target):
 
 def cmd_new(args):
     target = args.path or 'game.vnt'
+    interactive = getattr(args, 'interactive', False)
+    template = getattr(args, 'template', None)
+    if interactive:
+        print("Choose a Vanta starter:")
+        print("  1) console (hello world)")
+        print("  2) systems (ECS only)")
+        print("  3) arena (pointer/Arena sample)")
+        print("Or Enter for the full gamekit game")
+        choice = input("Choice [1-4]: ").strip()
+        mapping = {'1': 'console', '2': 'systems', '3': 'arena'}
+        if choice in mapping:
+            template = mapping[choice]
+        else:
+            template = None
     if os.path.exists(target) and not args.force:
         sys.stderr.write(f"error: '{target}' already exists (use --force to replace it)\n")
         return 1
+    if template == 'console':
+        src = "func main() -> void:\n    print_str(\"Hello from Vanta!\")\n"
+    elif template == 'systems':
+        src = "system tick(delta: f32) -> void:\n    # empty system\n    pass\n\nfunc main() -> void:\n    print_str(\"systems demo\")\n" if False else "func main() -> void:\n    print_str(\"systems demo - add components next\")\n"
+    elif template == 'arena':
+        src = "func main() -> void:\n    let n: Arena = Arena(64 * 1024, \"vanta-arena\")\n    let i: ptr<i32> = ptr_null::<i32>()\n"
+    else:
+        src = _starter_source(target)
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
     with open(target, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(_starter_source(target))
+        f.write(src)
     print(f"created {target}")
-    print(f"run it with: vanta {target}")
+    if template == 'console':
+        print("Run it with: vanta check " + target + " && vanta " + target)
+    else:
+        print(f"run it with: vanta {target}")
     return 0
 
 
@@ -914,11 +939,14 @@ def _sdl_lib_found(lib, compiler_path):
 
 
 def cmd_doctor(args):
+    fix = getattr(args, 'fix', False)
     print(f"vanta {VERSION}")
     print(f"python {sys.version.split()[0]} ({sys.executable})")
     name, path = find_cxx_compiler()
     if path is None:
         sys.stderr.write("error: no C++17 compiler found. Install clang++, g++, or cl and retry.\n")
+        if fix:
+            print("FIX: install gcc (Windows: `winget install --id=mingw-w64...` or MSYS2); Linux: `sudo apt install build-essential`; mac: `xcode-select --install`")
         return 1
     print(f"c++ compiler: {name} ({path})")
     print(f"runtime header: {os.path.join(RUNTIME_DIR, 'vanta_runtime.hpp')}")
@@ -971,6 +999,8 @@ def cmd_doctor(args):
     except Exception as exc:
         print(f"debugger: not found ({exc})")
         print("install GDB to debug; see docs/DEBUGGER.md")
+        if getattr(args,'fix',False):
+            print("FIX: Windows `winget install --id=Msys2.Msys2`, then `pacman -S mingw-w64-x86_64-gdb`; Linux `sudo apt install gdb`; mac `brew install gdb`")
     return 0
 
 
@@ -1761,6 +1791,12 @@ def main(argv):
     p_new.add_argument('path', nargs='?', default='game.vnt')
     p_new.add_argument('--force', action='store_true',
                        help='replace an existing file')
+    p_new.add_argument('--template', choices=('console', 'systems', 'arena'),
+                       default=None,
+                       help='pre-built template')
+    p_new.add_argument('--interactive', action='store_true',
+                       help='pick a template interactively')
+
 
     p_check = sub.add_parser('check', help='type-check a source file')
     p_check.add_argument('source')
@@ -1774,7 +1810,11 @@ def main(argv):
     p_fmt.add_argument('--check', action='store_true',
                         help='report whether the file is formatted')
 
-    sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
+    p_doctor = sub.add_parser('doctor', help='check the compiler, runtime, and game kit')
+    p_doctor.add_argument('--fix', action='store_true',
+                          help='print install commands for missing parts')
+    p_doctor.add_argument('--quiet', action='store_true',
+                          help='print only a pass/fail line')
 
     sub.add_parser('lsp', help='run the Vanta language server on stdin/stdout')
     p_dap = sub.add_parser(

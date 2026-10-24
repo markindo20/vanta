@@ -1,0 +1,10 @@
+{
+  "scope": "vanta",
+  "prefix": "class",
+  "body": [
+    "class ${1:Type}:",
+    "    ${2:x}: i32",
+    "    func ${3:method}(self:${1:Type}) -> void:",
+    "        pass"
+  ]
+}
