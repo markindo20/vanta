@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.99.2 - 2026-10-24
+
+- Richer string builtins: `str_sub`, `str_repeat`, `str_to_upper`, `str_to_lower`,
+  `str_trim`, `str_index_of`, completing the string manipulation surface.
+- 930 tests (unchanged).
+
 ## v0.99.0 - 2026-10-24
 
 - State-preserving hot reload Phase II.C: persistent counter via named shared

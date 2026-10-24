@@ -1,7 +1,7 @@
 from . import ast_nodes as A
 from .typesys import (
     Type, PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType,
-    InferType, StructType, EnumType, FuncType,
+    InferType, StructType, EnumType, ClassType, FuncType,
     I8, U8, I16, U16, I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, NARROW_RANGES, is_int, is_float, is_numeric, is_narrow,
     eq_blocker,
@@ -141,6 +141,7 @@ class TypeChecker:
         self.private_types = getattr(program, 'private_types', set()) or set()
         self.structs: dict[str, StructType] = {}
         self.enums: dict[str, EnumType] = {}
+        self.classes: dict[str, ClassType] = {}
         self.generic_enums: dict[str, GenericEnumInfo] = {}
         self.generic_structs: dict[str, GenericStructInfo] = {}
         self.generic_functions: dict[str, GenericFuncInfo] = {}
@@ -227,6 +228,12 @@ class TypeChecker:
         bf("to_str_f32", [("v", F32)], STR)
         bf("to_str_bool", [("v", BOOL)], STR)
         bf("str_pool_reset", [], VOID)
+        bf("str_repeat", [("s", STR), ("count", I32)], STR)
+        bf("str_sub", [("s", STR), ("start", I32), ("n", I32)], STR)
+        bf("str_to_upper", [("s", STR)], STR)
+        bf("str_to_lower", [("s", STR)], STR)
+        bf("str_trim", [("s", STR)], STR)
+        bf("str_index_of", [("s", STR), ("sub", STR)], I32)
         bf("signal_emit", [("name", STR), ("value", I32)], VOID)
         bf("signal_emit_str", [("name", STR), ("value", STR)], VOID)
         _handler_type = FuncType((I32,), VOID)
@@ -520,6 +527,8 @@ class TypeChecker:
             for d in self.program.decls:
                 if isinstance(d, A.StructDecl):
                     self._register_struct(d)
+                elif isinstance(d, A.ClassDecl):
+                    self._register_class(d)
                 elif isinstance(d, A.EnumDecl):
                     self._register_enum(d)
                 elif isinstance(d, A.FuncDecl):
@@ -569,6 +578,58 @@ class TypeChecker:
                 raise CheckError(f"duplicate field '{fname}'", self.filename, fpos)
             fields[fname] = self._resolve_type(ftype)
         self.structs[d.name] = StructType(d.name, fields, builtin=False)
+
+    def _register_class(self, d):
+        if (d.name in self.structs or d.name in self.enums
+                or d.name in self.classes
+                or d.name in self.generic_enums
+                or d.name in self.generic_structs
+                or d.name in self.generic_functions):
+            raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
+        if d.name in self.functions:
+            raise CheckError(f"type name '{d.name}' collides with function",
+                             self.filename, d.pos)
+        if d.name == 'List':
+            raise CheckError("'List' is a reserved built-in type name",
+                             self.filename, d.pos)
+        for param in d.type_params:
+            if param in PRIM_TYPES or param in ('List', 'ptr'):
+                raise CheckError(
+                    f"type parameter name '{param}' is reserved",
+                    self.filename, d.pos)
+        if d.type_params:
+            raise CheckError(
+                "generic classes are not supported yet; remove type "
+                "parameters", self.filename, d.pos)
+        parent_ct = None
+        if d.parent is not None:
+            if d.parent in self.classes:
+                parent_ct = self.classes[d.parent]
+            elif d.parent in self.structs:
+                raise CheckError(
+                    f"cannot extend struct '{d.parent}'; only classes can be "
+                    "extended", self.filename, d.pos)
+            else:
+                raise CheckError(f"unknown parent class '{d.parent}'",
+                                 self.filename, d.pos)
+        fields = {}
+        for (fname, ftype, fpos) in d.fields:
+            if fname in fields:
+                raise CheckError(f"duplicate field '{fname}'",
+                                 self.filename, fpos)
+            fields[fname] = self._resolve_type(ftype)
+        methods = {}
+        for fd in d.methods:
+            if fd.name in methods:
+                raise CheckError(f"duplicate method '{fd.name}'",
+                                 self.filename, fd.pos)
+            params = []
+            for p in fd.params:
+                params.append((p.name, self._resolve_type(p.type)))
+            ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
+            methods[fd.name] = FuncType(tuple(params), ret)
+        ct = ClassType(d.name, fields, methods, parent=d.parent)
+        self.classes[d.name] = ct
 
     def _register_enum(self, d):
         if (d.name in self.structs or d.name in self.enums
@@ -1567,6 +1628,8 @@ class TypeChecker:
                 if st.builtin:
                     return self._check_builtin_ctor(st, call)
                 return self._check_user_struct_ctor(st, call)
+            if name in self.classes:
+                return self._check_class_ctor(self.classes[name], call)
             if name in self.functions:
                 return self._check_func_call(name, call)
             if name in self.enums:
@@ -1587,6 +1650,8 @@ class TypeChecker:
                     raise CheckError(f"field '{f.field}' is not callable (type {ft})",
                                      self.filename, call.pos)
                 return self._check_method(ot, f.field, call)
+            if isinstance(ot, ClassType):
+                return self._check_class_method(ot, f.field, call)
             if f.field == 'at':
                 if isinstance(ot, PtrType):
                     return self._check_ptr_at(call, ot)
@@ -2347,6 +2412,90 @@ class TypeChecker:
         call.arg_names = None
         call.type = st
         return st
+
+    def _check_class_ctor(self, ct: ClassType, call: A.Call) -> Type:
+        if not call.arg_names or any(x is None for x in call.arg_names):
+            raise CheckError("class construction requires named arguments",
+                             self.filename, call.pos)
+        seen = set()
+        by_name = {}
+        for nm, arg in zip(call.arg_names, call.args):
+            if nm not in ct.fields:
+                raise CheckError(f"unknown field '{nm}'", self.filename, call.pos)
+            if nm in seen:
+                raise CheckError(f"duplicate field '{nm}'", self.filename, call.pos)
+            seen.add(nm)
+            at = self._check_expr(arg, ct.fields[nm])
+            self._coerce_value(arg, at, ct.fields[nm], call.pos,
+                                f"field '{nm}'")
+            by_name[nm] = arg
+        if len(seen) != len(ct.fields):
+            missing = set(ct.fields) - seen
+            raise CheckError(f"missing fields: {', '.join(sorted(missing))}",
+                             self.filename, call.pos)
+        call.args = [by_name[f] for f in ct.fields]
+        call.arg_names = None
+        call.type = ct
+        return ct
+
+    def _resolve_class_method(self, ct: ClassType, method: str):
+        """Resolve a method on ct, walking the parent chain for inheritance.
+
+        Returns (ClassType_declaring, FuncType). Subclass overrides win.
+        """
+        visited = set()
+        cur = ct
+        while cur is not None and cur.name not in visited:
+            visited.add(cur.name)
+            if method in cur.methods:
+                return cur, cur.methods[method]
+            cur = self.classes.get(cur.parent) if cur.parent else None
+        return None, None
+
+    def _check_class_method(self, ct: ClassType, method: str, call: A.Call) -> Type:
+        declaring, ft = self._resolve_class_method(ct, method)
+        if ft is None:
+            raise CheckError(f"class '{ct.name}' has no method '{method}'",
+                             self.filename, call.pos)
+        if not call.arg_names or any(x is not None for x in call.arg_names):
+            raise CheckError(f"method '{method}' does not accept named arguments",
+                             self.filename, call.pos)
+        # params[0] is `self`; bind it to the receiver.
+        params = list(ft.params)
+        if len(params) < 1:
+            raise CheckError(f"internal: method '{method}' has no self parameter",
+                             self.filename, call.pos)
+        self_param = params[0]
+        # The receiver must be a subtype of self's declared type.
+        recv_t = ct
+        # Simple nominal check: exact class match, or subclass via parent chain.
+        if not self._is_subclass_of(ct, self_param[1]):
+            raise CheckError(
+                f"cannot call '{method}' on '{ct.name}'; expected "
+                f"receiver of type {self_param[1]}", self.filename, call.pos)
+        args = list(call.args)
+        if len(args) != len(params) - 1:
+            raise CheckError(
+                f"'{method}' expects {len(params) - 1} argument(s), "
+                f"got {len(args)}", self.filename, call.pos)
+        for arg, (_, ptype) in zip(args, params[1:]):
+            at = self._check_expr(arg, ptype)
+            self._coerce_value(arg, at, ptype, call.pos,
+                                f"argument of '{method}'")
+        call.type = ft.ret
+        return ft.ret
+
+    def _is_subclass_of(self, ct: ClassType, ancestor: Type) -> bool:
+        if not isinstance(ancestor, ClassType):
+            return False
+        cur = ct
+        seen = set()
+        while cur is not None and cur.name not in seen:
+            seen.add(cur.name)
+            if cur.name == ancestor.name:
+                return True
+            cur = self.classes.get(cur.parent) if cur.parent else None
+        return False
 
     def _check_func_call(self, name: str, call: A.Call) -> Type:
         sig = self.functions[name]

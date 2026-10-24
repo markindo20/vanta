@@ -90,6 +90,8 @@ class Parser:
             return self.parse_struct(True)
         if t.type == TT.ENUM:
             return self.parse_enum()
+        if t.type == TT.CLASS:
+            return self.parse_class()
         if t.type == TT.EXTERN:
             return self.parse_extern()
         if t.type == TT.CONST:
@@ -252,8 +254,52 @@ class Parser:
         return A.EnumDecl(name, members, A.Pos(tok.line, tok.col),
                           type_params=type_params)
 
-    def parse_type_args(self):
         """Parse a comma-separated type argument list, without the brackets."""
+        args = []
+        while True:
+            args.append(self.parse_type())
+            if self.match(TT.COMMA):
+                continue
+            break
+        return args
+
+        return A.EnumDecl(name, members, A.Pos(tok.line, tok.col),
+                          type_params=type_params)
+
+    def parse_class(self):
+        tok = self.advance()  # class
+        name = self.expect(TT.IDENT).value
+        parent = None
+        if self.match(TT.EXTENDS):
+            parent = self.expect(TT.IDENT).value
+        self.expect(TT.COLON)
+        self.expect(TT.NEWLINE)
+        self.expect(TT.INDENT)
+        fields = []
+        methods = []
+        while not self.check(TT.DEDENT):
+            if self.check(TT.FUNC):
+                fd = self.parse_func(False)
+                methods.append(fd)
+            else:
+                fn = self.expect(TT.IDENT)
+                self.expect(TT.COLON)
+                ft = self.parse_type()
+                self.expect(TT.NEWLINE)
+                fields.append((fn.value, ft, A.Pos(fn.line, fn.col)))
+        self.expect(TT.DEDENT)
+        return A.ClassDecl(name, parent, fields, methods,
+                           A.Pos(tok.line, tok.col))
+        """Parse a comma-separated type argument list, without the brackets."""
+        args = []
+        while True:
+            args.append(self.parse_type())
+            if self.match(TT.COMMA):
+                continue
+            break
+        return args
+
+    def parse_type_args(self):
         args = []
         while True:
             args.append(self.parse_type())

@@ -17,6 +17,7 @@
 #include <new>
 #include <type_traits>
 #include <vector>
+#include <cctype>
 #include <string>
 
 namespace vanta {
@@ -806,8 +807,70 @@ inline Str str_fmt_impl(const char* fmt, ...) {
 // for source compatibility; it no longer invalidates anything.
 inline void str_pool_reset() {}
 
-inline Str str_concat(Str a, Str b) {
-    return Str::concat(a, b);
+inline Str str_concat(Str a, Str b) { return Str::concat(a, b); }
+
+inline Str str_repeat(Str s, int32_t count) {
+    if (count <= 0 || s.size() == 0) return Str();
+    size_t cap = s.size() * count;
+    char *buf = static_cast<char *>(std::malloc(cap + 1));
+    if (!buf) return Str();
+    for (int32_t i = 0; i < count; i++)
+        std::memcpy(buf + i * s.size(), s.c_str(), s.size());
+    buf[cap] = '\0';
+    Str out = Str::copy(buf, (int32_t)cap);
+    std::free(buf);
+    return out;
+}
+
+inline Str str_sub(Str s, int32_t start, int32_t n) {
+    if (start < 0) start = 0;
+    if (start > (int32_t)s.size()) return Str();
+    size_t avail = s.size() - start;
+    if (n < 0) n = 0;
+    if ((size_t)n > avail) n = (int32_t)avail;
+    if (n <= 0) return Str();
+    return Str::copy(s.c_str() + start, n);
+}
+
+inline Str str_to_lower(Str s) {
+    char *buf = static_cast<char *>(std::malloc(s.size() + 1));
+    if (!buf) return Str();
+    for (size_t i = 0; i < s.size(); i++)
+        buf[i] = (char)std::tolower((unsigned char)s.c_str()[i]);
+    buf[s.size()] = '\0';
+    Str out = Str::copy(buf, (int32_t)s.size());
+    std::free(buf);
+    return out;
+}
+
+inline Str str_to_upper(Str s) {
+    char *buf = static_cast<char *>(std::malloc(s.size() + 1));
+    if (!buf) return Str();
+    for (size_t i = 0; i < s.size(); i++)
+        buf[i] = (char)std::toupper((unsigned char)s.c_str()[i]);
+    buf[s.size()] = '\0';
+    Str out = Str::copy(buf, (int32_t)s.size());
+    std::free(buf);
+    return out;
+}
+
+inline Str str_trim(Str s) {
+    size_t start = 0, end = s.size();
+    while (start < end && std::isspace((unsigned char)s.c_str()[start]))
+        start++;
+    while (end > start && std::isspace((unsigned char)s.c_str()[end - 1]))
+        end--;
+    return Str::copy(s.c_str() + start, (int32_t)(end - start));
+}
+
+inline int32_t str_index_of(Str s, Str sub) {
+    if (sub.size() == 0) return 0;
+    if (sub.size() > s.size()) return -1;
+    for (size_t i = 0; i + sub.size() <= s.size(); i++) {
+        if (std::memcmp(s.c_str() + i, sub.c_str(), sub.size()) == 0)
+            return (int32_t)i;
+    }
+    return -1;
 }
 
 // Substring predicates, written `str_contains`, `str_starts_with`, and

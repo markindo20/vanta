@@ -5,7 +5,7 @@ from . import VERSION
 from .formats import parse_format
 from .typesys import (
     PrimType, IntLitType, FloatLitType, PtrType, ArrayType, ListType, InferType,
-    StructType, EnumType, FuncType,
+    StructType, EnumType, ClassType, FuncType,
     I8, U8, I16, U16, I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT,
     is_narrow, eq_blocker,
 )
@@ -38,6 +38,12 @@ BUILTIN_FN = {
     'str_to_i32': 'vanta::str_to_i32', 'str_to_f32': 'vanta::str_to_f32',
     'to_str_i32': 'vanta::to_str_i32', 'to_str_f32': 'vanta::to_str_f32',
     'to_str_bool': 'vanta::to_str_bool', 'str_pool_reset': 'vanta::str_pool_reset',
+    'str_sub': 'vanta::str_sub', 'str_repeat': 'vanta::str_repeat',
+    'str_to_upper': 'vanta::str_to_upper', 'str_to_lower': 'vanta::str_to_lower',
+    'str_trim': 'vanta::str_trim', 'str_index_of': 'vanta::str_index_of',
+    'str_sub': 'vanta::str_sub', 'str_repeat': 'vanta::str_repeat',
+    'str_to_upper': 'vanta::str_to_upper', 'str_to_lower': 'vanta::str_to_lower',
+    'str_trim': 'vanta::str_trim', 'str_index_of': 'vanta::str_index_of',
     'signal_emit': 'vanta::signal_emit', 'signal_on': 'vanta::signal_on',
     'signal_emit_str': 'vanta::signal_emit_str',
     'signal_on_str': 'vanta::signal_on_str',
@@ -248,6 +254,9 @@ class CodeGen:
                 return self.tc.func_types[t]
             except KeyError:
                 raise RuntimeError(f"internal: function type {t} was never registered")
+        if isinstance(t, ClassType): return t.name
+        if isinstance(t, PtrType) and isinstance(t.inner, ClassType):
+            return t.inner.name + '*'
         if isinstance(t, PtrType):
             return self._ctype(t.inner) + '*'
         if isinstance(t, ArrayType):
@@ -462,6 +471,7 @@ class CodeGen:
         # Extern declarations (outside namespace)
         externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
         structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
+        classes = [d for d in self.program.decls if isinstance(d, A.ClassDecl)]
         # `tc.structs` holds declaration structs plus every monomorphized
         # generic instance. Builtins are emitted by the runtime header.
         struct_types = [st for st in self.tc.structs.values()
@@ -469,11 +479,14 @@ class CodeGen:
         # `tc.enums` holds every concrete enum: ordinary declarations and
         # each monomorphized generic instance.
         enums = list(self.tc.enums.values())
+        # `tc.classes` holds every concrete class.
+        class_types = [ct for ct in self.tc.classes.values()
+                       if not ct.builtin]
 
         # Tags ahead of the extern block: an extern signature may mention a
         # user struct or enum (a callback carrying a ptr<State>, say), and
         # the definitions live inside the namespace below.
-        if externs and (struct_types or enums):
+        if externs and (struct_types or enums or class_types):
             self.emit('namespace vanta_user {')
             self.indent += 1
             for et in enums:
@@ -483,6 +496,9 @@ class CodeGen:
                     self.emit(f'enum class {et.name} : int32_t;')
             for st in struct_types:
                 self.emit(f'struct {st.name};')
+            for ct in class_types:
+                self.emit(f'struct {ct.name};')
+                self.emit(f'struct {ct.name}_vtable;')
             self.indent -= 1
             self.emit('}')
             self.emit('')
@@ -506,6 +522,9 @@ class CodeGen:
                 self.emit(f'enum class {et.name} : int32_t;')
         for st in struct_types:
             self.emit(f'struct {st.name};')
+        for ct in class_types:
+            self.emit(f'struct {ct.name};')
+            self.emit(f'struct {ct.name}_vtable;')
         self.emit('')
 
         # Function-pointer aliases, innermost first.
@@ -520,9 +539,13 @@ class CodeGen:
         # while resolving a field or signature and may depend on a type
         # declared later in the file.
         user_types = list(struct_types) + list(enums)
+        for ct in class_types:
+            user_types.append(ct)
         for t in self._ordered_user_types(user_types):
             if isinstance(t, StructType):
                 self._gen_struct(t)
+            elif isinstance(t, ClassType):
+                self._gen_class(t)
             else:
                 self._gen_enum(t)
 
@@ -613,6 +636,58 @@ class CodeGen:
                            for i, p in enumerate(fn.params))
         return f'{ret_s} fn_{fn.name}({params})'
 
+    def _gen_class(self, ct: ClassType):
+        # Fields + inherited fields. Walk the parent chain.
+        fields = []
+        visited = set()
+        cur = ct
+        while cur is not None and cur.name not in visited:
+            visited.add(cur.name)
+            order_fn = reversed(list(cur.fields.items()))
+            fields = list(order_fn) + fields
+            cur = self.tc.classes.get(cur.parent) if cur.parent else None
+        # Deduplicate inherited fields by name (subclass overrides field? no - use all)
+        # Emit struct.
+        self.emit(f'struct {ct.name} {{')
+        self.indent += 1
+        # V table pointer at end
+        for fname, ftype in fields:
+            self.emit(f'{self._ctype(ftype)} v_{fname};')
+        self.emit(f'{ct.name}_vtable* vtable;')
+        self.indent -= 1
+        self.emit('};')
+        self.emit('')
+
+        # Method function pointer table struct.
+        visited = set()
+        all_m = {}
+        cur = ct
+        while cur is not None and cur.name not in visited:
+            visited.add(cur.name)
+            for m, t in cur.methods.items():
+                if m not in all_m:
+                    all_m[m] = (cur, t)
+            cur = self.tc.classes.get(cur.parent) if cur.parent else None
+        # Emit vtable struct.
+        self.emit(f'struct {ct.name}_vtable {{')
+        self.indent += 1
+        for m in all_m:
+            _ct, ft = all_m[m]
+            # ft.params[0] is self type (ClassType or PtrType(ClassType)).
+            params = [self._ctype(ft.params[i]) for i in range(len(ft.params))]
+            sig_params = '*, '.join(params[1:] + [''])  # placeholder
+            # Make signature: ret (*m)(ct.name*, arg_types...)
+            rest = ', '.join(f'{params[i]} arg{i}' for i in range(1, len(params)))
+            self.emit(f'{self._ctype(ft.ret)} (*{m})({ct.name}* self' +
+                      (', ' + rest if rest else '') + ');')
+        self.indent -= 1
+        self.emit('};')
+        self.emit('')
+        # Emit static vtable instance after methods are defined (deferred).
+        self._class_vtables[ct.name] = all_m
+
+    # Method emission happens outside this loop from program's classes.
+
     def _ordered_user_types(self, types):
         """Order concrete user types so by-value fields are complete first.
 
@@ -622,6 +697,10 @@ class CodeGen:
         """
         def direct_deps(t):
             if isinstance(t, StructType):
+                if t.builtin:
+                    return ()
+                return tuple(t.fields.values())
+            if isinstance(t, ClassType):
                 if t.builtin:
                     return ()
                 return tuple(t.fields.values())
@@ -635,7 +714,7 @@ class CodeGen:
         def type_deps(t):
             out = []
             for dep in direct_deps(t):
-                if isinstance(dep, (StructType, EnumType)) and not getattr(
+                if isinstance(dep, (StructType, EnumType, ClassType)) and not getattr(
                         dep, 'builtin', False):
                     out.append(dep)
                 elif isinstance(dep, ArrayType):

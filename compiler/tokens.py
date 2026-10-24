@@ -5,13 +5,14 @@ from enum import Enum, auto
 class TT(Enum):
     INT = auto(); FLOAT = auto(); STRING = auto(); IDENT = auto()
     FUNC = auto(); LET = auto(); MUT = auto(); RETURN = auto(); CONST = auto()
-    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto(); ENUM = auto()
+    STRUCT = auto(); COMPONENT = auto(); SYSTEM = auto(); EXTERN = auto(); ENUM = auto(); CLASS = auto()
     IMPORT = auto(); MODULE = auto(); PUB = auto(); AS = auto()
     IF = auto(); ELIF = auto(); ELSE = auto(); MATCH = auto()
     WHILE = auto(); FOR = auto(); IN = auto()
     BREAK = auto(); CONTINUE = auto()
     TRUE = auto(); FALSE = auto()
     AND = auto(); OR = auto(); NOT = auto()
+    EXTENDS = auto()
     PLUS = auto(); MINUS = auto(); STAR = auto(); SLASH = auto(); PERCENT = auto()
     EQ = auto(); NEQ = auto(); LT = auto(); LTE = auto(); GT = auto(); GTE = auto()
     ASSIGN = auto(); PLUS_EQ = auto(); MINUS_EQ = auto(); STAR_EQ = auto(); SLASH_EQ = auto()
@@ -29,11 +30,13 @@ KEYWORDS = {
     'enum': TT.ENUM,
     'extern': TT.EXTERN, 'import': TT.IMPORT,
     'module': TT.MODULE, 'pub': TT.PUB, 'as': TT.AS,
+    'class': TT.CLASS,
     'if': TT.IF, 'elif': TT.ELIF, 'else': TT.ELSE, 'match': TT.MATCH,
     'while': TT.WHILE, 'for': TT.FOR, 'in': TT.IN,
     'break': TT.BREAK, 'continue': TT.CONTINUE,
     'true': TT.TRUE, 'false': TT.FALSE,
     'and': TT.AND, 'or': TT.OR, 'not': TT.NOT,
+    'extends': TT.EXTENDS,
 }
 
 

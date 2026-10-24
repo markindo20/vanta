@@ -105,6 +105,18 @@ class EnumDecl:
 
 
 @dataclass
+class ClassDecl:
+    # A class with methods and optional single inheritance.
+    name: str
+    parent: Optional[str]  # parent class name, or None
+    fields: List[Any]      # (name, TypeExpr, Pos)
+    methods: List[FuncDecl]  # each method's first param is `self`
+    pos: Pos
+    is_public: bool = False
+    type_params: List[str] = field(default_factory=list)
+
+
+@dataclass
 class ExternDecl:
     lib_name: str
     funcs: List['FuncDecl']

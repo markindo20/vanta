@@ -67,6 +67,33 @@ class StructType(Type):
 
 
 @dataclass(eq=False)
+class ClassType(Type):
+    """A class with methods and optional single inheritance.
+
+    `fields` maps field name -> type. `methods` maps method name -> FuncType
+    (the `self` parameter is already bound to the class instance). `parent`
+    names the base class, or None. `vtable` is the internal C++ tag for the
+    virtual-method table, emitted by codegen.
+    """
+    name: str
+    fields: Dict[str, Type]
+    methods: Dict[str, 'FuncType']
+    parent: Optional[str] = None  # parent class name, resolved later
+    builtin: bool = False
+    family: Optional[str] = None
+    type_args: Tuple[Type, ...] = ()
+    display: Optional[str] = None
+    vtable: Optional[str] = None
+    @property
+    def is_generic_instance(self) -> bool:
+        return self.family is not None
+    def __eq__(self, other):
+        return isinstance(other, ClassType) and self.name == other.name
+    def __hash__(self): return hash(self.name)
+    def __repr__(self): return self.display or self.name
+
+
+@dataclass(eq=False)
 class EnumType(Type):
     name: str
     members: Dict[str, int]
