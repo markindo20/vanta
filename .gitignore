@@ -1,6 +1,8 @@
+
+*.egg-info/
+*.pyc
+.vanta/
 __pycache__/
+breakout.score
 build/
 dist/
-*.pyc
-*.egg-info/
-breakout.score
