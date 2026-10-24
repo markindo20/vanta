@@ -2723,7 +2723,7 @@ _CPP_KEYWORDS = frozenset({
 })
 
 _HIT_CONDITION_RE = re.compile(r'^\s*(==|>=|<=|!=|>|<)?\s*(\d+)\s*$')
-_HIT_MODULO_RE = re.compile(r'^\s*%\s*(\d+)\s*==\s*0\s*$')
+_HIT_MODULO_RE = re.compile(r'^\s*%\s*(\d+)\s*(==\s*0)?\s*$')
 
 
 def _translate_vanta_expression(expression: str) -> str:
@@ -2803,6 +2803,20 @@ def _hit_condition_matches(spec, count: int) -> Optional[bool]:
     text = str(spec).strip()
     if not text:
         return None
+    # Accept a few common aliases agents send before the canonical operators.
+    low = text.lower()
+    if low.startswith('every '):
+        low = low[len('every '):]
+        text = '%% %s == 0' % low
+    if low.startswith('hitcount '):
+        low = low[len('hitcount '):]
+        text = '== %s' % low
+    if low.startswith('hitcount:'):
+        low = low[len('hitcount:'):].strip()
+        text = '== %s' % low
+    if low.startswith('hits '):
+        low = low[len('hits '):]
+        text = '== %s' % low
     match = _HIT_MODULO_RE.match(text)
     if match:
         period = int(match.group(1))
@@ -2867,13 +2881,32 @@ def _remote_target(value):
         text = value.strip()
         if not text:
             return None
-        host, _, port = text.rpartition(':')
-        if not host or not port.isdigit():
+        # Accept `host:port`, `[host]:port` (IPv6), `host port`, and
+        # `host,port` for clients that ship forms other than the canonical one.
+        if text.startswith('['):
+            close = text.find(']')
+            if close > 0:
+                host = text[1:close].strip()
+                rest = text[close + 1:].strip().lstrip(':').strip()
+                port_text = rest
+            else:
+                return None
+        elif ',' in text:
+            host, port_text = text.split(',', 1)
+            host = host.strip()
+            port_text = port_text.strip()
+        elif ' ' in text and ':' not in text:
+            host, port_text = text.split(None, 1)
+            port_text = port_text.strip()
+        else:
+            host, _, port_text = text.rpartition(':')
+            port_text = port_text.strip()
+        if not host or not port_text.isdigit():
             return None
-        return host, int(port)
+        return host.strip(), int(port_text)
     if isinstance(value, dict):
-        host = str(value.get('host') or '').strip()
-        port = _int_or_none(value.get('port'))
+        host = str(value.get('host') or value.get('hostname') or '').strip()
+        port = _int_or_none(value.get('port') or value.get('targetPort'))
         if not host or port is None:
             return None
         return host, port

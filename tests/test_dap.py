@@ -523,6 +523,19 @@ class HitConditionTests(unittest.TestCase):
         self.assertIsNone(_hit_condition_matches('', 1))
         self.assertIsNone(_hit_condition_matches(None, 1))
 
+    def test_every_nth_without_equals(self):
+        self.assertTrue(_hit_condition_matches('% 3', 3))
+        self.assertFalse(_hit_condition_matches('% 3', 2))
+
+    def test_hit_every_second_form(self):
+        self.assertTrue(_hit_condition_matches('every 2', 4))
+        self.assertFalse(_hit_condition_matches('every 2', 3))
+
+    def test_hit_count_alias_form(self):
+        self.assertTrue(_hit_condition_matches('hitcount 3', 3))
+        self.assertFalse(_hit_condition_matches('hitcount: 3', 2))
+        self.assertTrue(_hit_condition_matches('hits 3', 3))
+
 
 class LogMessageTests(unittest.TestCase):
     def test_interpolation(self):
@@ -1284,12 +1297,24 @@ class RemoteTargetTests(unittest.TestCase):
         from compiler.dap import _remote_target
         self.assertEqual(_remote_target('10.0.0.2:1234'), ('10.0.0.2', 1234))
 
-    def test_nothing_usable(self):
+    def test_an_ipv6_bracket_and_port(self):
         from compiler.dap import _remote_target
-        self.assertIsNone(_remote_target(None))
-        self.assertIsNone(_remote_target(''))
-        self.assertIsNone(_remote_target('nonsense'))
-        self.assertIsNone(_remote_target({'host': '10.0.0.2'}))
+        self.assertEqual(_remote_target('[::1]:1234'), ('::1', 1234))
+
+    def test_a_comma_separated_host_and_port(self):
+        from compiler.dap import _remote_target
+        self.assertEqual(_remote_target('host.example,1234'), ('host.example', 1234))
+
+    def test_a_space_separated_host_and_port(self):
+        from compiler.dap import _remote_target
+        self.assertEqual(_remote_target('host.example 1234'), ('host.example', 1234))
+
+    def test_a_dict_with_hostname_aliases(self):
+        from compiler.dap import _remote_target
+        self.assertEqual(
+            _remote_target({'hostname': '10.0.0.2', 'targetPort': 1234}),
+            ('10.0.0.2', 1234))
+
 
 
 class DapRemoteIntegrationTests(_DapSessionTestCase):

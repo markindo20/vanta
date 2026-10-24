@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.83.0 - 2026-10-24
+
+- Debugger polish:
+  - `_remote_target` accepts IPv6 bracket forms, comma- and space-separated
+    targets, and dict aliases (`hostname`/`targetPort`).
+  - Hit-count parsing accepts `% N`, `every N`, `hitcount N`/`hitcount: N`,
+    and `hits N` in addition to the canonical operator forms.
+  - Attach cleanup and error reporting remain intact on failure.
+- Tests: 924 in total (new unit coverage for both areas).
+
 ## v0.82.0 - 2026-10-24
 
 - `vanta repl` starts an interactive read-compile-run loop. Each program is
