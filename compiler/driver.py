@@ -1187,7 +1187,8 @@ def cmd_hot(args):
                     library = ctypes.CDLL(os.path.abspath(lib_path))
                     if previous is not None:
                         try:
-                            library.vanta_migrate(None)
+                            handle = ctypes.cast(previous, ctypes.c_void_p)
+                            library.vanta_migrate(handle)
                         except Exception as exc:
                             sys.stderr.write("migrate error: %s\n" % exc)
                     run = library.vanta_run_main

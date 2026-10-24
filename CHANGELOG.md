@@ -2,6 +2,11 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.97.0 - 2026-10-24
+
+- Hot-reload phase II.C: host passes previous unit handle into `vanta_migrate(prev)`; ADR-05 documents state contract and limitations.
+- Tests: 930 in total (unchanged).
+
 ## v0.96.0 - 2026-10-24
 
 - New builtin `str_fmt(...)` returns a Str (snprintf-backed). Uses the same
