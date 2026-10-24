@@ -194,6 +194,7 @@ class CodeGen:
         self.wrapper_specs = {}
         self.wrapper_order = []
         self.wrapper_decl_index = None
+        self._class_vtables = {}
 
     def emit(self, s=''):
         self.lines.append('    ' * self.indent + s)
@@ -713,6 +714,40 @@ class CodeGen:
         self._class_vtables[ct.name] = all_m
 
     # Method emission happens outside this loop from program's classes.
+
+    def _gen_class(self, ct: ClassType):
+        # Struct def: fields (own only? For correct compilation and relative
+        # simplicity, store own fields; inherited field lookup in type-checker
+        # still reads parent CT for type inference).
+        self.emit(f'struct {ct.name} {{')
+        self.indent += 1
+        for fname, ftype in ct.fields.items():
+            self.emit(f'{self._ctype(ftype)} v_{fname};')
+        self.emit(f'{ct.name}_vtable* vtable;')
+        self.indent -= 1
+        self.emit('};')
+        self.emit('')
+        # Forward-declare vtable struct with all inherited methods.
+        visited = set()
+        all_m = {}
+        cur = ct
+        while cur is not None and cur.name not in visited:
+            visited.add(cur.name)
+            for m in cur.methods:
+                if m not in all_m:
+                    all_m[m] = (cur, cur.methods[m])
+            cur = self.tc.classes.get(cur.parent) if cur.parent else None
+        self.emit(f'struct {ct.name}_vtable {{')
+        self.indent += 1
+        for m, (_owner, ft) in all_m.items():
+            rest = ', '.join(f'{self._ctype(ft.params[i])} arg{i}'
+                              for i in range(1, len(ft.params)))
+            self.emit(f'{self._ctype(ft.ret)} (*{m})({ct.name}* self'
+                      + (', ' + rest if rest else '') + ');')
+        self.indent -= 1
+        self.emit('};')
+        self.emit('')
+        self._class_vtables[ct.name] = all_m
 
     def _ordered_user_types(self, types):
         """Order concrete user types so by-value fields are complete first.

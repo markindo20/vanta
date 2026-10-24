@@ -2,6 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.1.1 - 2026-10-24
+
+- **Lexical string interpolation is operational**: `"Hello {expr}"` lexes to
+  `str_fmt("Hello {}", expr)` and resolves at compile-time; `{{` and `}}`
+  escapes remain literal (via str_fmt's placeholder count).
+- Tests: 930 (unchanged).
+
 ## v1.1.0 - 2026-10-24
 
 - Onboarding pack v1: templates, quickstart docs, `vanta new --template/--interactive`, `vanta doctor --fix`, examples guide, VS Code snippets.

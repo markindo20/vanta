@@ -294,6 +294,12 @@ class TypeChecker:
                     self.filename, te.pos)
             args = tuple(self._resolve_type(a, type_env) for a in te.args)
             return self._instantiate_struct(n, args, te.pos)
+        if n in self.classes:
+            if te.args:
+                raise CheckError(
+                    f"type '{n}' does not take type arguments",
+                    self.filename, te.pos)
+            return self.classes[n]
         if n in self.structs:
             if te.args:
                 raise CheckError(
@@ -539,6 +545,9 @@ class TypeChecker:
                         self._check_inferred_public(d, self.constants.get(d.name))
                 elif isinstance(d, A.ExternDecl):
                     self._register_extern(d)
+            for d in self.program.decls:
+                if isinstance(d, A.ClassDecl):
+                    self._check_class_methods(d)
         except CheckError as exc:
             self._reraise_pretty(exc)
 
@@ -632,12 +641,49 @@ class TypeChecker:
             all_fields[fname] = fields[fname]
         # store own fields only in ClassType.fields (keep it simple for ctor)
         # but typechecker `_all_fields` helper flattens when checking members/ctors.
+        # register method signatures
+        methods = {}
+        for fd in d.methods:
+            if fd.name in methods:
+                raise CheckError(f"duplicate method '{fd.name}'",
+                                 self.filename, fd.pos)
+            params = []
+            for pp in fd.params:
+                t = self._resolve_type(pp.type)
+                params.append((pp.name, t))
+            ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
+            methods[fd.name] = FuncType(tuple(params), ret)
+            qual = f"{d.name}_{fd.name}"
+            if qual in self.functions:
+                raise CheckError(f"duplicate function '{qual}'",
+                                 self.filename, fd.pos)
+            self.functions[qual] = FuncSig(qual, params, ret, is_extern=False)
         ct = ClassType(d.name, fields, methods, parent=d.parent)
         self.classes[d.name] = ct
-        # register method signatures
+
+    def _check_class_methods(self, d):
+        ct = self.classes[d.name]
         for fd in d.methods:
-            ...
-            self.functions[f"{d.name}_{fd.name}"] = FuncSig(...)
+            qual = f"{ct.name}_{fd.name}"
+            sig = self.functions[qual]
+            prev_ret = self.current_ret
+            prev_rv = self.return_values
+            self.current_ret = sig.ret
+            self.return_values = []
+            self._push()
+            try:
+                for (pname, ptype) in sig.params:
+                    if ptype is VOID:
+                        raise CheckError(
+                            f"parameter '{pname}' cannot be void",
+                            self.filename, fd.pos)
+                    self._declare(pname, ptype, False)
+                for stmt in fd.body:
+                    self._check_stmt(stmt)
+            finally:
+                self._pop()
+                self.current_ret = prev_ret
+                self.return_values = prev_rv
 
     def _register_enum(self, d):
         if (d.name in self.structs or d.name in self.enums
