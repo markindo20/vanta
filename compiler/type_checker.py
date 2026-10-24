@@ -2071,12 +2071,15 @@ class TypeChecker:
             if call.args:
                 raise CheckError("Matrix4() takes no arguments", self.filename, call.pos)
         elif n == "Arena":
-            if len(call.args) != 1:
-                raise CheckError("Arena(size) requires one argument", self.filename, call.pos)
+            if len(call.args) not in (1, 2):
+                raise CheckError("Arena(size) or Arena(size, name) requires 1-2 arguments", self.filename, call.pos)
             if call.arg_names and any(x is not None for x in call.arg_names):
                 raise CheckError("Arena does not accept named arguments", self.filename, call.pos)
             at = self._check_expr(call.args[0])
             self._coerce_value(call.args[0], at, I32, call.pos, "Arena size")
+            if len(call.args) == 2:
+                at2 = self._check_expr(call.args[1])
+                self._coerce_value(call.args[1], at2, STR, call.pos, "Arena name")
         elif n == "StrBuilder":
             raise CheckError(
                 "a StrBuilder is created from an Arena: arena.str_builder()",

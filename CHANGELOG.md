@@ -2,6 +2,15 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.94.0 - 2026-10-24
+
+- Arena gains a second constructor `Arena(size, name)` that attaches to a
+  named shared-memory segment on POSIX; plain `Arena(size)` remains private.
+  On platforms without OS shared memory the constructor falls back to a
+  per-process heap buffer. `docs/ADR-04-...md` documents the phase II
+  survival plan (shared arena, `vanta_migrate`, lib reload).
+- Tests: 930 in total (unchanged); runtime compile checked via example.
+
 ## v0.93.0 - 2026-10-24
 
 - Hot-reload phase I: `vanta run --hot` supervises the program and, on any

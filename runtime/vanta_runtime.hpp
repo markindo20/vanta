@@ -6,10 +6,17 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdarg>
+#ifndef _WIN32
+# include <fcntl.h>
+# include <sys/mman.h>
+# include <sys/stat.h>
+# include <unistd.h>
+#endif
 #include <array>
 #include <new>
 #include <type_traits>
 #include <vector>
+#include <string>
 
 namespace vanta {
 
@@ -306,11 +313,50 @@ inline Matrix4 mat4_from_quat(Quat q) {
 // ---------- Arena allocator ----------
 class Arena {
 public:
-    Arena(int32_t bytes) : size_((uint32_t)bytes), offset_(0) {
+    Arena(int32_t bytes) : size_((uint32_t)bytes), offset_(0), owned_(true) {
         data_ = static_cast<char*>(std::malloc((size_t)bytes));
         if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
     }
-    ~Arena() { reset(); std::free(data_); }
+#ifdef __linux__
+#elif defined(__APPLE__)
+#endif
+    Arena(int32_t bytes, const char* shared_name)
+        : size_((uint32_t)bytes), offset_(0), owned_(false) {
+        if (!shared_name || !shared_name[0]) {
+            owned_ = true;
+            data_ = static_cast<char*>(std::malloc((size_t)bytes));
+            if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
+            return;
+        }
+#ifndef _WIN32
+        const int fd = openShared_(shared_name, bytes);
+        if (fd >= 0) {
+            void* view = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            close(fd);
+            if (view != MAP_FAILED) {
+                data_ = static_cast<char*>(view);
+                shared_ = true;
+                sharedName_ = shared_name;
+                return;
+            }
+        }
+#endif
+        owned_ = true;
+        data_ = static_cast<char*>(std::malloc((size_t)bytes));
+        if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
+        return;
+    }
+    ~Arena() {
+        if (owned_) {
+            reset();
+            std::free(data_);
+        } else if (data_) {
+#ifndef _WIN32
+            munmap(data_, size_);
+            if (!sharedName_.empty()) shm_unlink(sharedName_.c_str());
+#endif
+        }
+    }
     Arena(const Arena&) = delete;
     Arena& operator=(const Arena&) = delete;
     Arena(Arena&&) = delete;
@@ -370,6 +416,24 @@ private:
         void (*destroy)(void*, int32_t);
     };
 
+    static int openShared_(const char* name, int32_t bytes) {
+#ifdef __linux__
+        std::string path = std::string("/") + name;
+        errno = 0;
+        int fd = shm_open(path.c_str(), O_CREAT | O_RDWR, 0666);
+        if (fd < 0) return -1;
+        if (ftruncate(fd, bytes) < 0) { close(fd); return -1; }
+        sharedNameStore_ = path;
+        return fd;
+#else
+        (void)name; (void)bytes;
+        return -1;
+#endif
+    }
+    bool owned_ = true;
+    bool shared_ = false;
+    std::string sharedName_ = "";
+    std::string sharedNameStore_ = "";
     char* data_;
     uint32_t size_;
     uint32_t offset_;
