@@ -2,6 +2,10 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.0.2 - 2026-10-24
+
+- Richer strings and lexical string interpolation now wired into the lexer (`str_fmt`). Internals: incremental cache safe; tests 930.
+- Patch released to push forward to v1(.0?) class development.
 ## v1.0.1 - 2026-10-24
 
 - **Phase II.B finished**: `vanta hot` loads the rebuilt shared unit in-process, invokes `vanta_migrate(prev)` before `vanta_run_main`, and keeps the host alive across iterations; ADR-06 documents the path.
