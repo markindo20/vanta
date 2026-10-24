@@ -12,14 +12,17 @@ from compiler.driver import (
     RUNTIME_DIR,
     _GAMEKIT_DIR,
     _auto_link_libs,
+    _discover_test_files,
     _frontend_only,
     _merge_link_libs,
     _normalize_argv,
     _starter_source,
+    _write_junit,
     cmd_check,
     cmd_doctor,
     cmd_fmt,
     cmd_new,
+    cmd_test,
     find_cxx_compiler,
 )
 
@@ -190,6 +193,59 @@ class CliTests(unittest.TestCase):
         program, _ = _frontend_only(os.path.join(EXAMPLES, 'strike.vnt'))
         self.assertEqual(_merge_link_libs(program, ['SDL2']),
                          ['SDL2_image', 'SDL2_ttf', 'SDL2'])
+
+    def test_discover_test_files_matches_naming(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ('a_test.vnt', 'test_b.vnt', 'notes.vnt'):
+                with open(os.path.join(tmp, name), 'w', encoding='utf-8'):
+                    pass
+            sub = os.path.join(tmp, 'sub')
+            os.mkdir(sub)
+            with open(os.path.join(sub, 'c_test.vnt'), 'w',
+                      encoding='utf-8'):
+                pass
+            found = _discover_test_files(tmp)
+            self.assertEqual([os.path.basename(p) for p in found],
+                             ['a_test.vnt', 'c_test.vnt', 'test_b.vnt'])
+
+    def test_junit_report_records_failures_and_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, 'report.xml')
+            results = [
+                {'path': 'ok_test.vnt', 'ok': True, 'kind': 'pass',
+                 'output': '', 'seconds': 0.1},
+                {'path': 'bad_test.vnt', 'ok': False, 'kind': 'fail',
+                 'output': 'boom <x>', 'seconds': 0.2},
+                {'path': 'err_test.vnt', 'ok': False, 'kind': 'error',
+                 'output': 'no main', 'seconds': 0.0},
+            ]
+            _write_junit(out, results, 0.3)
+            with open(out, encoding='utf-8') as f:
+                text = f.read()
+            self.assertIn('tests="3"', text)
+            self.assertIn('failures="1"', text)
+            self.assertIn('errors="1"', text)
+            self.assertIn('<failure', text)
+            self.assertIn('boom &lt;x&gt;', text)
+            self.assertIn('<error', text)
+
+    def test_test_command_runs_files_in_parallel(self):
+        if find_cxx_compiler()[1] is None:
+            self.skipTest('no C++ compiler on PATH')
+        with tempfile.TemporaryDirectory() as tmp:
+            src = 'func main() -> void:\n    print_i32(1)\n'
+            for name in ('one_test.vnt', 'two_test.vnt'):
+                with open(os.path.join(tmp, name), 'w',
+                          encoding='utf-8') as f:
+                    f.write(src)
+            junit = os.path.join(tmp, 'junit.xml')
+            args = SimpleNamespace(source=tmp, jobs=2, junit=junit)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cmd_test(args)
+            self.assertEqual(rc, 0)
+            self.assertIn('2/2 tests passed', out.getvalue())
+            self.assertTrue(os.path.exists(junit))
 
 
 if __name__ == '__main__':

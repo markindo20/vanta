@@ -2,6 +2,30 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.79.0 - 2026-10-24
+
+- `vanta test` now runs test files concurrently (`--jobs N`, 0 = auto) and
+  prints per-file timings plus a total wall-clock summary.
+- Failed and errored cases print their captured output beneath the result
+  instead of interleaving with other files.
+- New `--junit FILE` writes a JUnit XML report (`testsuite`/`testcase`
+  with `failure` and `error` elements) for CI dashboards.
+- Tests: 906 in total. New coverage for discovery, JUnit output, and the
+  parallel runner end to end. Build 0.79.0; extension stays 0.43.0.
+
+## v0.78.0 - 2026-10-24
+
+- `vanta fmt` accepts a directory and formats every `.vnt` file under it,
+  reporting a per-file result and a non-zero exit when any file fails.
+  `--check` works in directory mode too.
+- Build 0.78.0; extension stays 0.43.0.
+
+## v0.77.0 - 2026-10-24
+
+- `vanta check` type-checks directory targets in parallel (`--jobs N`,
+  0 = auto) and reports results in sorted order.
+- Build 0.77.0; extension stays 0.43.0.
+
 ## v0.76.0 - 2026-10-23
 
 - Compile-time integer overflow guard. Constant integer additions,

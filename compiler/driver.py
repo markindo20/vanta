@@ -1086,6 +1086,92 @@ def _discover_test_files(target):
     return sorted(result)
 
 
+def _run_test_file(path):
+    """Compile and run one test file, capturing its output.
+
+    Returns a dict with `path`, `ok`, `kind` (pass/fail/error), `output`,
+    and `seconds`.  Capturing instead of streaming keeps parallel runs
+    readable and lets the JUnit writer attach output to the right case.
+    """
+    started = time.perf_counter()
+    result = {'path': path, 'ok': False, 'kind': 'error', 'output': '',
+              'seconds': 0.0}
+    name, compiler = find_cxx_compiler()
+    if compiler is None:
+        result['output'] = 'error: no C++17 compiler found'
+        return result
+    try:
+        program, tc = _frontend_only(path)
+    except (LexError, ParseError, CheckError, LoadError) as exc:
+        result['output'] = str(exc)
+        result['seconds'] = time.perf_counter() - started
+        return result
+    if not any(isinstance(d, FuncDecl) and d.name == 'main'
+               for d in program.decls):
+        result['output'] = 'error: program has no main'
+        result['seconds'] = time.perf_counter() - started
+        return result
+    libs = _merge_link_libs(program, [])
+    lib_dirs = _auto_lib_dirs(libs)
+    env = _runtime_env(compiler, lib_dirs)
+    tmpdir = tempfile.mkdtemp(prefix='vanta_test_')
+    try:
+        cpp_path = os.path.join(tmpdir, 'main.cpp')
+        _emit_source(program, tc, cpp_path)
+        exe = os.path.join(tmpdir, 'prog.exe' if os.name == 'nt' else 'prog')
+        cmd = _compiler_cmd(name, compiler, cpp_path, exe, True, [], lib_dirs,
+                            libs)
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if proc.returncode != 0:
+            result['output'] = (proc.stdout or '') + (proc.stderr or '')
+            result['seconds'] = time.perf_counter() - started
+            return result
+        run = subprocess.run([exe], capture_output=True, text=True, env=env)
+        result['output'] = (run.stdout or '') + (run.stderr or '')
+        result['ok'] = run.returncode == 0
+        result['kind'] = 'pass' if run.returncode == 0 else 'fail'
+        result['seconds'] = time.perf_counter() - started
+        return result
+    except Exception as exc:  # codegen or toolchain failure
+        result['output'] = f'error running {path}: {exc}'
+        result['seconds'] = time.perf_counter() - started
+        return result
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _write_junit(path, results, elapsed):
+    """Write a JUnit XML report so CI systems can display native tests."""
+    from xml.sax.saxutils import escape, quoteattr
+    total = len(results)
+    failures = sum(1 for r in results if r['kind'] == 'fail')
+    errors = sum(1 for r in results if r['kind'] == 'error')
+    lines = ['<?xml version="1.0" encoding="utf-8"?>']
+    lines.append(
+        f'<testsuites name="vanta" tests="{total}" failures="{failures}" '
+        f'errors="{errors}" time="{elapsed:.3f}">')
+    lines.append(
+        f'  <testsuite name="vanta" tests="{total}" failures="{failures}" '
+        f'errors="{errors}" time="{elapsed:.3f}">')
+    for res in results:
+        name = quoteattr(res['path'])
+        lines.append(f'    <testcase classname="vanta" name={name} '
+                     f'time="{res["seconds"]:.3f}">')
+        if res['kind'] == 'fail':
+            message = quoteattr('non-zero exit')
+            body = escape(res['output'])
+            lines.append(f'      <failure message={message}>{body}</failure>')
+        elif res['kind'] == 'error':
+            message = quoteattr('compile or setup error')
+            body = escape(res['output'])
+            lines.append(f'      <error message={message}>{body}</error>')
+        lines.append('    </testcase>')
+    lines.append('  </testsuite>')
+    lines.append('</testsuites>')
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('\n'.join(lines) + '\n')
+
+
 def cmd_test(args):
     target = args.source if getattr(args, 'source', None) else os.getcwd()
     if not os.path.exists(target):
@@ -1095,27 +1181,47 @@ def cmd_test(args):
     if not files:
         sys.stderr.write(f"no test files found under {target}\n")
         return 0
-    passed = 0
-    failed = 0
+    workers = getattr(args, 'jobs', None)
+    if not workers or workers < 1:
+        workers = min(8, os.cpu_count() or 4)
     for path in files:
         sys.stdout.write(f"RUN  {path}\n")
-        sys.stdout.flush()
-        run_args = argparse.Namespace(
-            source=path, release=True, prog_args=[], include_dir=[],
-            lib_dir=[], link=[])
-        try:
-            rc = cmd_run(run_args)
-        except Exception as exc:
-            rc = 1
-            sys.stderr.write(f"error running {path}: {exc}\n")
-        if rc == 0:
-            sys.stdout.write(f"PASS {path}\n")
+    sys.stdout.flush()
+    started = time.perf_counter()
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_run_test_file, path) for path in files]
+        for fut in futures:
+            results.append(fut.result())
+    elapsed = time.perf_counter() - started
+    passed = 0
+    failed = 0
+    for res in results:
+        path = res['path']
+        if res['ok']:
+            sys.stdout.write(f"PASS {path} ({res['seconds']:.2f}s)\n")
             passed += 1
-        else:
-            sys.stdout.write(f"FAIL {path} (exit {rc})\n")
-            failed += 1
+            continue
+        label = 'FAIL' if res['kind'] == 'fail' else 'ERROR'
+        sys.stdout.write(
+            f"{label} {path} ({res['seconds']:.2f}s)\n")
+        output = res['output'].rstrip()
+        if output:
+            for line in output.splitlines():
+                sys.stdout.write(f"     {line}\n")
+        failed += 1
     total = len(files)
-    sys.stdout.write(f"\n{passed}/{total} tests passed\n")
+    sys.stdout.write(
+        f"\n{passed}/{total} tests passed in {elapsed:.2f}s "
+        f"({len(files) - passed} failed)\n")
+    junit = getattr(args, 'junit', None)
+    if junit:
+        try:
+            _write_junit(junit, results, elapsed)
+        except OSError as exc:
+            sys.stderr.write(f"error: cannot write {junit}: {exc}\n")
+            return 1
+        sys.stdout.write(f"JUnit report: {junit}\n")
     return 0 if failed == 0 else 1
 
 
@@ -1292,6 +1398,10 @@ def main(argv):
     p_test = sub.add_parser('test', help='discover and run *_test.vnt / test_*.vnt files')
     p_test.add_argument('source', nargs='?', default=None,
                         help='file or directory to scan (default: current directory)')
+    p_test.add_argument('--jobs', type=int, default=0,
+                        help='parallel workers (0 = auto)')
+    p_test.add_argument('--junit', default=None, metavar='FILE',
+                        help='write a JUnit XML report')
     p_run.add_argument('--lib-dir', action='append', default=[],
                        help='add library directory for linking')
     p_run.add_argument('--link', action='append', default=[],

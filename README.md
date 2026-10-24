@@ -56,6 +56,9 @@ Run it:
 
 ```powershell
 vanta check hello.vnt          # type-check only (fast, no C++)
+vanta check src --jobs 8       # type-check a tree in parallel
+vanta fmt src                  # format every file under a directory
+vanta test --junit report.xml  # run *_test.vnt files, emit JUnit XML
 vanta hello.vnt                # shorthand for `vanta run hello.vnt`
 vanta build hello.vnt --release
 vanta build hello.vnt --debug  # source-mapped build for GDB
@@ -233,7 +236,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (900 tests) |
+| `tests/` | `unittest` suite (906 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 

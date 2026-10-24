@@ -200,8 +200,11 @@ is still highlighted as far as it goes.
 indentation, and the same formatter is available on the command line:
 
 ```powershell
-vanta fmt game.vnt            # rewrite the file in place
+vanta fmt game.vnt             # rewrite the file in place
+vanta fmt src                  # format every .vnt file under a directory
 vanta fmt --check game.vnt     # report whether it is already formatted
+vanta test src --jobs 8        # run tests concurrently
+vanta test src --junit out.xml # emit a JUnit report for CI
 ```
 
 The formatter normalizes the whitespace around a program and never the
