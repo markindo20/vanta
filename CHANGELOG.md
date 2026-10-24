@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.85.0 - 2026-10-24
+
+- Runtime overflow checks for integer arithmetic. The compiler now emits
+  `VANTA_CK_*_ADD/SUB/MUL` helper calls for fixed-size integer types
+  (+,-,*), and the runtime header maps them to bounds-checked inline
+  helpers when compiled with `-DVANTA_CHECKED_ARITH`, aborting on
+  overflow, or to the plain operator otherwise.
+- `vanta build`/`vanta run` accept `--checked` (and checkers default to
+  `not --release`, so debug builds are checked automatically).
+- Tests: 929 in total (unchanged; runtime checks exercised via example).
+
 ## v0.84.0 - 2026-10-24
 
 - Generic functions close the generics arc. A declaration such as

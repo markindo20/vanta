@@ -816,3 +816,142 @@ inline Str arg_str(int32_t i) {
 }
 
 }
+
+
+// ---------- Checked integer arithmetic (optional; -DVANTA_CHECKED_ARITH) ----------
+// When generated code is compiled with -DVANTA_CHECKED_ARITH, plain + - *
+// operators are replaced with helper calls that abort on overflow / wrap.
+// Without the flag every helper collapses to the raw operator, so release
+// builds pay nothing.
+#ifndef VANTA_CK_I32_ADD
+#ifdef VANTA_CHECKED_ARITH
+#include <limits>
+#include <climits>
+namespace vanta {
+inline int8_t ck_i8_add(int8_t a, int8_t b) {
+    long long r = (long long)a + (long long)b;
+    if (r < -128 || r > 127) std::abort();
+    return (int8_t)r;
+}
+inline int8_t ck_i8_sub(int8_t a, int8_t b) {
+    long long r = (long long)a - (long long)b;
+    if (r < -128 || r > 127) std::abort();
+    return (int8_t)r;
+}
+inline int8_t ck_i8_mul(int8_t a, int8_t b) {
+    long long r = (long long)a * (long long)b;
+    if (r < -128 || r > 127) std::abort();
+    return (int8_t)r;
+}
+inline uint8_t ck_u8_add(uint8_t a, uint8_t b) {
+    unsigned long long r = (unsigned long long)a + b;
+    if (r > 255) std::abort();
+    return (uint8_t)r;
+}
+inline uint8_t ck_u8_sub(uint8_t a, uint8_t b) {
+    if (a < b) std::abort();
+    return a - b;
+}
+inline uint8_t ck_u8_mul(uint8_t a, uint8_t b) {
+    unsigned long long r = (unsigned long long)a * b;
+    if (r > 255) std::abort();
+    return (uint8_t)r;
+}
+inline int16_t ck_i16_add(int16_t a, int16_t b) {
+    long long r = (long long)a + (long long)b;
+    if (r < -32768 || r > 32767) std::abort();
+    return (int16_t)r;
+}
+inline int16_t ck_i16_sub(int16_t a, int16_t b) {
+    long long r = (long long)a - (long long)b;
+    if (r < -32768 || r > 32767) std::abort();
+    return (int16_t)r;
+}
+inline int16_t ck_i16_mul(int16_t a, int16_t b) {
+    long long r = (long long)a * (long long)b;
+    if (r < -32768 || r > 32767) std::abort();
+    return (int16_t)r;
+}
+inline uint16_t ck_u16_add(uint16_t a, uint16_t b) {
+    unsigned long long r = (unsigned long long)a + b;
+    if (r > 65535) std::abort();
+    return (uint16_t)r;
+}
+inline uint16_t ck_u16_sub(uint16_t a, uint16_t b) {
+    if (a < b) std::abort();
+    return a - b;
+}
+inline uint16_t ck_u16_mul(uint16_t a, uint16_t b) {
+    unsigned long long r = (unsigned long long)a * b;
+    if (r > 65535) std::abort();
+    return (uint16_t)r;
+}
+inline int32_t ck_i32_add(int32_t a, int32_t b) {
+    long long r = (long long)a + (long long)b;
+    if (r < INT32_MIN || r > INT32_MAX) std::abort();
+    return (int32_t)r;
+}
+inline int32_t ck_i32_sub(int32_t a, int32_t b) {
+    long long r = (long long)a - (long long)b;
+    if (r < INT32_MIN || r > INT32_MAX) std::abort();
+    return (int32_t)r;
+}
+inline int32_t ck_i32_mul(int32_t a, int32_t b) {
+    long long r = (long long)a * (long long)b;
+    if (r < INT32_MIN || r > INT32_MAX) std::abort();
+    return (int32_t)r;
+}
+inline uint32_t ck_u32_add(uint32_t a, uint32_t b) {
+    unsigned long long r = (unsigned long long)a + (unsigned long long)b;
+    if (r > 0xFFFFFFFFu) std::abort();
+    return (uint32_t)r;
+}
+inline uint32_t ck_u32_sub(uint32_t a, uint32_t b) {
+    if (a < b) std::abort();
+    return a - b;
+}
+inline uint32_t ck_u32_mul(uint32_t a, uint32_t b) {
+    unsigned long long r = (unsigned long long)a * (unsigned long long)b;
+    if (r > 0xFFFFFFFFu) std::abort();
+    return (uint32_t)r;
+}
+}
+#define VANTA_CK_I8_ADD(a,b) ::vanta::ck_i8_add((a),(b))
+#define VANTA_CK_I8_SUB(a,b) ::vanta::ck_i8_sub((a),(b))
+#define VANTA_CK_I8_MUL(a,b) ::vanta::ck_i8_mul((a),(b))
+#define VANTA_CK_U8_ADD(a,b) ::vanta::ck_u8_add((a),(b))
+#define VANTA_CK_U8_SUB(a,b) ::vanta::ck_u8_sub((a),(b))
+#define VANTA_CK_U8_MUL(a,b) ::vanta::ck_u8_mul((a),(b))
+#define VANTA_CK_I16_ADD(a,b) ::vanta::ck_i16_add((a),(b))
+#define VANTA_CK_I16_SUB(a,b) ::vanta::ck_i16_sub((a),(b))
+#define VANTA_CK_I16_MUL(a,b) ::vanta::ck_i16_mul((a),(b))
+#define VANTA_CK_U16_ADD(a,b) ::vanta::ck_u16_add((a),(b))
+#define VANTA_CK_U16_SUB(a,b) ::vanta::ck_u16_sub((a),(b))
+#define VANTA_CK_U16_MUL(a,b) ::vanta::ck_u16_mul((a),(b))
+#define VANTA_CK_I32_ADD(a,b) ::vanta::ck_i32_add((a),(b))
+#define VANTA_CK_I32_SUB(a,b) ::vanta::ck_i32_sub((a),(b))
+#define VANTA_CK_I32_MUL(a,b) ::vanta::ck_i32_mul((a),(b))
+#define VANTA_CK_U32_ADD(a,b) ::vanta::ck_u32_add((a),(b))
+#define VANTA_CK_U32_SUB(a,b) ::vanta::ck_u32_sub((a),(b))
+#define VANTA_CK_U32_MUL(a,b) ::vanta::ck_u32_mul((a),(b))
+#else
+#define VANTA_CK_I8_ADD(a,b) ((a)+(b))
+#define VANTA_CK_I8_SUB(a,b) ((a)-(b))
+#define VANTA_CK_I8_MUL(a,b) ((a)*(b))
+#define VANTA_CK_U8_ADD(a,b) ((a)+(b))
+#define VANTA_CK_U8_SUB(a,b) ((a)-(b))
+#define VANTA_CK_U8_MUL(a,b) ((a)*(b))
+#define VANTA_CK_I16_ADD(a,b) ((a)+(b))
+#define VANTA_CK_I16_SUB(a,b) ((a)-(b))
+#define VANTA_CK_I16_MUL(a,b) ((a)*(b))
+#define VANTA_CK_U16_ADD(a,b) ((a)+(b))
+#define VANTA_CK_U16_SUB(a,b) ((a)-(b))
+#define VANTA_CK_U16_MUL(a,b) ((a)*(b))
+#define VANTA_CK_I32_ADD(a,b) ((a)+(b))
+#define VANTA_CK_I32_SUB(a,b) ((a)-(b))
+#define VANTA_CK_I32_MUL(a,b) ((a)*(b))
+#define VANTA_CK_U32_ADD(a,b) ((a)+(b))
+#define VANTA_CK_U32_SUB(a,b) ((a)-(b))
+#define VANTA_CK_U32_MUL(a,b) ((a)*(b))
+#endif
+#endif

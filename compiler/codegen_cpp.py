@@ -164,11 +164,13 @@ def _escape_cpp_string(s: str) -> str:
 
 
 class CodeGen:
-    def __init__(self, program: A.Program, tc, debug=False, debug_filename=None):
+    def __init__(self, program: A.Program, tc, debug=False, debug_filename=None,
+                 checked=False):
         self.program = program
         self.tc = tc
         self.debug = debug
         self.debug_filename = debug_filename
+        self.checked = checked
         self.lines = []
         self.indent = 0
         self.temp_counter = 0
@@ -1011,6 +1013,15 @@ class CodeGen:
                 return f'({neg}vanta::str_eq({self._expr(e.left)}, {self._expr(e.right)}))'
             if op == 'and': op = '&&'
             elif op == 'or': op = '||'
+            prims = {'i8', 'u8', 'i16', 'u16', 'i32', 'u32'}
+            if self.checked and op in ('+', '-', '*') and lt is rt \
+                    and isinstance(lt, PrimType) and lt.name in prims:
+                which = {'+': 'ADD', '-': 'SUB', '*': 'MUL'}[op]
+                pn = lt.name.upper()
+                left = self._expr(e.left)
+                right = self._expr(e.right)
+                return ('(VANTA_CK_%s_%s(%s, %s))'
+                        % (pn, which, left, right))
             return f'({self._expr(e.left)} {op} {self._expr(e.right)})'
         if isinstance(e, A.UnaryOp):
             if e.op == 'not':
