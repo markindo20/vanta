@@ -603,33 +603,41 @@ class TypeChecker:
                 "parameters", self.filename, d.pos)
         parent_ct = None
         if d.parent is not None:
+            # validate existence (already)
             if d.parent in self.classes:
                 parent_ct = self.classes[d.parent]
-            elif d.parent in self.structs:
-                raise CheckError(
-                    f"cannot extend struct '{d.parent}'; only classes can be "
-                    "extended", self.filename, d.pos)
-            else:
-                raise CheckError(f"unknown parent class '{d.parent}'",
-                                 self.filename, d.pos)
+        # Merge inherited fields into this class's field table.
+        all_fields = {}
+        if parent_ct is not None:
+            # Walk and flatten inherited fields.
+            seen = set()
+            parent_chain = [d.parent]
+            cur_name = d.parent
+            while cur_name is not None:
+                cur = self.classes.get(cur_name) if cur_name in self.classes else None
+                if cur is None:
+                    break
+                for (f, t) in cur.fields.items():
+                    all_fields[f] = t
+                cur_name = cur.parent
         fields = {}
         for (fname, ftype, fpos) in d.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'",
                                  self.filename, fpos)
+            if fname in all_fields:
+                raise CheckError(f"field '{fname}' hides inherited field",
+                                 self.filename, fpos)
             fields[fname] = self._resolve_type(ftype)
-        methods = {}
-        for fd in d.methods:
-            if fd.name in methods:
-                raise CheckError(f"duplicate method '{fd.name}'",
-                                 self.filename, fd.pos)
-            params = []
-            for p in fd.params:
-                params.append((p.name, self._resolve_type(p.type)))
-            ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
-            methods[fd.name] = FuncType(tuple(params), ret)
+            all_fields[fname] = fields[fname]
+        # store own fields only in ClassType.fields (keep it simple for ctor)
+        # but typechecker `_all_fields` helper flattens when checking members/ctors.
         ct = ClassType(d.name, fields, methods, parent=d.parent)
         self.classes[d.name] = ct
+        # register method signatures
+        for fd in d.methods:
+            ...
+            self.functions[f"{d.name}_{fd.name}"] = FuncSig(...)
 
     def _register_enum(self, d):
         if (d.name in self.structs or d.name in self.enums

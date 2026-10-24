@@ -56,7 +56,7 @@ class Lexer:
                 # Unterminated; leave tail untouched.
                 result.append(src[i:]); break
             inner = ''.join(buf)
-            cooked = _interpolate_one_string_inner(inner)
+            cooked = interpolate_one_string_inner(inner)
             result.append(cooked)
             i = j + 1
 

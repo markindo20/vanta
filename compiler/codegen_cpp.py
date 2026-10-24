@@ -559,12 +559,38 @@ class CodeGen:
 
         self._gen_equality(struct_types, enums)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl) and not getattr(d, 'type_params', ())]
+        # Classes contribute one function per method under a qualified name.
+        for cd in classes:
+            for fd in getattr(cd, 'methods', []):
+                synth = A.FuncDecl(
+                    name=f"{cd.name}_{fd.name}", params=fd.params,
+                    ret=fd.ret, body=fd.body, is_system=fd.is_system,
+                    pos=fd.pos, is_public=fd.is_public)
+                funcs.append(synth)
         for fd in funcs:
             self.emit(self._func_sig(fd) + ';')
         self.emit('')
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
             self._gen_func(fd)
+        for ct in class_types:
+            visited = set()
+            all_m = {}
+            cur = ct
+            while cur is not None and cur.name not in visited:
+                visited.add(cur.name)
+                for m in cur.methods:
+                    if m not in all_m:
+                        all_m[m] = (cur, cur.methods[m])
+                cur = self.tc.classes.get(cur.parent) if cur.parent else None
+            if all_m:
+                self.emit(f'static {ct.name}_vtable {ct.name}_vtable_inst = {{')
+                self.indent += 1
+                for m, (owner, mft) in all_m.items():
+                    self.emit(f'&{owner.name}_{m},')
+                self.indent -= 1
+                self.emit('};')
+                self.emit('')
         self._generated_line()
         self._emit_wrapper_defs()
         self._emit_wrapper_decls()
@@ -1160,6 +1186,9 @@ class CodeGen:
             base = self._expr(e.obj)
             if isinstance(obj_t, StructType) and obj_t.builtin:
                 return f'{base}.{e.field}'
+            if isinstance(obj_t, ClassType):
+                # Fields are kept inline (inherited flattened into the struct).
+                return f'{base}.v_{e.field}'
             return f'{base}.v_{e.field}'
         if isinstance(e, A.Index):
             if isinstance(getattr(e.obj, 'type', None), ListType):
@@ -1252,6 +1281,11 @@ class CodeGen:
                 args = ', '.join(self._init_expr(a, ft)
                                  for a, ft in zip(c.args, st.fields.values()))
                 return f'{name}{{{args}}}'
+            if name in self.tc.classes:
+                ct = self.tc.classes[name]
+                args = ', '.join(self._init_expr(a, ft)
+                                 for a, ft in zip(c.args, ct.fields.values()))
+                return f'{name}{{{args}}}'
             if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'{BUILTIN_FN[name]}({args})'
@@ -1297,6 +1331,21 @@ class CodeGen:
             ot = getattr(f.obj, 'type', None)
             base = self._expr(f.obj)
             m = f.field
+            if isinstance(ot, ClassType):
+                # Resolve the declaring class walking the inheritance chain
+                decl = ot
+                visited = set()
+                while decl is not None and decl.name not in visited:
+                    visited.add(decl.name)
+                    if m in getattr(decl, 'methods', {}):
+                        break
+                    decl = self.tc.classes.get(decl.parent) if decl.parent else None
+                if decl is None:
+                    decl = ot
+                args = ', '.join(self._expr(a) for a in c.args)
+                # `base` is the receiver value; take its address for `self`.
+                return f'fn_{decl.name}_{m}({base}, {args})' if args else \
+                    f'fn_{decl.name}_{m}({base})'
             if isinstance(ot, StructType) and ot.name == 'Arena':
                 if m == 'reset':
                     return f'{base}.reset()'
