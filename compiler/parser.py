@@ -182,9 +182,26 @@ class Parser:
         body = self.parse_block()
         return A.FuncDecl(name, params, ret, body, is_system, A.Pos(tok.line, tok.col))
 
+    def _parse_type_params(self):
+        """Parse an optional `<T, U>` list after a declaration name."""
+        params = []
+        if not self.match(TT.LT):
+            return params
+        while True:
+            ptok = self.expect(TT.IDENT, "expected a type parameter")
+            if ptok.value in params:
+                self.error(f"duplicate type parameter '{ptok.value}'", ptok)
+            params.append(ptok.value)
+            if self.match(TT.COMMA):
+                continue
+            break
+        self.expect(TT.GT)
+        return params
+
     def parse_struct(self, is_component):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
+        type_params = self._parse_type_params()
         self.expect(TT.COLON)
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
@@ -196,22 +213,14 @@ class Parser:
             self.expect(TT.NEWLINE)
             fields.append((fn.value, ft, A.Pos(fn.line, fn.col)))
         self.expect(TT.DEDENT)
-        return A.StructDecl(name, fields, is_component, A.Pos(tok.line, tok.col))
+        return A.StructDecl(name, fields, is_component,
+                            A.Pos(tok.line, tok.col),
+                            type_params=type_params)
 
     def parse_enum(self):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
-        type_params = []
-        if self.match(TT.LT):
-            while True:
-                ptok = self.expect(TT.IDENT, "expected a type parameter")
-                if ptok.value in type_params:
-                    self.error(f"duplicate type parameter '{ptok.value}'", ptok)
-                type_params.append(ptok.value)
-                if self.match(TT.COMMA):
-                    continue
-                break
-            self.expect(TT.GT)
+        type_params = self._parse_type_params()
         self.expect(TT.COLON)
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)

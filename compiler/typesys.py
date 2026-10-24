@@ -51,10 +51,19 @@ class StructType(Type):
     name: str
     fields: Dict[str, Type]
     builtin: bool = False
+    # Generic struct instances carry the declaration family and the concrete
+    # type arguments, mirroring EnumType. `display` is the source spelling
+    # (e.g. Pair<i32>) used in diagnostics; `name` is the C++ tag.
+    family: Optional[str] = None
+    type_args: Tuple[Type, ...] = ()
+    display: Optional[str] = None
+    @property
+    def is_generic_instance(self) -> bool:
+        return self.family is not None
     def __eq__(self, other):
         return isinstance(other, StructType) and self.name == other.name
     def __hash__(self): return hash(self.name)
-    def __repr__(self): return self.name
+    def __repr__(self): return self.display or self.name
 
 
 @dataclass(eq=False)

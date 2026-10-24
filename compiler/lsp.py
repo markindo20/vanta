@@ -829,11 +829,13 @@ class _ProjectIndex:
                     for fname, ftype, fpos in d.fields
                 ]
                 keyword = 'component' if d.is_component else 'struct'
+                generics = (f'<{", ".join(d.type_params)}>'
+                            if d.type_params else '')
                 details = ', '.join(f'{f.name}: {f.type_name}' for f in fields)
                 decls.append(DeclInfo(
                     name=d.name, kind='struct',
-                    detail=f'{keyword} {d.name}' + (f' {{ {details} }}'
-                                                     if details else ''),
+                    detail=f'{keyword} {d.name}{generics}'
+                           + (f' {{ {details} }}' if details else ''),
                     path=path, line=d.pos.line, col=d.pos.col,
                     name_line=name_line, name_col=name_col,
                     public=is_legacy or d.is_public, fields=fields))

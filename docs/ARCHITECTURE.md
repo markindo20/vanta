@@ -38,10 +38,11 @@ custom backend, no IR, and no optimizer — the C++ compiler does that work.
    expression node with `expr.type`. This is where the builtins are declared
    (`_register_builtins`), where `extern` functions are registered
    (`is_extern=True`), and where the `Arena` non-copyable rule is enforced.
-   Generic enum families are registered from their declarations and
-   instantiated on demand in `_instantiate_enum`; the cache key is the family
-   plus concrete type arguments, and each instance gets an internal name such
-   as `Option__g0` while diagnostics keep `Option<i32>`. Constructor
+   Generic families (enums and structs) are registered from their declarations
+   and instantiated on demand in `_instantiate_enum` / `_instantiate_struct`;
+   the cache key is the family plus concrete type arguments, and each
+   instance gets an internal name such as `Option__g0` / `Pair__g0` while
+   diagnostics keep `Option<i32>` / `Pair<i32, str>`. Constructor
    parameters come from explicit `::<...>` arguments, an expected type, or
    payload inference, in that order. Instantiation substitutes payload type
    expressions, checks copyability and recursive by-value use, and records

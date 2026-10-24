@@ -67,6 +67,8 @@ class StructDecl:
     is_component: bool
     pos: Pos
     is_public: bool = False
+    # Type parameters for a generic struct, e.g. ['T', 'U'] for Pair<T, U>.
+    type_params: List[str] = field(default_factory=list)
 
 
 @dataclass

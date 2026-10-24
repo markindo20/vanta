@@ -1468,6 +1468,53 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_generic_struct_reference_snippet(self):
+        # Generic structs: explicit and inferred arguments, recursion behind
+        # a pointer, a generic enum field, and structural equality.
+        src = (
+            "struct Pair<T, U>:\n"
+            "    left: T\n"
+            "    right: U\n"
+            "\n"
+            "struct Node<T>:\n"
+            "    value: T\n"
+            "    next: ptr<Node<T>>\n"
+            "\n"
+            "enum Option<T>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "\n"
+            "struct Holder<T>:\n"
+            "    item: Option<T>\n"
+            "\n"
+            "func main() -> void:\n"
+            "    let p: Pair<i32, str> = Pair(left: 7, right: \"hi\")\n"
+            "    print_i32(p.left)\n"
+            "    print_str(p.right)\n"
+            "    let q = Pair::<i32, i32>(left: 1, right: 2)\n"
+            "    print_i32(q.left + q.right)\n"
+            "    let h: Holder<i32> = Holder(item: Option.Some(5))\n"
+            "    match h.item:\n"
+            "        Option.None:\n"
+            "            print_i32(0)\n"
+            "        Option.Some(v):\n"
+            "            print_i32(v)\n"
+            "    let n: Node<i32> = Node(value: 9, "
+            "next: ptr_null::<Node<i32>>())\n"
+            "    print_i32(n.value)\n"
+            "    print_bool(ptr_is_null(n.next))\n"
+            "    print_bool(p == Pair(left: 7, right: \"hi\"))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_docs_generic_struct_')
+        try:
+            path = os.path.join(tmp, 'snippet.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(src)
+            self._build_and_run(path, ['7', 'hi', '3', '5', '9',
+                                       'true', 'true'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_match_break_binds_to_loop(self):
         # break/continue in an arm control the enclosing loop: match is
         # not a loop and never captures them (codegen uses if/else, not

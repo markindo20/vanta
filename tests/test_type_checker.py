@@ -2470,5 +2470,60 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaisesRegex(CheckError, 'division by zero'):
             run("func main() -> i32:\n    let x: i32 = 1 / 0\n")
 
+    def test_generic_struct_instantiates_from_annotation(self):
+        _, tc = run("struct Pair<T, U>:\n"
+                    "    left: T\n"
+                    "    right: U\n"
+                    "func main() -> void:\n"
+                    "    let p: Pair<i32, str> = "
+                    "Pair(left: 1, right: \"x\")\n")
+        self.assertIn('Pair__g0', tc.structs)
+
+    def test_generic_struct_infers_from_arguments(self):
+        _, tc = run("struct Pair<T, U>:\n"
+                    "    left: T\n"
+                    "    right: U\n"
+                    "func main() -> void:\n"
+                    "    let p = Pair(left: 1, right: 2.5)\n"
+                    "    print_i32(p.left)\n")
+        st = next(s for n, s in tc.structs.items()
+                  if n.startswith('Pair__g'))
+        self.assertEqual(repr(st.fields['left']), 'i32')
+        self.assertEqual(repr(st.fields['right']), 'f32')
+
+    def test_generic_struct_two_instances_are_distinct(self):
+        _, tc = run("struct Box<T>:\n"
+                    "    value: T\n"
+                    "func main() -> void:\n"
+                    "    let a = Box(value: 1)\n"
+                    "    let b = Box(value: 2.5)\n")
+        names = [n for n in tc.structs if n.startswith('Box__g')]
+        self.assertEqual(len(names), 2)
+
+    def test_generic_struct_requires_arguments(self):
+        with self.assertRaisesRegex(
+                CheckError, r"generic type 'Box' requires type arguments"):
+            run("struct Box<T>:\n"
+                "    value: T\n"
+                "func main() -> void:\n"
+                "    let b: Box = Box(value: 1)\n")
+
+    def test_generic_struct_missing_field_raises(self):
+        with self.assertRaisesRegex(CheckError, 'missing fields: right'):
+            run("struct Pair<T, U>:\n"
+                "    left: T\n"
+                "    right: U\n"
+                "func main() -> void:\n"
+                "    let p: Pair<i32, i32> = Pair(left: 1)\n")
+
+    def test_generic_struct_reserved_type_parameter(self):
+        with self.assertRaisesRegex(
+                CheckError, "type parameter name 'i32' is reserved"):
+            run("struct Bad<i32>:\n"
+                "    x: i32\n"
+                "func main() -> void:\n"
+                "    print_i32(1)\n")
+
+
 if __name__ == '__main__':
     unittest.main()

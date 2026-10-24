@@ -236,7 +236,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (906 tests) |
+<|channel|> `tests/` | `unittest` suite (916 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -358,7 +358,11 @@ are real:
   not compiler-special-cased types. `==`/`!=` compare the tag and active
   payload, and `match` destructures payloads with bindings. Payload enums
   have no C representation and cannot appear in `extern` signatures; plain
-  enums still map to fixed-`int32_t` C++ enums
+  enums still map to fixed-`int32_t` C++ enums.
+- struct declarations gained the same type parameters in v0.80.0, so values
+  like `Pair<i32, str>` and `Node<T>` work alongside generic enums. Struct
+  construction stays named-argument form and instantiates one layout per
+  combination of type arguments.
 - windowing, images, and sound are shipped as SDL2 examples plus the game
   kit: the kit wraps controllers, sprite-sheet animation, textures, text,
   audio, and rectangle/circle collision; events are still read by hand (an

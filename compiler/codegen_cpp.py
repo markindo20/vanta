@@ -452,7 +452,10 @@ class CodeGen:
         # Extern declarations (outside namespace)
         externs = [d for d in self.program.decls if isinstance(d, A.ExternDecl)]
         structs = [d for d in self.program.decls if isinstance(d, A.StructDecl)]
-        struct_types = [self.tc.structs[sd.name] for sd in structs]
+        # `tc.structs` holds declaration structs plus every monomorphized
+        # generic instance. Builtins are emitted by the runtime header.
+        struct_types = [st for st in self.tc.structs.values()
+                        if not st.builtin]
         # `tc.enums` holds every concrete enum: ordinary declarations and
         # each monomorphized generic instance.
         enums = list(self.tc.enums.values())
@@ -1100,6 +1103,11 @@ class CodeGen:
             if name in ('Vec2', 'Vec3', 'Quat', 'Matrix4', 'Arena'):
                 args = ', '.join(self._expr(a) for a in c.args)
                 return f'vanta::{name}({args})'
+            if getattr(c, 'is_struct_ctor', False):
+                st = c.type
+                args = ', '.join(self._init_expr(a, ft)
+                                 for a, ft in zip(c.args, st.fields.values()))
+                return f'{st.name}{{{args}}}'
             st = self.tc.structs.get(name)
             if st is not None and not st.builtin:
                 args = ', '.join(self._init_expr(a, ft)

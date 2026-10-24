@@ -393,12 +393,12 @@ true
   an arm the checker proves it and no `else` is needed.
 - `enum` is a reserved keyword.
 
-## Generic enums and the standard library (v0.31.0)
+## Generic enums and structs (v0.31.0, v0.80.0)
 
-A generic enum declaration takes type parameters after its name. The
-parameters are in scope in that enum's payload types and are replaced by
-concrete types when the enum is used. v0.31.0 deliberately adds generics only
-to enum declarations - there are no generic structs or generic functions.
+A generic declaration takes type parameters after its name. The parameters
+are in scope in that declaration's payload or field types and are replaced by
+concrete types when the declaration is used. Enums have been generic since
+v0.31.0; structs joined them in v0.80.0. Generic functions are still to come.
 
 ```vanta
 enum Option<T>:
@@ -472,6 +472,50 @@ func main() -> void:
   `std/option.vnt` next to the importing file wins over the installed copy.
   The library is library-shaped: Option and Result are generic enum
   declarations, not compiler-special-cased types.
+
+### Generic structs (v0.80.0)
+
+A struct declaration takes type parameters the same way an enum does:
+
+```vanta
+struct Pair<T, U>:
+    left: T
+    right: U
+
+struct Node<T>:
+    value: T
+    next: ptr<Node<T>>
+
+func main() -> void:
+    let p: Pair<i32, str> = Pair(left: 7, right: "hi")
+    let q = Pair::<i32, i32>(left: 1, right: 2)
+    let n: Node<i32> = Node(value: 9, next: ptr_null::<Node<i32>>())
+    print_i32(p.left)
+    print_i32(q.left + q.right)
+    print_i32(n.value)
+```
+
+```
+7
+3
+9
+```
+
+- Fields use the parameters as ordinary types, including nested
+  applications such as `List<T>`, `[T, 4]`, `ptr<T>`, and `Option<T>`.
+- Construction keeps the usual named-argument form. The expected type
+  supplies the parameters when it is a concrete `Pair<...>`; otherwise the
+  field values are inferred, with integer and float literals defaulting to
+  `i32`/`f32`. `Pair::<i32, str>(...)` always works explicitly.
+- Each distinct set of arguments is a distinct type, monomorphized in the
+  generated C++. `Pair<i32, str>` cannot be assigned to `Pair<str, i32>`.
+- A struct may refer to itself behind a pointer, `next: ptr<Node<T>>`,
+  because the instance is registered before its fields are resolved. A
+  by-value self reference is left to the C++ compiler to reject.
+- Type parameter names may not shadow primitives, `List`, or `ptr`, and a
+  generic struct name may not be used without arguments.
+- Generic functions are not part of this slice; they are the next step on
+  the language track.
 
 ## Match (v0.13.0)
 

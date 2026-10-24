@@ -99,6 +99,20 @@ class GenericEnumInfo:
         self.payloads = payloads
 
 
+class GenericStructInfo:
+    """A struct declaration with type parameters, before instantiation.
+
+    Fields keep their TypeExprs for the same reason generic enum payloads do:
+    `Pair<T, U>` cannot choose concrete field types until a call site names
+    the arguments.
+    """
+
+    def __init__(self, name, type_params, fields):
+        self.name = name
+        self.type_params = tuple(type_params)
+        self.fields = tuple(fields)  # (field name, TypeExpr, Pos)
+
+
 class TypeChecker:
     def __init__(self, program: A.Program, filename="<input>"):
         self.program = program
@@ -108,6 +122,7 @@ class TypeChecker:
         self.structs: dict[str, StructType] = {}
         self.enums: dict[str, EnumType] = {}
         self.generic_enums: dict[str, GenericEnumInfo] = {}
+        self.generic_structs: dict[str, GenericStructInfo] = {}
         # (family, concrete type arguments) -> instantiated EnumType. Keeping
         # one instance per combination makes named types behave nominally and
         # lets codegen emit each concrete representation exactly once.
@@ -115,6 +130,8 @@ class TypeChecker:
         self._enum_instance_order: list[EnumType] = []
         self._enum_instance_counter = 0
         self._enum_instantiating: set[tuple[str, tuple[Type, ...]]] = set()
+        self._struct_instances: dict[tuple[str, tuple[Type, ...]], StructType] = {}
+        self._struct_instance_counter = 0
         self.functions: dict[str, FuncSig] = {}
         self.constants: dict[str, Type] = {}
         # Function types seen anywhere in the program, mapped to the C++
@@ -220,6 +237,15 @@ class TypeChecker:
                     f"type '{n}' does not take type arguments",
                     self.filename, te.pos)
             return PRIM_TYPES[n]
+        if n in self.generic_structs:
+            info = self.generic_structs[n]
+            if not te.args:
+                params = ', '.join(info.type_params)
+                raise CheckError(
+                    f"generic type '{n}' requires type arguments: {n}<{params}>",
+                    self.filename, te.pos)
+            args = tuple(self._resolve_type(a, type_env) for a in te.args)
+            return self._instantiate_struct(n, args, te.pos)
         if n in self.structs:
             if te.args:
                 raise CheckError(
@@ -339,6 +365,54 @@ class TypeChecker:
         inner = ', '.join(self._type_spelling(a) for a in args)
         return f"{name}<{inner}>"
 
+    def _instantiate_struct(self, family, args, pos) -> StructType:
+        """Resolve one concrete `Family<args>` struct instance."""
+        info = self.generic_structs[family]
+        if len(args) != len(info.type_params):
+            expected = ', '.join(info.type_params)
+            raise CheckError(
+                f"generic struct '{self._display(family)}' expects "
+                f"{len(info.type_params)} type argument(s) <{expected}>, "
+                f"got {len(args)}", self.filename, pos)
+        for arg, param in zip(args, info.type_params):
+            if arg is VOID:
+                raise CheckError(
+                    f"type argument for '{param}' cannot be void",
+                    self.filename, pos)
+            if isinstance(arg, (InferType, IntLitType, FloatLitType)):
+                raise CheckError(
+                    f"type argument for '{param}' must be a concrete type, "
+                    f"got {arg}", self.filename, pos)
+        key = (family, tuple(args))
+        existing = self._struct_instances.get(key)
+        if existing is not None:
+            return existing
+
+        while True:
+            self._struct_instance_counter += 1
+            internal = f"{family}__g{self._struct_instance_counter - 1}"
+            if (internal not in self.structs
+                    and internal not in self.enums
+                    and internal not in self.generic_enums
+                    and internal not in self.generic_structs):
+                break
+        display = self._generic_display(family, args)
+        st = StructType(internal, {}, family=family, type_args=tuple(args),
+                        display=display)
+        # Register before resolving fields so `ptr<Node<T>>` inside the
+        # declaration refers back to this same instance instead of recursing.
+        self.structs[internal] = st
+        self._struct_instances[key] = st
+        env = dict(zip(info.type_params, args))
+        fields = {}
+        for (fname, fte, fpos) in info.fields:
+            if fname in fields:
+                raise CheckError(f"duplicate field '{fname}'",
+                                 self.filename, fpos)
+            fields[fname] = self._resolve_type(fte, env)
+        st.fields = fields
+        return st
+
     def _make_list_type(self, inner: Type, pos) -> ListType:
         if inner is VOID:
             raise CheckError("a List cannot hold void", self.filename, pos)
@@ -419,7 +493,9 @@ class TypeChecker:
             self._reraise_pretty(exc)
 
     def _register_struct(self, d):
-        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
+        if (d.name in self.structs or d.name in self.enums
+                or d.name in self.generic_enums
+                or d.name in self.generic_structs):
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
         if d.name in self.functions:
             raise CheckError(f"type name '{d.name}' collides with function",
@@ -430,6 +506,21 @@ class TypeChecker:
                 self.filename, d.pos)
         if d.name == 'List':
             raise CheckError("'List' is a reserved built-in type name", self.filename, d.pos)
+        for param in getattr(d, 'type_params', ()):
+            if param in PRIM_TYPES or param in ('List', 'ptr'):
+                raise CheckError(
+                    f"type parameter name '{param}' is reserved",
+                    self.filename, d.pos)
+        if d.type_params:
+            fields = {}
+            for (fname, _ftype, fpos) in d.fields:
+                if fname in fields:
+                    raise CheckError(f"duplicate field '{fname}'",
+                                     self.filename, fpos)
+                fields[fname] = True
+            self.generic_structs[d.name] = GenericStructInfo(
+                d.name, d.type_params, d.fields)
+            return
         fields = {}
         for (fname, ftype, fpos) in d.fields:
             if fname in fields:
@@ -438,7 +529,9 @@ class TypeChecker:
         self.structs[d.name] = StructType(d.name, fields, builtin=False)
 
     def _register_enum(self, d):
-        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
+        if (d.name in self.structs or d.name in self.enums
+                or d.name in self.generic_enums
+                or d.name in self.generic_structs):
             raise CheckError(f"duplicate type '{d.name}'", self.filename, d.pos)
         if d.name in self.functions:
             raise CheckError(f"type name '{d.name}' collides with function",
@@ -506,7 +599,9 @@ class TypeChecker:
     def _register_func(self, d):
         if d.name in self.functions:
             raise CheckError(f"duplicate function '{d.name}'", self.filename, d.pos)
-        if d.name in self.structs or d.name in self.enums or d.name in self.generic_enums:
+        if (d.name in self.structs or d.name in self.enums
+                or d.name in self.generic_enums
+                or d.name in self.generic_structs):
             raise CheckError(f"function name '{d.name}' collides with type", self.filename, d.pos)
         params = []
         for p in d.params:
@@ -517,7 +612,9 @@ class TypeChecker:
     def _register_const(self, c):
         if c.name in self.constants:
             raise CheckError(f"duplicate constant '{c.name}'", self.filename, c.pos)
-        if c.name in self.structs or c.name in self.enums or c.name in self.generic_enums:
+        if (c.name in self.structs or c.name in self.enums
+                or c.name in self.generic_enums
+                or c.name in self.generic_structs):
             raise CheckError(f"constant '{c.name}' collides with type", self.filename, c.pos)
         if c.name in self.functions:
             raise CheckError(f"constant '{c.name}' collides with function", self.filename, c.pos)
@@ -542,7 +639,9 @@ class TypeChecker:
         for fd in d.funcs:
             if fd.name in self.functions:
                 raise CheckError(f"duplicate function '{fd.name}'", self.filename, fd.pos)
-            if fd.name in self.structs or fd.name in self.enums or fd.name in self.generic_enums:
+            if (fd.name in self.structs or fd.name in self.enums
+                    or fd.name in self.generic_enums
+                    or fd.name in self.generic_structs):
                 raise CheckError(f"function name '{fd.name}' collides with type", self.filename, fd.pos)
             params = []
             for p in fd.params:
@@ -933,7 +1032,9 @@ class TypeChecker:
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if (expr.name in self.structs or expr.name in self.enums
-                    or expr.name in self.generic_enums or expr.name == 'List'):
+                    or expr.name in self.generic_enums
+                    or expr.name in self.generic_structs
+                    or expr.name == 'List'):
                 raise CheckError(f"cannot use type '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if expr.name in self.functions:
@@ -1371,6 +1472,9 @@ class TypeChecker:
                 return self._check_ptr_null(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
+            if name in self.generic_structs:
+                return self._check_generic_struct_ctor(
+                    self.generic_structs[name], call, expected)
             if name in self.structs:
                 st = self.structs[name]
                 if st.builtin:
@@ -1451,7 +1555,7 @@ class TypeChecker:
         bindings[name] = actual
 
     def _infer_type_params(self, te, actual, info, bindings):
-        """Infer enum type parameters from a payload argument's type."""
+        """Infer generic type parameters from a payload or field type."""
         if te is None:
             return
         if te.kind == 'named':
@@ -1460,6 +1564,12 @@ class TypeChecker:
                 return
             if (te.args and te.name in self.generic_enums
                     and isinstance(actual, EnumType)
+                    and actual.family == te.name
+                    and len(te.args) == len(actual.type_args)):
+                for sub_te, sub_actual in zip(te.args, actual.type_args):
+                    self._infer_type_params(sub_te, sub_actual, info, bindings)
+            if (te.args and te.name in self.generic_structs
+                    and isinstance(actual, StructType)
                     and actual.family == te.name
                     and len(te.args) == len(actual.type_args)):
                 for sub_te, sub_actual in zip(te.args, actual.type_args):
@@ -1914,6 +2024,64 @@ class TypeChecker:
             for arg in call.args:
                 at = self._check_expr(arg, ftype)
                 self._coerce_value(arg, at, ftype, call.pos, "argument")
+
+    def _check_generic_struct_ctor(self, info, call, expected) -> Type:
+        label = self._display(info.name)
+        if not call.arg_names or any(x is None for x in call.arg_names):
+            raise CheckError("struct construction requires named arguments",
+                             self.filename, call.pos)
+        by_name = {}
+        for nm, arg in zip(call.arg_names, call.args):
+            if nm in by_name:
+                raise CheckError(f"duplicate field '{nm}'",
+                                 self.filename, call.pos)
+            if nm not in {f[0] for f in info.fields}:
+                raise CheckError(f"unknown field '{nm}'",
+                                 self.filename, call.pos)
+            by_name[nm] = arg
+        missing = [f[0] for f in info.fields if f[0] not in by_name]
+        if missing:
+            raise CheckError(f"missing fields: {', '.join(missing)}",
+                             self.filename, call.pos)
+
+        params = list(info.type_params)
+        bindings = {}
+        if call.type_args:
+            explicit = [self._resolve_type(te) for te in call.type_args]
+            if len(explicit) != len(params):
+                raise CheckError(
+                    f"'{label}' expects {len(params)} type argument(s), "
+                    f"got {len(explicit)}", self.filename, call.pos)
+            for pname, arg in zip(params, explicit):
+                bindings[pname] = arg
+        elif isinstance(expected, StructType) and expected.family == info.name:
+            for pname, arg in zip(params, expected.type_args):
+                bindings[pname] = arg
+        else:
+            for fname, fte, _fpos in info.fields:
+                arg = by_name[fname]
+                at = self._check_expr(arg)
+                at = self._default_type(at, arg)
+                self._infer_type_params(fte, at, info, bindings)
+            missing_params = [p for p in params if p not in bindings]
+            if missing_params:
+                names = ', '.join(f"'{p}'" for p in missing_params)
+                word = 'parameter' if len(missing_params) == 1 else 'parameters'
+                type_params = ', '.join(params)
+                raise CheckError(
+                    f"cannot infer type {word} {names} for '{label}'; "
+                    f"add a type annotation or write "
+                    f"{label}::<{type_params}>(...)",
+                    self.filename, call.pos)
+
+        args = tuple(bindings[pname] for pname in params)
+        st = self._instantiate_struct(info.name, args, call.pos)
+        ordered = [f[0] for f in info.fields]
+        call.args = [by_name[n] for n in ordered]
+        call.arg_names = list(ordered)
+        result = self._check_user_struct_ctor(st, call)
+        call.is_struct_ctor = True
+        return result
 
     def _check_user_struct_ctor(self, st: StructType, call: A.Call) -> Type:
         if not call.arg_names or any(x is None for x in call.arg_names):

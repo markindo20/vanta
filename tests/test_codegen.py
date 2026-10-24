@@ -1033,5 +1033,44 @@ class CodegenTests(unittest.TestCase):
         self.assertLess(inner, outer)
 
 
+    # ---------- generic structs (v0.80.0) ----------
+
+    def test_generic_struct_monomorphized_emit(self):
+        cpp = gen("struct Pair<T, U>:\n"
+                  "    left: T\n"
+                  "    right: U\n"
+                  "func main() -> void:\n"
+                  "    let p: Pair<i32, str> = "
+                  "Pair(left: 1, right: \"x\")\n")
+        self.assertIn('struct Pair__g0 {', cpp)
+        self.assertIn('int32_t v_left;', cpp)
+        self.assertIn('vanta::Str v_right;', cpp)
+        self.assertIn('Pair__g0 v_p = Pair__g0{1, '
+                      'vanta::Str::literal("x", 1)};', cpp)
+        self.assertNotIn('struct Pair {', cpp)
+
+    def test_generic_struct_instances_are_distinct(self):
+        cpp = gen("struct Box<T>:\n"
+                  "    value: T\n"
+                  "func main() -> void:\n"
+                  "    let a = Box(value: 5)\n"
+                  "    let b = Box(value: 2.5)\n"
+                  "    print_i32(a.value)\n")
+        self.assertIn('struct Box__g0 {', cpp)
+        self.assertIn('struct Box__g1 {', cpp)
+        self.assertIn('int32_t v_value;', cpp)
+
+    def test_generic_struct_recursive_pointer(self):
+        cpp = gen("struct Node<T>:\n"
+                  "    value: T\n"
+                  "    next: ptr<Node<T>>\n"
+                  "func main() -> void:\n"
+                  "    let n: Node<i32> = "
+                  "Node(value: 1, next: ptr_null::<Node<i32>>())\n")
+        self.assertIn('struct Node__g0 {', cpp)
+        self.assertIn('Node__g0* v_next;', cpp)
+        self.assertIn('Node__g0 v_n = Node__g0{1, nullptr};', cpp)
+
+
 if __name__ == '__main__':
     unittest.main()

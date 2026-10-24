@@ -460,8 +460,9 @@ class _Resolver:
             if d.ret is not None:
                 self._resolve_type(d.ret, mod)
         elif isinstance(d, A.StructDecl):
+            type_params = set(getattr(d, 'type_params', ()))
             for (_name, ftype, _pos) in d.fields:
-                self._resolve_type(ftype, mod)
+                self._resolve_type(ftype, mod, type_params=type_params)
         elif isinstance(d, A.EnumDecl):
             type_params = set(d.type_params)
             for member in d.members:

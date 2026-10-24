@@ -2,6 +2,25 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.80.0 - 2026-10-24
+
+- Generic structs join generic enums. A declaration such as
+  `struct Pair<T, U>: left: T, right: U` takes type parameters that
+  substitute into field types, and construction monomorphizes one layout per
+  set of arguments: `Pair<i32, str>`, `Pair<f32, bool>` and so on.
+- Type arguments follow the same rules as generic enums: expected type
+  first, explicit `::<...>` always works, inference from field values
+  otherwise (int and float literals default to `i32`/`f32`). Recursive
+  references are safe behind a pointer, `next: ptr<Node<T>>`.
+- Codegen emits one `Pair__gN` C++ struct and constructor per concrete
+  argument combination; diagnostics keep the source spelling.
+- Tests: 916 in total. New type-checker and codegen coverage for generic
+  structs, plus an integration test exercising inference, explicit args, a
+  pointer-recursive node, a generic-enum field, and equality.
+- Docs: LANGUAGE_REFERENCE, README, ARCHITECTURE, ROADMAP, and EDITOR notes
+  describe the new capability. Build uses 0.80.0; the VS Code extension stays
+  0.43.0 (no LSP change).
+
 ## v0.79.0 - 2026-10-24
 
 - `vanta test` now runs test files concurrently (`--jobs N`, 0 = auto) and
