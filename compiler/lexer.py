@@ -30,6 +30,72 @@ class Lexer:
         p = self.pos + off
         return self.source[p] if p < len(self.source) else ''
 
+    @staticmethod
+    def _interpolate_strings(src: str) -> str:
+        result = []
+        i = 0
+        n = len(src)
+        while i < n:
+            if src[i] == '#':
+                j = src.find('\n', i)
+                if j == -1:
+                    result.append(src[i:]); break
+                result.append(src[i:j + 1]); i = j + 1; continue
+            if src[i] != '"':
+                result.append(src[i]); i += 1; continue
+            # collect the full double-quoted string
+            buf = []
+            j = i + 1
+            while j < n and src[j] != '"' and src[j] != '\n':
+                if src[j] == '\\':
+                    if j + 1 < n:
+                        buf.append(src[j]); buf.append(src[j + 1]); j += 2
+                        continue
+                buf.append(src[j]); j += 1
+            if j >= n or src[j] != '"':
+                # Unterminated; leave tail untouched.
+                result.append(src[i:]); break
+            inner = ''.join(buf)
+            cooked = _interpolate_one_string_inner(inner)
+            result.append(cooked)
+            i = j + 1
+
+        return ''.join(result)
+
+    @staticmethod
+    def _interpolate_one_string_inner(inner: str) -> str:
+        fmt_parts = []
+        buf = []
+        args = []
+        i = 0
+        n = len(inner)
+        while i < n:
+            if inner[i] == '\\' and i + 1 < n:
+                buf.append(inner[i:i + 2]); i += 2; continue
+            if inner[i] == '{' and i + 1 < n and inner[i + 1] == '{':
+                buf.append('{'); i += 2; continue
+            if inner[i] == '}' and i + 1 < n and inner[i + 1] == '}':
+                buf.append('}'); i += 2; continue
+            if inner[i] == '{':
+                end = inner.find('}', i + 1)
+                if end == -1:
+                    return '"' + inner + '"'
+                expr = inner[i + 1:end].strip()
+                if not expr:
+                    return '"' + inner + '"'
+                fmt_parts.append(''.join(buf))
+                fmt_parts.append('{}')
+                buf = []
+                args.append(expr)
+                i = end + 1
+                continue
+            buf.append(inner[i]); i += 1
+        if not args:
+            return '"' + inner + '"'
+        fmt_parts.append(''.join(buf))
+        fmt = ''.join(fmt_parts)
+        return 'str_fmt("%s", %s)' % (fmt.replace('"', '\\\\"'), ', '.join(args))
+
     def _adv(self):
         ch = self.source[self.pos]
         self.pos += 1
@@ -44,6 +110,7 @@ class Lexer:
         self.tokens.append(Token(tt, value, line or self.line, col or self.col))
 
     def tokenize(self):
+        self.source = interpolate_strings(self.source)
         at_line_start = True
         while self.pos < len(self.source):
             if at_line_start:
@@ -187,3 +254,63 @@ class Lexer:
             self._emit(single[ch], ch, line, col)
             return
         self._err(f"unexpected character {ch!r}", line, col)
+
+def interpolate_strings(src: str) -> str:
+    result = []
+    i = 0
+    n = len(src)
+    while i < n:
+        if src[i] == '#':
+            j = src.find('\n', i)
+            if j == -1:
+                result.append(src[i:]); break
+            result.append(src[i:j + 1]); i = j + 1; continue
+        if src[i] != '"':
+            result.append(src[i]); i += 1; continue
+        buf = []
+        j = i + 1
+        while j < n and src[j] != '"' and src[j] != '\n':
+            if src[j] == '\\':
+                if j + 1 < n:
+                    buf.append(src[j]); buf.append(src[j+1]); j += 2; continue
+            buf.append(src[j]); j += 1
+        if j >= n or src[j] != '"':
+            result.append(src[i:]); break
+        inner = src[i+1:j]
+        result.append(interpolate_one_string_inner(inner))
+        i = j + 1
+    return ''.join(result)
+
+
+def interpolate_one_string_inner(inner: str) -> str:
+    fmt_parts = []
+    buf = []
+    args = []
+    i = 0
+    n = len(inner)
+    while i < n:
+        if inner[i] == '\\' and i + 1 < n:
+            buf.append(inner[i:i + 2]); i += 2; continue
+        if inner[i] == '{' and i + 1 < n and inner[i+1] == '{':
+            buf.append('{'); i += 2; continue
+        if inner[i] == '}' and i + 1 < n and inner[i+1] == '}':
+            buf.append('}'); i += 2; continue
+        if inner[i] == '{':
+            end = inner.find('}', i + 1)
+            if end == -1:
+                return '"' + inner + '"'
+            expr = inner[i+1:end].strip()
+            if not expr:
+                return '"' + inner + '"'
+            fmt_parts.append(''.join(buf))
+            fmt_parts.append('{}')
+            buf = []
+            args.append(expr)
+            i = end + 1
+            continue
+        buf.append(inner[i]); i += 1
+    if not args:
+        return '"' + inner + '"'
+    fmt_parts.append(''.join(buf))
+    fmt = ''.join(fmt_parts)
+    return 'str_fmt("%s", %s)' % (fmt, ', '.join(args))

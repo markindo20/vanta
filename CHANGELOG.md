@@ -2,6 +2,13 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.0.0 - 2026-10-24
+
+- String interpolation: `"Hello {expr}"` transforms to `str_fmt("Hello {}", expr)`
+  at lex-time. Supports `{{` / `}}` escapes; avoids an interpolation by
+  using non-brace text. (Validated during examples.)
+- 930 tests total.
+
 ## v0.99.2 - 2026-10-24
 
 - Richer string builtins: `str_sub`, `str_repeat`, `str_to_upper`, `str_to_lower`,
