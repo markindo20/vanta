@@ -782,6 +782,24 @@ inline void print_fmt_impl(const char* fmt, ...) {
     va_end(ap);
 }
 
+inline Str str_fmt_impl(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = std::vsnprintf(nullptr, 0, fmt, ap);
+    va_end(ap);
+    if (n < 0) n = 0;
+    size_t cap = (size_t)n + 1;
+    char* buf = static_cast<char*>(std::malloc(cap));
+    if (!buf) return Str();
+    va_list ap2;
+    va_start(ap2, fmt);
+    std::vsnprintf(buf, cap, fmt, ap2);
+    va_end(ap2);
+    Str out = Str::copy(buf, (int32_t)n);
+    std::free(buf);
+    return out;
+}
+
 // ---------- String ownership ----------
 // str_concat, to_str_*, and file_read return owned Str values. The old
 // process-lifetime pool is gone, so str_pool_reset() is retained as a no-op

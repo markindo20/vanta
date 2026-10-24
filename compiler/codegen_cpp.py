@@ -1106,8 +1106,11 @@ class CodeGen:
                 rendered.append(f'({self._expr(a)}).c_str()')
             else:
                 rendered.append(self._expr(a))
-        fmt = build_fmt_c_string(fmt_lit.value, type_names, newline=(name == 'print_fmt'))
+        newline = (name == 'print_fmt')
+        fmt = build_fmt_c_string(fmt_lit.value, type_names, newline=newline)
         args = ', '.join([f'"{fmt}"'] + rendered)
+        if name == 'str_fmt':
+            return f'vanta::str_fmt_impl({args})'
         return f'vanta::print_fmt_impl({args})'
 
     def _call(self, c: A.Call) -> str:
@@ -1142,7 +1145,7 @@ class CodeGen:
                 return f'static_cast<int32_t>({self._expr(c.args[0])})'
             if name == 'ptr_is_null':
                 return f'(({self._expr(c.args[0])}) == nullptr)'
-            if name in ('print_fmt', 'write_fmt'):
+            if name in ('print_fmt', 'write_fmt', 'str_fmt'):
                 return self._fmt_call(c, name)
             if name == 'assert':
                 line = c.pos.line if c.pos else 0

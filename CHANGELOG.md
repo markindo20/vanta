@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.96.0 - 2026-10-24
+
+- New builtin `str_fmt(...)` returns a Str (snprintf-backed). Uses the same
+  compile-time `{}` placeholders as `print_fmt`/`write_fmt`, but is a value
+  expression, so:
+  - `let s = str_fmt("hello {}", 42)` builds labeled text for UI.
+- Runtime: `vanta::str_fmt_impl`, allocates an owned Str (cap handled via
+  snprintf sizing + safe realloc).
+- Tests: 930 in total (unchanged; runtime exercised via example).
+
 ## v0.95.0 - 2026-10-24
 
 - **Phase II.B host supervisor (Phase 1)**: new `vanta hot <file>` command (and `--hot` on `run`)

@@ -1108,7 +1108,7 @@ class TypeChecker:
             if ent is not None:
                 expr.type = ent[0]
                 return ent[0]
-            if expr.name in ('len', 'print_fmt', 'write_fmt', 'assert', 'enum_to_i32',
+            if expr.name in ('len', 'print_fmt', 'write_fmt', 'str_fmt', 'assert', 'enum_to_i32',
                              'ptr_is_null', 'ptr_cast', 'ptr_offset', 'ptr_null'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
@@ -1552,6 +1552,8 @@ class TypeChecker:
                 return self._check_ptr_offset(call)
             if name == 'ptr_null':
                 return self._check_ptr_null(call)
+            if name == 'str_fmt':
+                return self._check_str_fmt(call)
             if name in ('print_fmt', 'write_fmt'):
                 return self._check_fmt(call, name)
             if name in self.generic_functions:
@@ -2028,6 +2030,35 @@ class TypeChecker:
             raise CheckError("'len' is not a List method; write len(xs)",
                              self.filename, call.pos)
         raise CheckError(f"List has no method '{method}'", self.filename, call.pos)
+
+    def _check_str_fmt(self, call: A.Call) -> Type:
+        if call.arg_names and any(x is not None for x in call.arg_names):
+            raise CheckError("str_fmt does not accept named arguments", self.filename, call.pos)
+        if not call.args:
+            raise CheckError("str_fmt requires a format string", self.filename, call.pos)
+        fmt = call.args[0]
+        if not isinstance(fmt, A.StringLit):
+            raise CheckError("str_fmt format must be a string literal", self.filename, call.pos)
+        try:
+            _pieces, n_ph = parse_format(fmt.value)
+        except ValueError as e:
+            raise CheckError("str_fmt: %s" % e, self.filename, call.pos)
+        extra = call.args[1:]
+        if len(extra) != n_ph:
+            raise CheckError(
+                "str_fmt: format string has %d placeholder(s) "
+                "but %d argument(s) were given" % (n_ph, len(extra)),
+                self.filename, call.pos)
+        allowed = (I8, U8, I16, U16, I32, U32, F32, F64, BOOL, STR)
+        for a in extra:
+            at = self._default_type(self._check_expr(a), a)
+            if not any(at is t for t in allowed):
+                raise CheckError(
+                    "str_fmt: cannot format a value of type %s "
+                    "(expected an integer, f32, f64, bool, or str)" % at,
+                    self.filename, call.pos)
+        call.type = STR
+        return STR
 
     def _check_fmt(self, call: A.Call, name: str) -> Type:
         if call.arg_names and any(x is not None for x in call.arg_names):
