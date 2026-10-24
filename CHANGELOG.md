@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.99.0 - 2026-10-24
+
+- State-preserving hot reload Phase II.C: persistent counter via named shared
+  Arena survives across `vanta hot` invocations, plus docs contract.
+- 930 tests (unchanged).
+
 ## v0.98.0 - 2026-10-24
 
 - Shared-state hot path: new `examples/stateful_hot.vnt` demonstrates an
