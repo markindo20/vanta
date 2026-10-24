@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.0.5 - 2026-10-24
+
+- New CLI command `vanta get <path<|message|>url>` fetches a dependency into a local
+  vendor directory and maintains `.vanta.lock`. Local paths and git URLs
+  supported (depth-1 clone). No central registry yet.
+- Tests: 930 (unchanged).
+
+## v1.0.5 - 2026-10-24
+
+- New CLI command `vanta get <path or url>` fetches a dependency into a local
+  vendor directory and maintains `.vanta.lock`. Local paths and git URLs
+  supported (depth-1 clone). No central registry yet.
+- Tests: 930 (unchanged).
+
 ## v1.0.3 - 2026-10-24
 
 - String interpolation `'Hello {expr}'` expands at lex-time to `str_fmt("Hello {}", expr)`.

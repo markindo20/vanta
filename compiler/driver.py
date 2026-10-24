@@ -1138,6 +1138,52 @@ def cmd_run_hot(args):
             return 0
     return 0
 
+def cmd_get(args):
+    """Fetch a dependency into a local vendor directory and record it.
+
+    If the source is an existing local path, it is copied verbatim. If
+    it looks like a git URL (http(s)://, git:, ssh), it is cloned at
+    depth 1. A small lockfile (.vanta.lock) records what was fetched.
+    """
+    source = args.source
+    dest = args.dest or 'vendor'
+    import os, subprocess, shutil
+    if source is None:
+        sys.stderr.write("error: missing source path/URL\n")
+        return 1
+    os.makedirs(dest, exist_ok=True)
+    name = args.name or os.path.basename(source.rstrip('/\\')) or 'dep'
+    name = name.rstrip('/')
+    if os.path.exists(source) and os.path.isdir(source):
+        target = os.path.join(dest, name)
+        if os.path.exists(target):
+            shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(source, target)
+    elif (source.startswith('http://') or source.startswith('https://')
+          or source.startswith('git@') or source.startswith('git.')):
+        target = os.path.join(dest, name)
+        if os.path.exists(target):
+            shutil.rmtree(target, ignore_errors=True)
+        try:
+            subprocess.run(['git','clone','--depth','1',source,target], check=True)
+        except Exception as exc:
+            sys.stderr.write(f"error: could not clone {source}: {exc}\n")
+            return 1
+    else:
+        sys.stderr.write(f"error: source not found or not a git URL: {source}\n")
+        return 1
+    lock = '.vanta.lock'
+    lines = []
+    if os.path.exists(lock):
+        lines = [l for l in open(lock).read().splitlines() if l and not l.startswith(name+'=')]
+    lines.append(name+"="+source)
+    with open(lock,'w',encoding='utf-8') as f:
+        f.write('\n'.join(lines)+'\n')
+    print('fetched ' + name + ' -> ' + target)
+    print('lockfile ' + lock)
+    return 0
+
+
 def cmd_hot(args):
     """Phase II.B.1: load the shared unit in this process and reload it.
 
@@ -1431,7 +1477,7 @@ def cmd_test(args):
 
 
 _COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
-             'lsp', 'dap', 'watch', 'repl', 'hot')
+             'lsp', 'dap', 'watch', 'repl', 'hot', 'get')
 
 
 def _normalize_argv(argv):
@@ -1803,6 +1849,13 @@ def main(argv):
     p_hot.add_argument('--release', action='store_true')
     p_hot.add_argument('--checked', action='store_true')
 
+    p_get = sub.add_parser('get', help='fetch a dependency into a local vendor directory')
+    p_get.add_argument('source', help='local path or git URL to fetch')
+    p_get.add_argument('--dest', default='vendor',
+                        help='destination parent directory (default vendor)')
+    p_get.add_argument('--name', default=None,
+                        help='override the dependency name')
+
     p_debug = sub.add_parser(
         'debug', help='build with Vanta source locations and debug with GDB')
     p_debug.add_argument('source')
@@ -1860,6 +1913,8 @@ def main(argv):
         return cmd_test(args)
     if args.cmd == 'hot':
         return cmd_hot(args)
+    if args.cmd == 'get':
+        return cmd_get(args)
     if args.cmd == 'debug':
         return cmd_debug(args)
     return 1
