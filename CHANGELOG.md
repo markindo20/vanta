@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v0.81.0 - 2026-10-24
+
+- `vanta watch file.vnt` rebuilds and reruns on source change. `vanta run
+  --watch file.vnt` does the same from a single command. Both poll for
+  modification and rerun the build/run pipeline; Ctrl+C stops the loop. This
+  is the first piece of the debugger/feedback-loop track: a hot-reload
+  skeleton driven by rebuild-on-change rather than an in-process compiler.
+- Tests: +1 new test in test_cli for the watch loop.
+- Build uses 0.81.0. Extension stays 0.43.0.
+
 ## v0.80.0 - 2026-10-24
 
 - Generic structs join generic enums. A declaration such as

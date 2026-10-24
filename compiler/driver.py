@@ -1226,7 +1226,7 @@ def cmd_test(args):
 
 
 _COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
-             'lsp', 'dap')
+             'lsp', 'dap', 'watch')
 
 
 def _normalize_argv(argv):
@@ -1337,10 +1337,55 @@ def _split_program_args(argv):
     return argv, []
 
 
+    return 1
+
+
+def cmd_watch(args):
+    if not getattr(args, 'source', None) or not os.path.exists(args.source):
+        sys.stderr.write(
+            f"error: not found: {getattr(args, 'source', None)}\n")
+        return 1
+    out = sys.stdout
+    out.write(f"watching {args.source} (Ctrl+C to stop)\n")
+    out.flush()
+    last_mtime = 0.0
+    while True:
+        try:
+            mtime = os.path.getmtime(args.source)
+        except OSError:
+            mtime = 0.0
+        if mtime > last_mtime:
+            out.write(f"\n--- rebuild {time.strftime('%H:%M:%S')} ---\n")
+            out.flush()
+            try:
+                rc = cmd_run(args)
+            except (KeyboardInterrupt, Exception) as exc:
+                rc = 1
+                if not isinstance(exc, KeyboardInterrupt):
+                    sys.stderr.write(f"error: {exc}\n")
+                else:
+                    out.write("\nwatch stopped\n")
+                    out.flush()
+                    return 0
+            if rc not in (0, None):
+                out.write(f"(exit {rc})\n")
+            out.flush()
+            try:
+                last_mtime = max(mtime, os.path.getmtime(args.source))
+            except OSError:
+                last_mtime = mtime
+        try:
+            time.sleep(0.5)
+        except KeyboardInterrupt:
+            out.write("\nwatch stopped\n")
+            out.flush()
+            return 0
+
+
 def main(argv):
     argv = _normalize_argv(argv)
     program_args = []
-    if argv and argv[0] in ('run', 'debug'):
+    if argv and argv[0] in ('run', 'debug', 'watch'):
         argv, program_args = _split_program_args(argv)
     ap = argparse.ArgumentParser(
         prog='vanta', description='Vanta language compiler',
@@ -1408,6 +1453,14 @@ def main(argv):
                        help='link against library (e.g. SDL2)')
     p_run.add_argument('prog_args', nargs='*',
                        help='arguments passed through to the program')
+    p_run.add_argument('--watch', action='store_true',
+                       help='rebuild and rerun on source change')
+
+    p_watch = sub.add_parser('watch',
+                             help='watch a source file and rebuild/re-run on change')
+    p_watch.add_argument('source')
+    p_watch.add_argument('--include-dir', action='append', default=[],
+                        help='add include directory for C++ compilation')
 
     p_debug = sub.add_parser(
         'debug', help='build with Vanta source locations and debug with GDB')
@@ -1426,7 +1479,7 @@ def main(argv):
     p_debug.add_argument('prog_args', nargs='*',
                          help='arguments passed through to the program')
 
-    if argv and argv[0] in ('run', 'debug'):
+    if argv and argv[0] in ('run', 'debug', 'watch'):
         # Anything the compiler does not know belongs to the program.
         args, extra = ap.parse_known_args(argv)
         if extra:
@@ -1451,8 +1504,12 @@ def main(argv):
         return run_stdio(args.log)
     if args.cmd == 'build':
         return cmd_build(args)
+    if args.cmd == 'run' and getattr(args, 'watch', False):
+        return cmd_watch(args)
     if args.cmd == 'run':
         return cmd_run(args)
+    if args.cmd == 'watch':
+        return cmd_watch(args)
     if args.cmd == 'test':
         return cmd_test(args)
     if args.cmd == 'debug':

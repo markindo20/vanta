@@ -2,6 +2,7 @@ import contextlib
 import io
 import os
 import sys
+import time
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from compiler.driver import (
     cmd_fmt,
     cmd_new,
     cmd_test,
+    cmd_watch,
     find_cxx_compiler,
 )
 
@@ -246,6 +248,30 @@ class CliTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn('2/2 tests passed', out.getvalue())
             self.assertTrue(os.path.exists(junit))
+
+
+    def test_watch_runs_one_build_then_stops(self):
+        if find_cxx_compiler()[1] is None:
+            self.skipTest('no C++ compiler on PATH')
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, 'w.vnt')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('func main() -> void:\n    print_i32(1)\n')
+        args = SimpleNamespace(source=path, release=True, prog_args=[],
+                               include_dir=[], lib_dir=[], link=[])
+        orig = time.sleep
+        def fake_sleep(sec):
+            raise KeyboardInterrupt()
+        time.sleep = fake_sleep
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cmd_watch(args)
+        finally:
+            time.sleep = orig
+        self.assertEqual(rc, 0)
+        self.assertIn('watching', out.getvalue())
+        self.assertIn('rebuild', out.getvalue())
 
 
 if __name__ == '__main__':
