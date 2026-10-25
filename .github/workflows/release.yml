@@ -1,4 +1,4 @@
-name: Release
+﻿name: Release
 
 on:
   push:
@@ -7,20 +7,59 @@ on:
 
 jobs:
   release:
-    permissions:
-      id-token: write
+    name: build and attach
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
-      - name: Install build dependencies
-        run: python -m pip install build wheel
-      - name: Build sdist and wheel
-        run: python -m build
-      - name: Publish to PyPI (Trusted Publishing)
+
+      - name: Check the tag matches the compiler version
+        run: |
+          python - <<'PY'
+          import os
+          from compiler import VERSION
+          tag = os.environ['GITHUB_REF_NAME']
+          expected = 'v' + VERSION
+          if tag != expected:
+              raise SystemExit(f'tag {tag} does not match {expected}')
+          print(f'releasing {tag}')
+          PY
+
+      - name: Build wheel and sdist
+        run: python -m pip install --upgrade build twine && python -m build && python -m twine check dist/*
+
+      - name: Keep the distributions for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Attach the distributions to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish:
+    name: publish to PyPI
+    needs: release
+    if: vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
