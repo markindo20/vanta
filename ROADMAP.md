@@ -500,10 +500,12 @@ public declarations. `examples/modules_demo/` is the worked example.
 
 ## Next: language (candidate)
 
-1. **Generic follow-ups - large.** Generic enum payloads now cover
-   `Option`, `Result`, and reusable error containers. Generic structs,
-   generic functions, and constraints each need their own design and are not
-   assumed by this milestone.
+1. **Generic follow-ups - large.** Generic enum payloads cover `Option`,
+   `Result`, and reusable error containers. Generic structs, generic functions,
+   and generic constraints are implemented (generic structs since v0.80.0,
+   generic functions since v0.84.0, constraints in v1.5.0). Generic structs
+   and functions now support type parameter constraints like `T: Copyable` and
+   `T: Eq`, enforced at instantiation time.
 
 ## Kit and examples
 

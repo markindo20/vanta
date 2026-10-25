@@ -2548,6 +2548,100 @@ class TypeCheckerTests(unittest.TestCase):
                 "func main() -> void:\n"
                 "    print_i32(1)\n")
 
+    # ---------- generic constraints ----------
+
+    def test_generic_struct_copyable_constraint_ok(self):
+        _, tc = run("struct Pair<T: Copyable, U>:\n"
+                    "    pub left: T\n"
+                    "    pub right: U\n"
+                    "func main() -> void:\n"
+                    "    let p = Pair::<i32, i32>(left: 1, right: 2)\n"
+                    "    print_i32(p.left)\n")
+        self.assertIn('Pair__g0', tc.structs)
+
+    def test_generic_struct_copyable_constraint_rejects_arena(self):
+        with self.assertRaisesRegex(CheckError, "does not satisfy"):
+            run("struct Pair<T: Copyable, U>:\n"
+                "    pub left: T\n"
+                "    pub right: U\n"
+                "func main() -> void:\n"
+                "    let p = Pair::<Arena, i32>(left: Arena(64), right: 1)\n"
+                "    print_i32(p.left)\n")
+
+    def test_generic_struct_eq_constraint_ok(self):
+        _, tc = run("struct Pair<T: Eq, U>:\n"
+                    "    pub left: T\n"
+                    "    pub right: U\n"
+                    "func main() -> void:\n"
+                    "    let p = Pair::<i32, i32>(left: 1, right: 2)\n"
+                    "    print_i32(p.left)\n")
+        self.assertIn('Pair__g0', tc.structs)
+
+    def test_generic_struct_eq_constraint_rejects_arena(self):
+        with self.assertRaisesRegex(CheckError, "does not satisfy"):
+            run("struct Pair<T: Eq, U>:\n"
+                "    pub left: T\n"
+                "    pub right: U\n"
+                "func main() -> void:\n"
+                "    let p = Pair::<Arena, i32>(left: Arena(64), right: 1)\n"
+                "    print_i32(p.left)\n")
+
+    def test_generic_func_copyable_constraint_ok(self):
+        _, tc = run("func copy<T: Copyable>(x: T) -> T:\n"
+                    "    return x\n"
+                    "func main() -> void:\n"
+                    "    let a = copy(5)\n"
+                    "    print_i32(a)\n")
+        names = [n for n in tc.functions if n.startswith('copy__g')]
+        self.assertEqual(len(names), 1)
+
+    def test_generic_func_copyable_constraint_rejects_arena(self):
+        with self.assertRaisesRegex(CheckError, "does not satisfy"):
+            run("func copy<T: Copyable>(x: T) -> T:\n"
+                "    return x\n"
+                "func main() -> void:\n"
+                "    let a = copy::<Arena>(Arena(64))\n"
+                "    print_i32(1)\n")
+
+    def test_generic_func_eq_constraint_ok(self):
+        _, tc = run("func same<T: Eq>(a: T, b: T) -> bool:\n"
+                    "    return a == b\n"
+                    "func main() -> void:\n"
+                    "    print_bool(same(1, 2))\n")
+        names = [n for n in tc.functions if n.startswith('same__g')]
+        self.assertEqual(len(names), 1)
+
+    def test_generic_func_eq_constraint_rejects_arena(self):
+        with self.assertRaisesRegex(CheckError, "does not satisfy"):
+            run("func same<T: Eq>(a: T, b: T) -> bool:\n"
+                "    return a == b\n"
+                "func main() -> void:\n"
+                "    print_bool(same::<Arena>(Arena(64), Arena(64)))\n")
+
+    def test_generic_enum_copyable_constraint_ok(self):
+        run("enum Option<T: Copyable>:\n"
+            "    None\n"
+            "    Some(T)\n"
+            "func main() -> void:\n"
+            "    let o: Option<i32> = Option.Some(5)\n"
+            "    print_i32(1)\n")
+
+    def test_generic_enum_copyable_constraint_rejects_arena(self):
+        with self.assertRaisesRegex(CheckError, "does not satisfy"):
+            run("enum Option<T: Copyable>:\n"
+                "    None\n"
+                "    Some(T)\n"
+                "func main() -> void:\n"
+                "    let o: Option<Arena> = Option.Some(Arena(64))\n"
+                "    print_i32(1)\n")
+
+    def test_generic_constraint_unknown_is_error(self):
+        with self.assertRaisesRegex(CheckError, "unknown constraint"):
+            run("struct Bad<T: NotAConstraint>:\n"
+                "    x: T\n"
+                "func main() -> void:\n"
+                "    print_i32(1)\n")
+
     def test_match_guard_must_be_bool(self):
         with self.assertRaises(CheckError):
             run("enum S:\n    A\n    B\nfunc f(s: S, n: i32) -> void:\n    match s:\n        S.A if n:\n            print_i32(0)\n")

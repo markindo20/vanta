@@ -395,6 +395,11 @@ are real:
   `pub` controls top-level declarations, and per-field visibility
   (`pub x: i32`) controls individual struct/class fields; a public
   declaration cannot expose a private type
+- generic structs (`struct Pair<T, U>`), generic enums (`enum Option<T>`),
+  and generic functions (`func id<T>(x: T) -> T`) are supported with type
+  argument inference and explicit type arguments (`Pair::<i32, str>`,
+  `id::<i32>(5)`); type parameter constraints (`T: Copyable`, `T: Eq`) are
+  checked at instantiation time
 - `vanta get <source>` still works but is superseded by `vanta pm add
   <source>`, which records dependencies in `vanta.toml` / `vanta.lock` and
   populates `vendor/`. Prefer `vanta pm add`; `vanta get` is kept for

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 
 @dataclass
@@ -70,8 +70,8 @@ class FuncDecl:
     is_public: bool = False
     # Type parameters for a generic function, e.g. ['T'] for identity<T>.
     type_params: List[str] = field(default_factory=list)
-    # Type parameters for a generic function, e.g. ['T'] for identity<T>.
-    type_params: List[str] = field(default_factory=list)
+    # Type parameter name -> list of constraint names, e.g. {'T': ['Copyable']}.
+    type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -83,6 +83,8 @@ class StructDecl:
     is_public: bool = False
     # Type parameters for a generic struct, e.g. ['T', 'U'] for Pair<T, U>.
     type_params: List[str] = field(default_factory=list)
+    # Type parameter name -> list of constraint names.
+    type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,6 +104,8 @@ class EnumDecl:
     is_public: bool = False
     # Type parameters for a generic enum, e.g. ['T', 'E'] for Result<T, E>.
     type_params: List[str] = field(default_factory=list)
+    # Type parameter name -> list of constraint names.
+    type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,6 +118,8 @@ class ClassDecl:
     pos: Pos
     is_public: bool = False
     type_params: List[str] = field(default_factory=list)
+    # Type parameter name -> list of constraint names.
+    type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass

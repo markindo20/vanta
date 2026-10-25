@@ -5,6 +5,7 @@ from .typesys import (
     I8, U8, I16, U16, I32, U32, F32, F64, BOOL, VOID, STR, INT_LIT, FLOAT_LIT, INFER,
     PRIM_TYPES, NARROW_RANGES, is_int, is_float, is_numeric, is_narrow,
     eq_blocker,
+    CONSTRAINT_COPYABLE, CONSTRAINT_EQ, KNOWN_CONSTRAINTS,
 )
 from .formats import parse_format
 
@@ -92,11 +93,13 @@ class GenericEnumInfo:
     the enum resolves those expressions in a type environment.
     """
 
-    def __init__(self, name, type_params, members, payloads):
+    def __init__(self, name, type_params, members, payloads,
+                 type_param_constraints=None):
         self.name = name
         self.type_params = tuple(type_params)
         self.members = members
         self.payloads = payloads
+        self.type_param_constraints = type_param_constraints or {}
 
 
 class GenericFuncInfo:
@@ -108,7 +111,8 @@ class GenericFuncInfo:
     """
 
     def __init__(self, name, type_params, params, ret, body, pos,
-                 is_system=False, is_public=False):
+                 is_system=False, is_public=False,
+                 type_param_constraints=None):
         self.name = name
         self.type_params = tuple(type_params)
         self.params = params  # list of (name, TypeExpr)
@@ -117,6 +121,7 @@ class GenericFuncInfo:
         self.pos = pos
         self.is_system = is_system
         self.is_public = is_public
+        self.type_param_constraints = type_param_constraints or {}
 
 
 class GenericStructInfo:
@@ -127,10 +132,12 @@ class GenericStructInfo:
     the arguments.
     """
 
-    def __init__(self, name, type_params, fields):
+    def __init__(self, name, type_params, fields,
+                 type_param_constraints=None):
         self.name = name
         self.type_params = tuple(type_params)
         self.fields = tuple(fields)  # (field name, TypeExpr, Pos)
+        self.type_param_constraints = type_param_constraints or {}
 
 
 class TypeChecker:
@@ -369,6 +376,7 @@ class TypeChecker:
                 raise CheckError(
                     f"type argument for '{param}' must be a concrete type, "
                     f"got {arg}", self.filename, pos)
+        self._check_constraints(info, args, pos)
         key = (family, tuple(args))
         existing = self._enum_instances.get(key)
         if existing is not None:
@@ -439,6 +447,7 @@ class TypeChecker:
                 raise CheckError(
                     f"type argument for '{param}' must be a concrete type, "
                     f"got {arg}", self.filename, pos)
+        self._check_constraints(info, args, pos)
         key = (family, tuple(args))
         existing = self._struct_instances.get(key)
         if existing is not None:
@@ -574,6 +583,7 @@ class TypeChecker:
                     f"type parameter name '{param}' is reserved",
                     self.filename, d.pos)
         if d.type_params:
+            self._validate_constraints(d)
             fields = {}
             for (fname, _ftype, fpos, _fpub) in d.fields:
                 if fname in fields:
@@ -581,7 +591,8 @@ class TypeChecker:
                                      self.filename, fpos)
                 fields[fname] = True
             self.generic_structs[d.name] = GenericStructInfo(
-                d.name, d.type_params, d.fields)
+                d.name, d.type_params, d.fields,
+                type_param_constraints=d.type_param_constraints)
             return
         fields = {}
         for (fname, ftype, fpos, fpub) in d.fields:
@@ -739,11 +750,13 @@ class TypeChecker:
                 self.filename, member.pos)
 
         if d.type_params:
+            self._validate_constraints(d)
             # Payloads stay unresolved until instantiation: a declaration
             # such as `enum Result<T, E>` cannot choose concrete layouts yet.
             payloads = {m.name: tuple(m.payload or []) for m in d.members}
             self.generic_enums[d.name] = GenericEnumInfo(
-                d.name, d.type_params, members, payloads)
+                d.name, d.type_params, members, payloads,
+                type_param_constraints=d.type_param_constraints)
             return
 
         payloads = {}
@@ -775,10 +788,12 @@ class TypeChecker:
                     f"type parameter name '{param}' is reserved",
                     self.filename, d.pos)
         if getattr(d, 'type_params', ()):
+            self._validate_constraints(d)
             self.generic_functions[d.name] = GenericFuncInfo(
                 d.name, d.type_params, [(p.name, p.type) for p in d.params],
                 d.ret, d.body, d.pos, is_system=d.is_system,
-                is_public=d.is_public)
+                is_public=d.is_public,
+                type_param_constraints=getattr(d, 'type_param_constraints', {}))
             return
         params = []
         for p in d.params:
@@ -2452,6 +2467,70 @@ class TypeChecker:
         call.generic_func_instance = concrete_name
         return sig.ret
 
+    def _check_constraints(self, info, args, pos):
+        """Validate that each type argument satisfies its declared constraints."""
+        constraints = info.type_param_constraints
+        if not constraints:
+            return
+        for param_name, arg in zip(info.type_params, args):
+            required = constraints.get(param_name, ())
+            if not required:
+                continue
+            for constraint in required:
+                if constraint == CONSTRAINT_COPYABLE:
+                    if not self._is_copyable(arg):
+                        raise CheckError(
+                            f"type argument '{self._type_spelling(arg)}' for "
+                            f"parameter '{param_name}' does not satisfy "
+                            f"constraint 'Copyable'", self.filename, pos)
+                elif constraint == CONSTRAINT_EQ:
+                    blocker = eq_blocker(arg)
+                    if blocker is not None:
+                        path, bad_type = blocker
+                        raise CheckError(
+                            f"type argument '{self._type_spelling(arg)}' for "
+                            f"parameter '{param_name}' does not satisfy "
+                            f"constraint 'Eq' ({bad_type} cannot be compared "
+                            f"for equality)", self.filename, pos)
+                else:
+                    raise CheckError(
+                        f"unknown constraint '{constraint}' on parameter "
+                        f"'{param_name}'", self.filename, pos)
+
+    def _is_copyable(self, t: Type) -> bool:
+        """A type is copyable if it is not Arena and does not contain Arena
+        transitively."""
+        if isinstance(t, StructType):
+            if t.name == "Arena":
+                return False
+            for (_fname, (ftype, _pub)) in t.fields.items():
+                if not self._is_copyable(ftype):
+                    return False
+            return True
+        if isinstance(t, EnumType):
+            for payload in t.payloads.values():
+                for ptype in payload:
+                    if not self._is_copyable(ptype):
+                        return False
+            return True
+        if isinstance(t, PtrType):
+            return self._is_copyable(t.inner)
+        if isinstance(t, ArrayType):
+            return self._is_copyable(t.inner)
+        if isinstance(t, ListType):
+            return self._is_copyable(t.inner)
+        return True
+
+    def _validate_constraints(self, d) -> None:
+        """Reject unknown constraint names on a generic declaration."""
+        constraints = getattr(d, 'type_param_constraints', {}) or {}
+        for param_name, cons in constraints.items():
+            for c in cons:
+                if c not in KNOWN_CONSTRAINTS:
+                    raise CheckError(
+                        f"unknown constraint '{c}' on parameter "
+                        f"'{param_name}'", self.filename, d.pos)
+
     def _instantiate_generic_func(self, info, args, pos) -> str:
         if not info.type_params and args:
             raise CheckError("too many type arguments", self.filename, pos)
@@ -2473,6 +2552,7 @@ class TypeChecker:
                 raise CheckError(
                     f"type argument for '{param}' must be a concrete type, "
                     f"got {arg}", self.filename, pos)
+        self._check_constraints(info, args, pos)
         while True:
             self.generic_func_counter += 1
             internal = f"{info.name}__g{self.generic_func_counter - 1}"

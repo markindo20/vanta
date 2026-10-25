@@ -146,7 +146,7 @@ class Parser:
     def parse_func_decl(self):
         tok = self.advance()  # consume FUNC
         name = self.expect(TT.IDENT).value
-        type_params = self._parse_type_params()
+        type_params, type_param_constraints = self._parse_type_params()
         self.expect(TT.LPAREN)
         params = []
         if not self.check(TT.RPAREN):
@@ -163,12 +163,14 @@ class Parser:
         if self.match(TT.ARROW):
             ret = self.parse_type()
         self.expect(TT.NEWLINE)
-        return A.FuncDecl(name, params, ret, [], False, A.Pos(tok.line, tok.col))
+        return A.FuncDecl(name, params, ret, [], False, A.Pos(tok.line, tok.col),
+                          type_params=type_params,
+                          type_param_constraints=type_param_constraints)
 
     def parse_func(self, is_system):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
-        type_params = self._parse_type_params()
+        type_params, type_param_constraints = self._parse_type_params()
         self.expect(TT.LPAREN)
         params = []
         if not self.check(TT.RPAREN):
@@ -187,28 +189,41 @@ class Parser:
         self.expect(TT.COLON)  
         body = self.parse_block()
         return A.FuncDecl(name, params, ret, body, is_system, A.Pos(tok.line, tok.col),
-                          type_params=type_params)
+                          type_params=type_params,
+                          type_param_constraints=type_param_constraints)
 
     def _parse_type_params(self):
-        """Parse an optional `<T, U>` list after a declaration name."""
+        """Parse an optional `<T, U>` or `<T: Copyable + Eq, U>` list after a
+        declaration name. Returns (param_names, constraints_dict). The `+`
+        separates multiple constraints on one type parameter; `,` separates
+        type parameters."""
         params = []
+        constraints = {}
         if not self.match(TT.LT):
-            return params
+            return params, constraints
         while True:
             ptok = self.expect(TT.IDENT, "expected a type parameter")
             if ptok.value in params:
                 self.error(f"duplicate type parameter '{ptok.value}'", ptok)
             params.append(ptok.value)
+            cons = []
+            if self.match(TT.COLON):
+                ctok = self.expect(TT.IDENT, "expected a constraint name")
+                cons.append(ctok.value)
+                while self.match(TT.PLUS):
+                    ctok = self.expect(TT.IDENT, "expected a constraint name")
+                    cons.append(ctok.value)
+            constraints[ptok.value] = cons
             if self.match(TT.COMMA):
                 continue
             break
         self.expect(TT.GT)
-        return params
+        return params, constraints
 
     def parse_struct(self, is_component):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
-        type_params = self._parse_type_params()
+        type_params, type_param_constraints = self._parse_type_params()
         self.expect(TT.COLON)
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
@@ -226,12 +241,13 @@ class Parser:
         self.expect(TT.DEDENT)
         return A.StructDecl(name, fields, is_component,
                             A.Pos(tok.line, tok.col),
-                            type_params=type_params)
+                            type_params=type_params,
+                            type_param_constraints=type_param_constraints)
 
     def parse_enum(self):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
-        type_params = self._parse_type_params()
+        type_params, type_param_constraints = self._parse_type_params()
         self.expect(TT.COLON)
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
@@ -258,7 +274,8 @@ class Parser:
                 mn.value, payload, value, A.Pos(mn.line, mn.col)))
         self.expect(TT.DEDENT)
         return A.EnumDecl(name, members, A.Pos(tok.line, tok.col),
-                          type_params=type_params)
+                          type_params=type_params,
+                          type_param_constraints=type_param_constraints)
 
         """Parse a comma-separated type argument list, without the brackets."""
         args = []

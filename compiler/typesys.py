@@ -12,6 +12,13 @@ class PrimType(Type):
     def __repr__(self): return self.name
 
 
+# Built-in generic constraints. A type argument must satisfy every constraint
+# listed on its type parameter, or instantiation is a compile error.
+CONSTRAINT_COPYABLE = "Copyable"
+CONSTRAINT_EQ = "Eq"
+KNOWN_CONSTRAINTS = {CONSTRAINT_COPYABLE, CONSTRAINT_EQ}
+
+
 @dataclass(frozen=True)
 class IntLitType(Type):
     def __repr__(self): return "<int-lit>"
