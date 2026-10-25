@@ -79,7 +79,7 @@ class LexerTests(unittest.TestCase):
 
     def test_invalid_char(self):
         with self.assertRaises(LexError):
-            lex("x = @\n")
+            lex("x = $\n")
 
     def test_tab_rejected(self):
         with self.assertRaises(LexError):
