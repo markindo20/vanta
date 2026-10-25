@@ -254,6 +254,14 @@ class TypeChecker:
         bf("signal_new", [("name", STR)], STR)
         bf("signal_off", [("name", STR)], VOID)
         bf("signal_off_str", [("name", STR)], VOID)
+        bf("signal_instance_new", [], I32)
+        bf("signal_emit_instance", [("instance", I32), ("name", STR), ("value", I32)], VOID)
+        bf("signal_emit_str_instance", [("instance", I32), ("name", STR), ("value", STR)], VOID)
+        bf("signal_on_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
+        bf("signal_on_str_instance", [("instance", I32), ("name", STR), ("handler", _handler_str_type)], VOID)
+        bf("signal_on_once_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
+        bf("signal_off_instance", [("instance", I32), ("name", STR)], VOID)
+        bf("signal_off_str_instance", [("instance", I32), ("name", STR)], VOID)
         bf("file_exists", [("path", STR)], BOOL)
         bf("file_write", [("path", STR), ("data", STR)], I32)
         bf("file_read", [("path", STR)], STR)
@@ -476,7 +484,7 @@ class TypeChecker:
         self._struct_instances[key] = st
         env = dict(zip(info.type_params, args))
         fields = {}
-        for (fname, fte, fpos, fpub) in info.fields:
+        for (fname, fte, fpos, fpub, _fexported) in info.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'",
                                  self.filename, fpos)
@@ -593,7 +601,7 @@ class TypeChecker:
         if d.type_params:
             self._validate_constraints(d)
             fields = {}
-            for (fname, _ftype, fpos, _fpub) in d.fields:
+            for (fname, _ftype, fpos, _fpub, _fexported) in d.fields:
                 if fname in fields:
                     raise CheckError(f"duplicate field '{fname}'",
                                      self.filename, fpos)
@@ -603,7 +611,7 @@ class TypeChecker:
                 type_param_constraints=d.type_param_constraints)
             return
         fields = {}
-        for (fname, ftype, fpos, fpub) in d.fields:
+        for (fname, ftype, fpos, fpub, _fexported) in d.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'", self.filename, fpos)
             fields[fname] = (self._resolve_type(ftype), fpub)
@@ -655,7 +663,7 @@ class TypeChecker:
                     all_fields[f] = (t, _pub)
                 cur_name = cur.parent
         fields = {}
-        for (fname, ftype, fpos, fpub) in d.fields:
+        for (fname, ftype, fpos, fpub, _fexported) in d.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'",
                                  self.filename, fpos)
@@ -2729,7 +2737,7 @@ class TypeChecker:
             for pname, arg in zip(params, expected.type_args):
                 bindings[pname] = arg
         else:
-            for fname, fte, _fpos, _fpub in info.fields:
+            for fname, fte, _fpos, _fpub, _fexported in info.fields:
                 arg = by_name[fname]
                 at = self._check_expr(arg)
                 at = self._default_type(at, arg)

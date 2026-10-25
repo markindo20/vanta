@@ -64,17 +64,32 @@ class Parser:
         return A.Program(decls)
 
     def parse_top_level(self):
+        decorators = []
+        while self.check(TT.AT):
+            decorators.append(self._parse_decorator())
         t = self.peek()
         if t.type == TT.PUB:
             pub = self.advance()
-            if self.peek().type in (TT.IMPORT, TT.MODULE, TT.PUB):
+            if self.peek().type in (TT.IMPORT, TT.MODULE, TT.PUB, TT.AT):
                 self.error("'pub' must precede a declaration", pub)
             decl = self._parse_decl()
             if not hasattr(decl, 'is_public'):
                 self.error("'pub' cannot be applied to this declaration", pub)
             decl.is_public = True
+            if decorators:
+                decl.decorators.extend(decorators)
+                if "@export" in decorators:
+                    decl.is_exported = True
             return decl
-        return self._parse_decl()
+        decl = self._parse_decl()
+        if decorators:
+            if not hasattr(decl, 'decorators'):
+                self.error("decorator cannot be applied to this declaration",
+                           self.peek())
+            decl.decorators.extend(decorators)
+            if "@export" in decorators:
+                decl.is_exported = True
+        return decl
 
     def _parse_decl(self):
         t = self.peek()
@@ -109,6 +124,12 @@ class Parser:
             parts.append(self.expect(TT.IDENT, "expected a module name").value)
         name = '.'.join(parts)
         return A.ModuleDecl(name, A.Pos(tok.line, tok.col))
+
+    def _parse_decorator(self):
+        self.advance()  # AT
+        name = self.expect(TT.IDENT).value
+        self.expect(TT.NEWLINE)
+        return "@" + name
 
     def parse_const(self):
         tok = self.advance()
@@ -231,6 +252,9 @@ class Parser:
         self.expect(TT.INDENT)
         fields = []
         while not self.check(TT.DEDENT):
+            decorators = []
+            while self.check(TT.AT):
+                decorators.append(self._parse_decorator())
             is_public = False
             if self.check(TT.PUB):
                 self.advance()
@@ -239,7 +263,7 @@ class Parser:
             self.expect(TT.COLON)
             ft = self.parse_type()
             self.expect(TT.NEWLINE)
-            fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public))
+            fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public, decorators))
         self.expect(TT.DEDENT)
         return A.StructDecl(name, fields, is_component,
                             A.Pos(tok.line, tok.col),
@@ -303,8 +327,15 @@ class Parser:
         fields = []
         methods = []
         while not self.check(TT.DEDENT):
+            decorators = []
+            while self.check(TT.AT):
+                decorators.append(self._parse_decorator())
             if self.check(TT.FUNC):
                 fd = self.parse_func(False)
+                if decorators:
+                    fd.decorators.extend(decorators)
+                    if "@export" in decorators:
+                        fd.is_exported = True
                 methods.append(fd)
             else:
                 is_public = False
@@ -315,7 +346,7 @@ class Parser:
                 self.expect(TT.COLON)
                 ft = self.parse_type()
                 self.expect(TT.NEWLINE)
-                fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public))
+                fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public, decorators))
         self.expect(TT.DEDENT)
         return A.ClassDecl(name, parent, fields, methods,
                            A.Pos(tok.line, tok.col))

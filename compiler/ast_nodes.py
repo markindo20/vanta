@@ -78,6 +78,9 @@ class FuncDecl:
     type_params: List[str] = field(default_factory=list)
     # Type parameter name -> list of constraint names, e.g. {'T': ['Copyable']}.
     type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
+    # Whether `@export` was attached to this declaration.
+    is_exported: bool = False
+    decorators: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -91,6 +94,8 @@ class StructDecl:
     type_params: List[str] = field(default_factory=list)
     # Type parameter name -> list of constraint names.
     type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
+    is_exported: bool = False
+    decorators: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -112,6 +117,8 @@ class EnumDecl:
     type_params: List[str] = field(default_factory=list)
     # Type parameter name -> list of constraint names.
     type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
+    is_exported: bool = False
+    decorators: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -126,6 +133,8 @@ class ClassDecl:
     type_params: List[str] = field(default_factory=list)
     # Type parameter name -> list of constraint names.
     type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
+    is_exported: bool = False
+    decorators: List[str] = field(default_factory=list)
 
 
 @dataclass

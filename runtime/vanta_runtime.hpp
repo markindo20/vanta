@@ -1467,6 +1467,102 @@ inline void signal_off_str(Str name) {
     }
 }
 
+// ---------- Instance-bound signals ----------
+// A handle is a unique integer minted by `signal_instance_new()`. Nothing
+// tries to infer identity from a pointer; programs (and class conventions)
+// pass the handle wherever the signal belongs.
+
+inline int32_t signal_instance_new() {
+    static int32_t next = 1;
+    return next++;
+}
+
+struct InstanceSignalEntry {
+    int32_t instance;
+    Str name;
+    int kind;  // 0 = i32, 1 = str
+    bool once;
+    signal_handler_i32_t i32h;
+    signal_handler_str_t strh;
+};
+
+inline std::vector<InstanceSignalEntry>& instance_signal_registry() {
+    static std::vector<InstanceSignalEntry> r;
+    return r;
+}
+
+inline void signal_on_instance(int32_t instance, Str name,
+                              signal_handler_i32_t handler) {
+    InstanceSignalEntry e;
+    e.instance = instance; e.name = name; e.kind = 0; e.once = false;
+    e.i32h = handler; e.strh = nullptr;
+    instance_signal_registry().push_back(e);
+}
+
+inline void signal_on_str_instance(int32_t instance, Str name,
+                                  signal_handler_str_t handler) {
+    InstanceSignalEntry e;
+    e.instance = instance; e.name = name; e.kind = 1; e.once = false;
+    e.i32h = nullptr; e.strh = handler;
+    instance_signal_registry().push_back(e);
+}
+
+inline void signal_on_once_instance(int32_t instance, Str name,
+                                    signal_handler_i32_t handler) {
+    InstanceSignalEntry e;
+    e.instance = instance; e.name = name; e.kind = 0; e.once = true;
+    e.i32h = handler; e.strh = nullptr;
+    instance_signal_registry().push_back(e);
+}
+
+inline void signal_emit_instance(int32_t instance, Str name, int32_t value) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 0 && reg[i].i32h) {
+            reg[i].i32h(value);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+
+inline void signal_emit_str_instance(int32_t instance, Str name, Str value) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 1 && reg[i].strh) {
+            reg[i].strh(value);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+
+inline void signal_off_instance(int32_t instance, Str name) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 0) {
+            reg.erase(reg.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
+inline void signal_off_str_instance(int32_t instance, Str name) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 1) {
+            reg.erase(reg.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
 inline void signal_emit(Str name, int32_t value) {
     auto& reg = signal_registry();
     for (size_t i = 0; i < reg.size();) {
