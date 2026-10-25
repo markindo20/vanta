@@ -49,8 +49,8 @@ struct Font:
 # the same string can be drawn every frame without re-rendering.
 struct TextSprite:
     handle: ptr<void>   # the rendered texture
-    w: i32              # rendered width, in pixels
-    h: i32              # rendered height, in pixels
+    pub w: i32              # rendered width, in pixels
+    pub h: i32              # rendered height, in pixels
 
 func font_open(path: str, size: i32) -> Font:
     # Like screen_open: C reports failure by returning NULL, and the handle

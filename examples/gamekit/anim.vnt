@@ -28,7 +28,7 @@ import "sdl.vnt"
 import "image.vnt"
 
 struct Anim:
-    count: i32      # frames in the sheet
+    pub count: i32      # frames in the sheet
     fw: i32         # frame width, in pixels
     fh: i32         # frame height, in pixels
     fps: f32        # playback rate, in frames per second

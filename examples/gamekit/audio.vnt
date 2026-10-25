@@ -58,7 +58,7 @@ const TONE_CAP_MS: i32 = 10000     # audio_play_tone caps longer durations here
 
 struct Audio:
     dev: u32
-    rate: i32
+    pub rate: i32
 
 func audio_open() -> Audio:
     # Like screen_open: SDL_Init reports failure by return code and the
@@ -120,8 +120,8 @@ func audio_play_tone(a: Audio, freq: i32, ms: i32, buf: ptr<i16>, capacity: i32)
     return n
 
 struct Sound:
-    data: ptr<u8>
-    len: i32        # bytes of 44.1 kHz mono S16 PCM; one sample is two
+    pub data: ptr<u8>
+    pub len: i32        # bytes of 44.1 kHz mono S16 PCM; one sample is two
 
 func sound_load(a: Audio, path: str) -> Sound:
     # SDL_LoadWAV decodes the whole file into a buffer sound_free hands

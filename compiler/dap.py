@@ -664,6 +664,8 @@ class DapAdapter:
         self._variable_refs: dict[int, dict] = {}
         self._next_var_ref = 1
         self._recording = False
+        self._reverse_step_expected = False
+        self._reverse_step_expected = False
 
     # -- protocol ----------------------------------------------------------
 
@@ -1697,38 +1699,42 @@ class DapAdapter:
         self.response(request)
 
     def _ensure_recording(self):
-        """Mark that reverse execution is requested.
-
-        GDB builds that support reverse execution start recording
-        automatically on the first reverse command; older builds will
-        reject the reverse command with a clear error.  This method is a
-        no-op so the adapter never blocks waiting for recording to start.
-        """
+        if self._recording:
+            return
+        if self._gdb is not None:
+            self._gdb.run_command(
+                '-interpreter-exec console "record"')
         self._recording = True
 
     def _request_reverseContinue(self, request, args):
         self._ensure_recording()
-        self._resume(request, '-exec-reverse-continue', args)
+        self._reverse_step_expected = False
+        self._resume(request, '-interpreter-exec console "reverse-continue"',
+                     args)
 
     def _request_reverseStepIn(self, request, args):
         self._ensure_recording()
+        self._reverse_step_expected = True
         granularity = args.get('granularity', 'statement')
-        if granularity == 'instruction':
-            self._resume(request, '-exec-reverse-step-instruction', args)
-        else:
-            self._resume(request, '-exec-reverse-step', args)
+        command = ('reverse-stepi' if granularity == 'instruction'
+                   else 'reverse-step')
+        self._resume(request,
+                     '-interpreter-exec console "' + command + '"', args)
 
     def _request_reverseStepOut(self, request, args):
         self._ensure_recording()
-        self._resume(request, '-exec-reverse-finish', args)
+        self._reverse_step_expected = True
+        self._resume(request, '-interpreter-exec console "reverse-finish"',
+                     args)
 
     def _request_stepBack(self, request, args):
         self._ensure_recording()
+        self._reverse_step_expected = True
         granularity = args.get('granularity', 'statement')
-        if granularity == 'instruction':
-            self._resume(request, '-exec-reverse-next-instruction', args)
-        else:
-            self._resume(request, '-exec-reverse-next', args)
+        command = ('reverse-nexti' if granularity == 'instruction'
+                   else 'reverse-next')
+        self._resume(request,
+                     '-interpreter-exec console "' + command + '"', args)
 
     def _request_evaluate(self, request, args):
         expression = str(args.get('expression') or '')
@@ -2587,7 +2593,10 @@ class DapAdapter:
         self._try_native_conditions()
 
         dap_reason = 'breakpoint'
-        if reason in ('end-stepping-range', 'function-finished'):
+        if self._reverse_step_expected:
+            dap_reason = 'step'
+            self._reverse_step_expected = False
+        elif reason in ('end-stepping-range', 'function-finished'):
             dap_reason = 'step'
         elif reason == 'signal-received':
             dap_reason = 'exception'
@@ -2684,6 +2693,7 @@ class DapAdapter:
     def _shutdown(self, cleanup=False):
         self._running = False
         self._recording = False
+        self._reverse_step_expected = False
         if self._gdb is not None:
             try:
                 self._gdb.close()

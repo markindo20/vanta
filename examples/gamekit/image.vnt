@@ -23,8 +23,8 @@ extern "sdl2_image" {
 
 struct Tex:
     handle: ptr<void>
-    w: i32
-    h: i32
+    pub w: i32
+    pub h: i32
 
 func tex_load(s: Screen, path: str) -> Tex:
     # One call decodes the file straight into a texture on this renderer.
