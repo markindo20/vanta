@@ -5,10 +5,20 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise â€” priorities move
 as the games show what actually hurts.
 
-Current release: **v1.1.1** ([changelog](CHANGELOG.md)). The language's
+Current release: **v1.3.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v1.3.0
+
+Classes — full model + tests: `class` declarations with fields and methods,
+single inheritance (`extends`), construction via named arguments, field
+read/write, `ptr<Self>` self parameter, and inheritance resolution of
+methods at call sites. 945 tests total.
+
+Remaining queue: capturing lambdas, module-level globals backed by the state
+segment, registry package manager, instance-bound signals, `@export`.
 
 ## Landed in v1.2.0
 
@@ -18,11 +28,6 @@ segment per session and binds it into every rebuilt generation.
 `hot_should_reload()` lets a loop cooperate with rebuilds; `__reload(prev)`
 runs once per generation. `--reloads N` gives deterministic build/swap cycles.
 936 tests total.
-
-The class model remains partially implemented; scoped out of this release so
-hot reload could ship verified. Next: classes full model + tests, capturing
-lambdas, module-level globals backed by the state segment.
-
 
 Go-to-implementation landed. `textDocument/implementation` jumps from a
 type declaration to its concrete construction sites, or from a function

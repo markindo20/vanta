@@ -617,6 +617,8 @@ class TypeChecker:
             # validate existence (already)
             if d.parent in self.classes:
                 parent_ct = self.classes[d.parent]
+        # Forward-register so method param types can reference this class.
+        self.classes[d.name] = ClassType(d.name, {}, {}, parent=d.parent)
         # Merge inherited fields into this class's field table.
         all_fields = {}
         if parent_ct is not None:
@@ -660,8 +662,9 @@ class TypeChecker:
                 raise CheckError(f"duplicate function '{qual}'",
                                  self.filename, fd.pos)
             self.functions[qual] = FuncSig(qual, params, ret, is_extern=False)
-        ct = ClassType(d.name, fields, methods, parent=d.parent)
-        self.classes[d.name] = ct
+        ct = self.classes[d.name]
+        ct.fields = dict(all_fields)
+        ct.methods = methods
 
     def _check_class_methods(self, d):
         ct = self.classes[d.name]
@@ -1025,6 +1028,11 @@ class TypeChecker:
                     continue
                 return False
             if isinstance(node, A.Member):
+                ot = self._check_expr(node.obj)
+                # Through a pointer or list handle the memory is always writable,
+                # regardless of how the binding itself was declared.
+                if isinstance(ot, (PtrType, ListType)):
+                    return True
                 node = node.obj
                 continue
             break
@@ -1313,6 +1321,8 @@ class TypeChecker:
                 return self._check_generic_enum_member(
                     self.generic_enums[expr.obj.name], expr, expected)
             ot = self._check_expr(expr.obj)
+            if isinstance(ot, PtrType) and isinstance(ot.inner, ClassType):
+                ot = ot.inner
             if isinstance(ot, EnumType):
                 raise CheckError(f"enum values have no fields; write {ot}.Member",
                                  self.filename, expr.pos)
@@ -1320,6 +1330,24 @@ class TypeChecker:
                 t = ot.fields[expr.field]
                 expr.type = t
                 return t
+            if isinstance(ot, ClassType):
+                # Walk parents for inherited fields.
+                cur = ot
+                seen = set()
+                while cur is not None and cur.name not in seen:
+                    seen.add(cur.name)
+                    if expr.field in cur.fields:
+                        t = cur.fields[expr.field]
+                        expr.type = t
+                        return t
+                    cur = self.classes.get(cur.parent) if cur.parent else None
+                # A bare method name is not a value (it must be called).
+                if expr.field in ot.methods:
+                    raise CheckError(
+                        f"method '{expr.field}' must be called",
+                        self.filename, expr.pos)
+                raise CheckError(f"type {ot} has no field '{expr.field}'",
+                                 self.filename, expr.pos)
             if expr.field == 'at' and isinstance(ot, PtrType):
                 raise CheckError("'at' on a pointer must be called with an index "
                                  "and a size: p.at(i, size)",
@@ -2516,7 +2544,7 @@ class TypeChecker:
         if ft is None:
             raise CheckError(f"class '{ct.name}' has no method '{method}'",
                              self.filename, call.pos)
-        if not call.arg_names or any(x is not None for x in call.arg_names):
+        if call.arg_names is not None and any(x is not None for x in call.arg_names):
             raise CheckError(f"method '{method}' does not accept named arguments",
                              self.filename, call.pos)
         # params[0] is `self`; bind it to the receiver.
@@ -2527,8 +2555,11 @@ class TypeChecker:
         self_param = params[0]
         # The receiver must be a subtype of self's declared type.
         recv_t = ct
-        # Simple nominal check: exact class match, or subclass via parent chain.
-        if not self._is_subclass_of(ct, self_param[1]):
+        # Allow `self` declared as either the class or a pointer to it.
+        ancestor = self_param[1]
+        if isinstance(ancestor, PtrType) and isinstance(ancestor.inner, ClassType):
+            ancestor = ancestor.inner
+        if not self._is_subclass_of(ct, ancestor):
             raise CheckError(
                 f"cannot call '{method}' on '{ct.name}'; expected "
                 f"receiver of type {self_param[1]}", self.filename, call.pos)

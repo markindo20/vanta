@@ -2,6 +2,17 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.3.0 - 2026-10-25
+
+- **Classes — full model + tests**: `class` declarations with fields and methods,
+  single inheritance (`extends`), construction via named arguments (flattening
+  inherited fields), field read/write, `ptr<Self>` self parameter, method calls
+  with inheritance resolution (base methods invoked on subclass instances).
+- Added `tests/test_classes.py` with 9 tests (basic field read/write, method
+  read/mutation/params, inheritance of fields and methods, missing/unknown
+  field rejection).
+- Tests: 945 (936 + 9 class tests).
+
 ## v1.2.0 - 2026-10-25
 
 - **Phase II.D: state-preserving hot reload**. `vanta hot` owns one flat byte

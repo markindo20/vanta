@@ -586,11 +586,11 @@ class CodeGen:
                     if m not in all_m:
                         all_m[m] = (cur, cur.methods[m])
                 cur = self.tc.classes.get(cur.parent) if cur.parent else None
-            if all_m:
+            if False and all_m:
                 self.emit(f'static {ct.name}_vtable {ct.name}_vtable_inst = {{')
                 self.indent += 1
                 for m, (owner, mft) in all_m.items():
-                    self.emit(f'&{owner.name}_{m},')
+                    self.emit(f'&fn_{owner.name}_{m},')
                 self.indent -= 1
                 self.emit('};')
                 self.emit('')
@@ -765,7 +765,7 @@ class CodeGen:
         self.emit(f'struct {ct.name}_vtable {{')
         self.indent += 1
         for m, (_owner, ft) in all_m.items():
-            rest = ', '.join(f'{self._ctype(ft.params[i])} arg{i}'
+            rest = ', '.join(f'{self._ctype(ft.params[i][1])} arg{i}'
                               for i in range(1, len(ft.params)))
             self.emit(f'{self._ctype(ft.ret)} (*{m})({ct.name}* self'
                       + (', ' + rest if rest else '') + ');')
@@ -1144,6 +1144,8 @@ class CodeGen:
             # Recurse through _lvalue, not _expr: a checked at() receiver
             # must be emitted as a reference so writes reach the array.
             base = self._lvalue(expr.obj)
+            if isinstance(obj_t, PtrType) and isinstance(obj_t.inner, ClassType):
+                return f'{base}->v_{expr.field}'
             if isinstance(obj_t, StructType) and obj_t.builtin:
                 return f'{base}.{expr.field}'
             return f'{base}.v_{expr.field}'
@@ -1246,6 +1248,8 @@ class CodeGen:
             base = self._expr(e.obj)
             if isinstance(obj_t, StructType) and obj_t.builtin:
                 return f'{base}.{e.field}'
+            if isinstance(obj_t, PtrType) and isinstance(obj_t.inner, ClassType):
+                return f'{base}->v_{e.field}'
             if isinstance(obj_t, ClassType):
                 # Fields are kept inline (inherited flattened into the struct).
                 return f'{base}.v_{e.field}'
@@ -1402,10 +1406,13 @@ class CodeGen:
                     decl = self.tc.classes.get(decl.parent) if decl.parent else None
                 if decl is None:
                     decl = ot
+                # `base` is the receiver value; pass a pointer to its (possibly
+                # upcast) declaring class for `self`.
                 args = ', '.join(self._expr(a) for a in c.args)
-                # `base` is the receiver value; take its address for `self`.
-                return f'fn_{decl.name}_{m}({base}, {args})' if args else \
-                    f'fn_{decl.name}_{m}({base})'
+                caster = f'reinterpret_cast<{decl.name}*>'
+                call_self = f'{caster}(&{base})'
+                return (f'fn_{decl.name}_{m}({call_self}, {args})' if args else
+                       f'fn_{decl.name}_{m}({call_self})')
             if isinstance(ot, StructType) and ot.name == 'Arena':
                 if m == 'reset':
                     return f'{base}.reset()'
