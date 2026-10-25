@@ -1,7 +1,11 @@
 import os
+import functools
 import sys
+import tarfile
 import tempfile
+import threading
 import unittest
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -251,6 +255,53 @@ class PackagesTests(unittest.TestCase):
             if old is not None:
                 os.environ['VANTA_REGISTRY'] = old
         self.assertEqual(rc, 1)
+
+    def _make_http_registry(self, root, name, ver, files):
+        pkg_dir = os.path.join(root, name, ver)
+        os.makedirs(pkg_dir, exist_ok=True)
+        tar_path = os.path.join(pkg_dir, 'source.tar.gz')
+        with tarfile.open(tar_path, 'w:gz') as tf:
+            for rel, content in files.items():
+                data = content.encode('utf-8')
+                info = tarfile.TarInfo(name=rel)
+                info.size = len(data)
+                tf.addfile(info, __import__('io').BytesIO(data))
+        return tar_path
+
+    def test_add_registry_dep_http_base(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        root = os.path.join(self._tmp.name, 'httpregistry')
+        self._make_http_registry(root, 'httpdep', '2.0.0', {
+            'vanta.toml': '[package]\nname = "httpdep"\nversion = "2.0.0"\n',
+            'lib.vnt': 'func main() -> void: print_i32(9)\n',
+        })
+
+        handler = functools.partial(SimpleHTTPRequestHandler, directory=root)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            old = os.environ.get('VANTA_REGISTRY')
+            os.environ['VANTA_REGISTRY'] = 'http://127.0.0.1:%d' % port
+            try:
+                rc = cmd_pm(make_args(pm_command='add',
+                                      sources=['httpdep@2.0.0'], names=[]))
+            finally:
+                if old is None:
+                    os.environ.pop('VANTA_REGISTRY', None)
+                else:
+                    os.environ['VANTA_REGISTRY'] = old
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(rc, 0)
+        manifest = _read_manifest()
+        self.assertEqual(manifest['dependencies']['httpdep'], {'registry': '2.0.0'})
+        lock = read_lock()
+        self.assertEqual(lock['packages']['httpdep']['source'],
+                         'registry:httpdep@2.0.0')
+        self.assertTrue(os.path.exists(os.path.join(VENDOR, 'httpdep', 'lib.vnt')))
 
 
 def io_capture(fn):

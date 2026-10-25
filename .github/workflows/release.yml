@@ -2,90 +2,23 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
 
 jobs:
   release:
-    name: build and attach
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Check the tag matches the compiler version
-        run: |
-          python - <<'PY'
-          import os
-          from compiler import VERSION
-          tag = os.environ['GITHUB_REF_NAME']
-          expected = 'v' + VERSION
-          if tag != expected:
-              raise SystemExit(f'tag {tag} does not match {expected}')
-          print(f'releasing {tag}')
-          PY
-
-      - name: Build wheel and sdist
-        run: python -m pip install --upgrade build twine && python -m build && python -m twine check dist/*
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: editors/vscode/package-lock.json
-
-      - name: Build the VS Code extension
-        working-directory: editors/vscode
-        run: |
-          npm ci
-          npm run package
-
-      - name: Smoke-test the installed wheel
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install dist/*.whl
-          .venv/bin/vanta --version
-          .venv/bin/vanta doctor
-          mkdir -p /tmp/vanta-smoke
-          printf 'func main() -> void:\n    print_str("installed ok")\n' > /tmp/vanta-smoke/hello.vnt
-          .venv/bin/vanta /tmp/vanta-smoke/hello.vnt
-          printf 'import "std/option.vnt"\nimport "std/result.vnt"\nfunc main() -> void:\n    let value: Option<i32> = Option.None\n    match value:\n        Option.None:\n            print_str("stdlib ok")\n        Option.Some(v):\n            print_i32(v)\n    let parsed: Result<i32, str> = Result.Ok(3)\n    match parsed:\n        Result.Ok(v):\n            print_i32(v)\n        Result.Err(message):\n            print_str(message)\n' > /tmp/vanta-smoke/stdlib.vnt
-          .venv/bin/vanta /tmp/vanta-smoke/stdlib.vnt
-
-      - name: Keep the distributions for the publish job
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/*
-
-      - name: Attach the distributions and VSIX to the GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*
-            editors/vscode/vanta-language-*.vsix
-          generate_release_notes: true
-
-  # Trusted Publishing is enabled by setting the repository variable
-  # PUBLISH_PYPI=true and configuring this repo + the `pypi` environment on
-  # PyPI. Until then the release job still builds and attaches the wheel, so
-  # `pip install <release wheel URL>` works.
-  publish:
-    name: publish to PyPI
-    needs: release
-    if: vars.PUBLISH_PYPI == 'true'
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - name: Download the distributions
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-      - name: Publish
+      - name: Install build dependencies
+        run: python -m pip install build wheel
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

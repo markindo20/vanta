@@ -69,6 +69,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Write each debug session to this file: every DAP message and every line of GDB traffic. Leave empty to keep no log. Use it to report a problem with the debugger."
+        },
+        "vanta.pm.command": {
+          "type": "string",
+          "default": "vanta pm",
+          "markdownDescription": "Command used to run the Vanta package manager from the editor (default `vanta pm`)."
         }
       }
     },
@@ -214,6 +219,10 @@
       {
         "command": "vanta.restartServer",
         "title": "Vanta: Restart Language Server"
+      },
+      {
+        "command": "vanta.runPm",
+        "title": "Vanta: Run Package Manager"
       }
     ]
   },

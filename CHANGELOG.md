@@ -15,7 +15,7 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
 - Added `tests/test_packages.py` covering manifest/lockfile IO, local-path
   fetching, transitive resolution, add/list/lock/check/remove/install, and
   error cases.
-- Tests: 967 (945 + 22 package-manager tests).
+- Tests: 968 (945 + 23 package-manager tests).
 
 ## v1.3.0 - 2026-10-25
 

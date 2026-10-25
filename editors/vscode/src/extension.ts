@@ -31,6 +31,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       restart(context)),
   );
   context.subscriptions.push(
+    vscode.commands.registerCommand('vanta.runPm', () => runPm()),
+  );
+  context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('vanta.server.path')) {
         void restart(context);
@@ -178,9 +181,21 @@ async function restart(context: vscode.ExtensionContext): Promise<void> {
   try {
     await stop();
     await start(context);
-  } finally {
+  }   finally {
     restarting = false;
   }
+}
+
+function runPm(): void {
+  const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const config = vscode.workspace.getConfiguration('vanta');
+  const command = (config.get<string>('pm.command') ?? 'vanta pm').trim();
+  const terminal = vscode.window.createTerminal({
+    name: 'Vanta Package Manager',
+    cwd: workspace,
+  });
+  terminal.show();
+  terminal.sendText(command);
 }
 
 async function stop(): Promise<void> {
