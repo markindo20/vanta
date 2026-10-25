@@ -1443,6 +1443,30 @@ inline void signal_on_once(Str name, signal_handler_i32_t handler) {
     signal_registry().push_back(e);
 }
 
+inline Str signal_new(Str name) { return Str::copy(name.c_str(), name.size()); }
+
+inline void signal_off(Str name) {
+    auto& reg = signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (vanta::str_eq(reg[i].name, name) && reg[i].kind == 0) {
+            reg.erase(reg.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
+inline void signal_off_str(Str name) {
+    auto& reg = signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (vanta::str_eq(reg[i].name, name) && reg[i].kind == 1) {
+            reg.erase(reg.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
 inline void signal_emit(Str name, int32_t value) {
     auto& reg = signal_registry();
     for (size_t i = 0; i < reg.size();) {
