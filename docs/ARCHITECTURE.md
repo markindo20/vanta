@@ -460,7 +460,12 @@ pipe.
   views, and owned buffers are freed by the last copy
 - the `Arena` bump allocator; it constructs and destroys non-trivial element
   types, so `alloc::<str>` and structs containing `Str` are well-defined
-- `List<T>` with `list_new` / `list_push` / `list_pop` / `list_insert` /
+- `bind_host_state`, `state_arena()`, `request_host_reload`, and
+  `hot_should_reload` — the Phase II.D hot-reload substrate: the host binds a
+  flat byte segment into every generation, `state_arena()` allocates from it,
+  named `Arena(bytes, "name")` maps an OS shared segment (handle retained on
+  Windows), and a 64-byte `StateHeader` + 256-entry layout table replays
+  allocations deterministically
   `list_remove` / `list_sort` (a stable merge sort driven by the caller's
   comparator function value) / `list_at_checked[_ref]` — the arena-backed
   growable lists behind `arena.list::<T>()`
