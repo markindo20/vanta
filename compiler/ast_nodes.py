@@ -51,13 +51,19 @@ class Param:
 
 @dataclass
 class LambdaExpr:
-    # An anonymous function literal with no captures. It desugars to a fresh
-    # top-level function whose name is assigned by the type checker.
+    # An anonymous function literal. If it captures variables from its
+    # enclosing scope it becomes a closure: the checker generates a wrapper
+    # function taking a context pointer and a closure struct type bundling
+    # the invoke function pointer with the captured values.
     params: List[Param]
     ret: Optional[TypeExpr]
     body: List[Any]
     pos: Pos
     name: str = ''  # filled in by the checker
+    is_closure: bool = False  # True when the lambda captures variables
+    captured_names: List[str] = field(default_factory=list)  # names captured from enclosing scope
+    invoke_name: str = ''  # generated wrapper function name (closure only)
+    ctx_struct_name: str = ''  # generated closure context struct name (closure only)
 
 @dataclass
 class FuncDecl:

@@ -2685,6 +2685,51 @@ class TypeCheckerTests(unittest.TestCase):
             "    mut c = C(x: 1, secret: 2)\n"
             "    print_i32(c.x)\n")
 
+    # ---------- closures ----------
+
+    def test_non_capturing_lambda(self):
+        _, tc = run("func main() -> void:\n"
+                    "    let f = func(x: i32) -> i32:\n"
+                    "        return x + 1\n"
+                    "    print_i32(f(5))\n")
+        names = [n for n in tc.functions if n.startswith('__lambda__')]
+        self.assertEqual(len(names), 1)
+
+    def test_capturing_lambda_basic(self):
+        _, tc = run("func main() -> void:\n"
+                    "    let offset = 10\n"
+                    "    let f = func(x: i32) -> i32:\n"
+                    "        return x + offset\n"
+                    "    print_i32(f(5))\n")
+        # Closure struct should exist with invoke + captured field
+        self.assertIn('Closure__0', tc.structs)
+        st = tc.structs['Closure__0']
+        self.assertIn('invoke', st.fields)
+        self.assertIn('offset', st.fields)
+        # Closure value type is ptr<Closure__0>
+        self.assertEqual(len(tc.closures), 1)
+
+    def test_capturing_lambda_multiple(self):
+        _, tc = run("func main() -> void:\n"
+                    "    let a = 1\n"
+                    "    let b = 2\n"
+                    "    let f = func(x: i32) -> i32:\n"
+                    "        return x + a + b\n"
+                    "    print_i32(f(3))\n")
+        self.assertIn('Closure__0', tc.structs)
+        st = tc.structs['Closure__0']
+        self.assertIn('a', st.fields)
+        self.assertIn('b', st.fields)
+
+    def test_closure_call_typechecks(self):
+        _, tc = run("func main() -> void:\n"
+                    "    let offset = 10\n"
+                    "    let f = func(x: i32) -> i32:\n"
+                    "        return x + offset\n"
+                    "    let r = f(5)\n"
+                    "    print_i32(r)\n")
+        # f(5) should typecheck as i32
+
 
 if __name__ == '__main__':
     unittest.main()

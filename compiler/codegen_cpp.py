@@ -576,6 +576,9 @@ class CodeGen:
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
             self._gen_func(fd)
+        # Generate __make_closure__N helpers for all capturing lambdas.
+        for closure in getattr(self.tc, 'closures', []):
+            self._gen_closure_make_function(closure)
         for ct in class_types:
             visited = set()
             all_m = {}
@@ -970,6 +973,73 @@ class CodeGen:
         self.emit('}')
         self.emit('')
 
+    _AST_NODE_TYPES = frozenset({
+        'Program', 'FuncDecl', 'StructDecl', 'ClassDecl', 'EnumDecl',
+        'EnumMember', 'Param', 'LambdaExpr', 'VarDecl', 'AssignStmt',
+        'ReturnStmt', 'BreakStmt', 'ContinueStmt', 'IfStmt', 'MatchPattern',
+        'MatchArm', 'MatchStmt', 'WhileStmt', 'ForRangeStmt', 'ForEachStmt',
+        'ExprStmt', 'Name', 'BinOp', 'UnaryOp', 'Call', 'Member', 'Index',
+        'TypeExpr',
+    })
+
+    def _find_closures(self, node, out):
+        """Recursively collect LambdaExpr nodes that are closures."""
+        if isinstance(node, A.LambdaExpr):
+            if node.is_closure:
+                out.append(node)
+            return
+        if type(node).__name__ not in self._AST_NODE_TYPES:
+            return
+        if isinstance(node, list):
+            for item in node:
+                self._find_closures(item, out)
+            return
+        if isinstance(node, tuple):
+            for item in node:
+                self._find_closures(item, out)
+            return
+        if isinstance(node, dict):
+            for v in node.values():
+                self._find_closures(v, out)
+            return
+        for attr in ('decls', 'body', 'params', 'fields', 'methods', 'args', 'arg_names',
+                     'then_body', 'else_body', 'elif_branches',
+                     'patterns', 'guard', 'collection', 'members', 'payload',
+                     'left', 'right', 'operand', 'obj', 'index', 'field',
+                     'target', 'value', 'start', 'end', 'var', 'type', 'ret',
+                     'inner', 'type_params', 'display', 'captured_names',
+                     'name', 'pos'):
+            v = getattr(node, attr, None)
+            if v is None:
+                continue
+            self._find_closures(v, out)
+
+    def _gen_closure_make_function(self, closure: A.LambdaExpr):
+        st = self.tc.structs.get(closure.ctx_struct_name)
+        if st is None:
+            raise RuntimeError(f"missing closure struct {closure.ctx_struct_name}")
+        cap_params = []
+        for fname, (ftype, _pub) in st.fields.items():
+            if fname == 'invoke':
+                continue
+            pname = f'cap_{fname}'
+            cap_params.append(f'{self._ctype(ftype)} {pname}')
+        params_str = ', '.join(cap_params)
+        self.emit(f'static {closure.ctx_struct_name}* '
+                  f'__make_closure_{closure.name}({params_str}) {{')
+        self.indent += 1
+        self.emit(f'auto* __c = vanta::state_arena().alloc<{closure.ctx_struct_name}>();')
+        self.emit(f'__c->v_invoke = &vanta_user::{closure.invoke_name};')
+        for fname, (ftype, _pub) in st.fields.items():
+            if fname == 'invoke':
+                continue
+            pname = f'cap_{fname}'
+            self.emit(f'__c->v_{fname} = {pname};')
+        self.emit('return __c;')
+        self.indent -= 1
+        self.emit('}')
+        self.emit('')
+
     def _gen_extern(self, ed: A.ExternDecl):
         self.emit(f'extern "C" {{')
         self.indent += 1
@@ -1174,6 +1244,10 @@ class CodeGen:
 
     def _expr(self, e) -> str:
         if isinstance(e, A.LambdaExpr):
+            if e.is_closure:
+                cap_args = ', '.join(self._expr(A.Name(name, e.pos))
+                                     for name in e.captured_names)
+                return f'__make_closure_{e.name}({cap_args})'
             return f'vanta_user::fn_{e.name}'
         if isinstance(e, A.IntLit):
             t = getattr(e, 'type', I32)
@@ -1250,6 +1324,8 @@ class CodeGen:
                 return f'{base}.{e.field}'
             if isinstance(obj_t, PtrType) and isinstance(obj_t.inner, ClassType):
                 return f'{base}->v_{e.field}'
+            if isinstance(obj_t, PtrType) and isinstance(obj_t.inner, StructType):
+                return f'{base}->v_{e.field}'
             if isinstance(obj_t, ClassType):
                 # Fields are kept inline (inherited flattened into the struct).
                 return f'{base}.v_{e.field}'
@@ -1293,6 +1369,10 @@ class CodeGen:
             if isinstance(et, EnumType) and et.has_payloads:
                 return f'make_{et.name}_{f.field}({args})'
             return f'{et.name}::{f.field}'
+        if getattr(c, 'is_closure_call', False):
+            func_expr = self._expr(c.func)
+            args = ', '.join([func_expr] + [self._expr(a) for a in c.args])
+            return f'{func_expr}->v_invoke({args})'
         if getattr(c, 'is_indirect_call', False):
             # The checker resolved this through a function value: a variable,
             # a struct field, an indexed element, or another call.

@@ -168,6 +168,8 @@ class TypeChecker:
         # Function types seen anywhere in the program, mapped to the C++
         # alias name codegen will emit for them.
         self.func_types: dict[FuncType, str] = {}
+        # Closures encountered during type checking, for codegen.
+        self.closures: List[A.LambdaExpr] = []
         self.scopes = []
         self.current_ret: Type = VOID
         self.loop_depth = 0
@@ -1228,11 +1230,18 @@ class TypeChecker:
         if ct is not BOOL:
             raise CheckError(f"condition must be bool, got {ct}", self.filename, pos)
 
-    def _check_expr(self, expr, expected=None) -> Type:
-        if isinstance(expr, A.LambdaExpr):
-            self._lambda_counter += 1
-            name = "__lambda__%d" % (self._lambda_counter - 1)
-            expr.name = name
+    def _check_lambda(self, expr: A.LambdaExpr) -> Type:
+        self._lambda_counter += 1
+        idx = self._lambda_counter - 1
+        name = "__lambda__%d" % idx
+        expr.name = name
+
+        param_names = {p.name for p in expr.params}
+        captured = self._analyze_captures(expr.body, param_names)
+        expr.captured_names = captured
+
+        if not captured:
+            # No captures: desugar to a plain top-level function (existing behavior).
             fd = A.FuncDecl(
                 name=name, params=expr.params, ret=expr.ret,
                 body=expr.body, is_system=False, pos=expr.pos)
@@ -1245,6 +1254,263 @@ class TypeChecker:
             expr.type = ft
             expr.is_func_ref = True
             return expr.type
+
+        # Closure: build wrapper function + closure struct type.
+        expr.is_closure = True
+        self.closures.append(expr)
+        closure_struct_name = "Closure__%d" % idx
+        expr.ctx_struct_name = closure_struct_name
+        expr.invoke_name = "fn_closure__%d" % idx
+
+        # Resolve captured variable types.
+        ctx_fields = {}  # name -> Type
+        for cap_name in captured:
+            ent = self._lookup(cap_name)
+            if ent is None:
+                raise CheckError(
+                    f"cannot capture unknown variable '{cap_name}'",
+                    self.filename, expr.pos)
+            cap_type = ent[0]
+            ctx_fields[cap_name] = cap_type
+
+        # Register closure struct placeholder (needed for PtrType in invoke signature).
+        closure_struct = StructType(closure_struct_name, {}, builtin=False,
+                                     decl_file=self.filename)
+        self.structs[closure_struct_name] = closure_struct
+
+        # Rewrite the body: replace captured Name refs with Member(self, name).
+        new_body = self._rewrite_captures(expr.body, captured)
+
+        # Build the closure struct type: { invoke: FuncType, captured fields... }
+        # Must be done BEFORE checking the wrapper (which references self.<cap>).
+        invoke_params = (PtrType(closure_struct),) + \
+                        tuple(self._resolve_type(p.type) for p in expr.params)
+        invoke_ret = self._resolve_type(expr.ret) if expr.ret else VOID
+        invoke_ft = self._func_type(invoke_params, invoke_ret)
+
+        closure_fields = {"invoke": (invoke_ft, True)}
+        for cap_name in captured:
+            closure_fields[cap_name] = (ctx_fields[cap_name], True)
+        closure_struct.fields = closure_fields
+
+        # Wrapper function: fn_closure__N(self: ptr<ClosureStruct>, params...) -> ret
+        ctx_te = A.TypeExpr('ptr',
+                            inner=A.TypeExpr('named', name=closure_struct_name),
+                            pos=expr.pos)
+        wrapper_params = [A.Param("self", ctx_te, expr.pos)]
+        for p in expr.params:
+            wrapper_params.append(A.Param(p.name, p.type, p.pos))
+
+        ret_te = expr.ret if expr.ret is not None else \
+            A.TypeExpr('named', name='void', pos=expr.pos)
+        fd = A.FuncDecl(
+            name="fn_closure__%d" % idx,
+            params=wrapper_params,
+            ret=ret_te,
+            body=new_body,
+            is_system=False,
+            pos=expr.pos)
+        expr.invoke_name = fd.name
+        self.program.decls.append(fd)
+        self._register_func(fd)
+        self._check_func(fd)
+
+        expr.type = PtrType(closure_struct)
+        return PtrType(closure_struct)
+
+    def _type_to_type_expr(self, t: Type, pos) -> A.TypeExpr:
+        """Convert a resolved Type back into a TypeExpr (for wrapper params)."""
+        if isinstance(t, PrimType):
+            return A.TypeExpr('named', name=t.name, pos=pos)
+        if isinstance(t, PtrType):
+            return A.TypeExpr('ptr',
+                              inner=self._type_to_type_expr(t.inner, pos),
+                              pos=pos)
+        if isinstance(t, ListType):
+            return A.TypeExpr('list',
+                              inner=self._type_to_type_expr(t.inner, pos),
+                              pos=pos)
+        if isinstance(t, ArrayType):
+            return A.TypeExpr('array',
+                              inner=self._type_to_type_expr(t.inner, pos),
+                              size=t.size, pos=pos)
+        if isinstance(t, StructType):
+            return A.TypeExpr('named', name=t.name, pos=pos)
+        if isinstance(t, EnumType):
+            return A.TypeExpr('named', name=t.name, pos=pos)
+        if isinstance(t, ClassType):
+            return A.TypeExpr('named', name=t.name, pos=pos)
+        if t is VOID:
+            return A.TypeExpr('named', name='void', pos=pos)
+        if t is BOOL:
+            return A.TypeExpr('named', name='bool', pos=pos)
+        # Fallback: named type.
+        return A.TypeExpr('named', name=getattr(t, 'name', 'void'), pos=pos)
+
+    def _analyze_captures(self, body, param_names):
+        """Find variables from enclosing scopes referenced by the lambda body.
+
+        Returns a list of captured variable names (in order of first use).
+        """
+        declared = set(param_names)
+        captures = []
+        capture_set = set()
+
+        def collect_names(node, local_names):
+            if isinstance(node, A.Name):
+                if (node.name not in local_names
+                        and node.name not in declared
+                        and node.name not in capture_set):
+                    ent = self._lookup(node.name)
+                    if ent is not None:
+                        # Only capture variables, not functions/constants.
+                        captures.append(node.name)
+                        capture_set.add(node.name)
+                return
+            if isinstance(node, A.VarDecl):
+                collect_names(node.value, local_names | {node.name})
+                return
+            if isinstance(node, A.AssignStmt):
+                collect_names(node.target, local_names)
+                collect_names(node.value, local_names)
+                return
+            if isinstance(node, A.ReturnStmt):
+                if node.value is not None:
+                    collect_names(node.value, local_names)
+                return
+            if isinstance(node, A.ExprStmt):
+                collect_names(node.expr, local_names)
+                return
+            if isinstance(node, A.IfStmt):
+                collect_names(node.cond, local_names)
+                for s in node.then_body:
+                    collect_names(s, local_names)
+                for eb in node.elif_branches:
+                    for s in eb.body:
+                        collect_names(s, local_names)
+                if node.else_body:
+                    for s in node.else_body:
+                        collect_names(s, local_names)
+                return
+            if isinstance(node, A.WhileStmt):
+                collect_names(node.cond, local_names)
+                for s in node.body:
+                    collect_names(s, local_names)
+                return
+            if isinstance(node, A.ForRangeStmt):
+                collect_names(node.start, local_names)
+                collect_names(node.end, local_names)
+                for s in node.body:
+                    collect_names(s, local_names | {node.var})
+                return
+            if isinstance(node, A.ForEachStmt):
+                collect_names(node.collection, local_names)
+                for s in node.body:
+                    collect_names(s, local_names | {node.var})
+                return
+            if isinstance(node, A.MatchStmt):
+                collect_names(node.value, local_names)
+                for arm in node.arms:
+                    for b in arm.body:
+                        collect_names(b, local_names)
+                    if arm.guard:
+                        collect_names(arm.guard, local_names)
+                return
+            if isinstance(node, A.Call):
+                collect_names(node.func, local_names)
+                for a in node.args:
+                    collect_names(a, local_names)
+                return
+            if isinstance(node, A.BinOp):
+                collect_names(node.left, local_names)
+                collect_names(node.right, local_names)
+                return
+            if isinstance(node, A.UnaryOp):
+                collect_names(node.operand, local_names)
+                return
+            if isinstance(node, A.Member):
+                collect_names(node.obj, local_names)
+                return
+            if isinstance(node, A.Index):
+                collect_names(node.obj, local_names)
+                collect_names(node.index, local_names)
+                return
+
+        for stmt in body:
+            collect_names(stmt, set())
+        return captures
+
+    def _rewrite_captures(self, body, captured_names):
+        """Rewrite captured Name refs to Member(self, name) in the body."""
+        capture_set = set(captured_names)
+
+        def rewrite(node):
+            if isinstance(node, A.Name):
+                if node.name in capture_set:
+                    return A.Member(obj=A.Name("self", node.pos),
+                                    field=node.name, pos=node.pos)
+                return node
+            if isinstance(node, A.VarDecl):
+                return A.VarDecl(node.name, node.type_ann, node.mutable,
+                                 rewrite(node.value), node.pos)
+            if isinstance(node, A.AssignStmt):
+                return A.AssignStmt(rewrite(node.target), rewrite(node.value),
+                                    node.pos)
+            if isinstance(node, A.ReturnStmt):
+                return A.ReturnStmt(rewrite(node.value) if node.value else None,
+                                    node.pos)
+            if isinstance(node, A.ExprStmt):
+                return A.ExprStmt(rewrite(node.expr), node.pos)
+            if isinstance(node, A.IfStmt):
+                return A.IfStmt(rewrite(node.cond),
+                                [rewrite(s) for s in node.then_body],
+                                [(rewrite(c), [rewrite(s) for s in b.body])
+                                 for c, b in node.elif_branches],
+                                [rewrite(s) for s in node.else_body]
+                                if node.else_body else None,
+                                node.pos)
+            if isinstance(node, A.WhileStmt):
+                return A.WhileStmt(rewrite(node.cond),
+                                   [rewrite(s) for s in node.body],
+                                   node.pos)
+            if isinstance(node, A.ForRangeStmt):
+                return A.ForRangeStmt(node.var, rewrite(node.start),
+                                      rewrite(node.end),
+                                      [rewrite(s) for s in node.body],
+                                      node.pos)
+            if isinstance(node, A.ForEachStmt):
+                return A.ForEachStmt(node.var, rewrite(node.collection),
+                                     [rewrite(s) for s in node.body],
+                                     node.pos)
+            if isinstance(node, A.MatchStmt):
+                return A.MatchStmt(rewrite(node.value),
+                                   [A.MatchArm(a.patterns, a.is_else,
+                                               [rewrite(s) for s in a.body],
+                                               rewrite(a.guard)
+                                               if a.guard else None,
+                                               a.pos) for a in node.arms],
+                                   node.pos)
+            if isinstance(node, A.Call):
+                return A.Call(rewrite(node.func),
+                              [rewrite(a) for a in node.args],
+                              node.arg_names, node.type_args, node.pos)
+            if isinstance(node, A.BinOp):
+                return A.BinOp(node.op, rewrite(node.left), rewrite(node.right),
+                               node.pos)
+            if isinstance(node, A.UnaryOp):
+                return A.UnaryOp(node.op, rewrite(node.operand), node.pos)
+            if isinstance(node, A.Member):
+                return A.Member(rewrite(node.obj), node.field, node.pos)
+            if isinstance(node, A.Index):
+                return A.Index(rewrite(node.obj), rewrite(node.index),
+                               node.pos)
+            return node
+
+        return [rewrite(s) for s in body]
+
+    def _check_expr(self, expr, expected=None) -> Type:
+        if isinstance(expr, A.LambdaExpr):
+            return self._check_lambda(expr)
         if isinstance(expr, A.IntLit):
             expr.type = INT_LIT; return INT_LIT
         if isinstance(expr, A.FloatLit):
@@ -1347,6 +1613,8 @@ class TypeChecker:
                     self.generic_enums[expr.obj.name], expr, expected)
             ot = self._check_expr(expr.obj)
             if isinstance(ot, PtrType) and isinstance(ot.inner, ClassType):
+                ot = ot.inner
+            if isinstance(ot, PtrType) and isinstance(ot.inner, StructType):
                 ot = ot.inner
             if isinstance(ot, EnumType):
                 raise CheckError(f"enum values have no fields; write {ot}.Member",
@@ -1723,6 +1991,30 @@ class TypeChecker:
             if ent is not None:
                 if isinstance(ent[0], FuncType):
                     return self._check_indirect_call(call, ent[0])
+                # Closure call via a variable: f(args...) where f is
+                # ptr<ClosureStruct> with an invoke field.
+                if isinstance(ent[0], PtrType) and isinstance(ent[0].inner, StructType):
+                    st = ent[0].inner
+                    if 'invoke' in st.fields:
+                        (invoke_ft, _pub) = st.fields['invoke']
+                        if isinstance(invoke_ft, FuncType):
+                            call.is_closure_call = True
+                            call.closure_expr = f
+                            invoke_params = invoke_ft.params[1:]  # skip self
+                            if len(call.args) != len(invoke_params):
+                                raise CheckError(
+                                    f"closure expects {len(invoke_params)} argument(s), "
+                                    f"got {len(call.args)}", self.filename, call.pos)
+                            for arg, ptype in zip(call.args, invoke_params):
+                                at = self._check_expr(arg, ptype)
+                                if isinstance(at, StructType) and at.name == "Arena":
+                                    raise CheckError(
+                                        "cannot pass Arena to a closure",
+                                        self.filename, call.pos)
+                                self._coerce_value(arg, at, ptype, call.pos,
+                                                   "argument")
+                            call.type = invoke_ft.ret
+                            return invoke_ft.ret
                 raise CheckError(f"cannot call a value of type {ent[0]}",
                                  self.filename, call.pos)
             if name == 'len':
@@ -1791,6 +2083,29 @@ class TypeChecker:
         t = self._default_type(self._check_expr(f), f)
         if isinstance(t, FuncType):
             return self._check_indirect_call(call, t)
+        # Closure call: closure(args...) where closure is ptr<ClosureStruct>
+        # with an invoke field of type FuncType.
+        if isinstance(t, PtrType) and isinstance(t.inner, StructType):
+            st = t.inner
+            if 'invoke' in st.fields:
+                (invoke_ft, _pub) = st.fields['invoke']
+                if isinstance(invoke_ft, FuncType):
+                    call.is_closure_call = True
+                    invoke_params = invoke_ft.params[1:]  # skip self param
+                    if len(call.args) != len(invoke_params):
+                        raise CheckError(
+                            f"closure expects {len(invoke_params)} argument(s), "
+                            f"got {len(call.args)}", self.filename, call.pos)
+                    for arg, ptype in zip(call.args, invoke_params):
+                        at = self._check_expr(arg, ptype)
+                        if isinstance(at, StructType) and at.name == "Arena":
+                            raise CheckError(
+                                "cannot pass Arena to a closure",
+                                self.filename, call.pos)
+                        self._coerce_value(arg, at, ptype, call.pos,
+                                           "argument")
+                    call.type = invoke_ft.ret
+                    return invoke_ft.ret
         raise CheckError(f"cannot call a value of type {t}", self.filename, call.pos)
 
     def _check_generic_enum_member(self, info, expr, expected) -> Type:
