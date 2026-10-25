@@ -612,7 +612,7 @@ def program_layouts(program, tc):
         if st.builtin and name not in ('Vec2', 'Vec3', 'Quat'):
             continue
         structs[name] = [(field, repr(ftype))
-                         for field, ftype in st.fields.items()]
+                         for field, (ftype, _pub) in st.fields.items()]
     enums = {}
     for name, et in tc.enums.items():
         if getattr(et, 'has_payloads', False):

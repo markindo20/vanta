@@ -826,7 +826,7 @@ class _ProjectIndex:
                 fields = [
                     FieldInfo(fname, _type_expr_text(ftype), fpos.line,
                               fpos.col, f'{fname}: {_type_expr_text(ftype)}')
-                    for fname, ftype, fpos in d.fields
+                    for fname, ftype, fpos, _pub in d.fields
                 ]
                 keyword = 'component' if d.is_component else 'struct'
                 generics = (f'<{", ".join(d.type_params)}>'
@@ -1422,7 +1422,7 @@ class _ReferenceWalker:
             if isinstance(decl, A.FuncDecl):
                 self._walk_function(decl, self._func_symbol(decl.name))
             elif isinstance(decl, A.StructDecl):
-                for _name, ftype, _pos in decl.fields:
+                for _name, ftype, _pos, _pub in decl.fields:
                     self._visit_type(ftype)
             elif isinstance(decl, A.EnumDecl):
                 for member in decl.members:

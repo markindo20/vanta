@@ -71,8 +71,8 @@ const KEY_LEFT: i32 = 1073741904
 const KEY_RIGHT: i32 = 1073741903
 
 struct Screen:
-    window: ptr<void>
-    renderer: ptr<void>
+    pub window: ptr<void>
+    pub renderer: ptr<void>
 
 func screen_open(title: str, w: i32, h: i32) -> Screen:
     # There is no nil literal in Vanta, and there does not need to be one

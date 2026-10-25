@@ -170,9 +170,9 @@ class TypeChecker:
         self._register_builtins()
 
     def _register_builtins(self):
-        self.structs["Vec2"] = StructType("Vec2", {"x": F32, "y": F32}, builtin=True)
-        self.structs["Vec3"] = StructType("Vec3", {"x": F32, "y": F32, "z": F32}, builtin=True)
-        self.structs["Quat"] = StructType("Quat", {"x": F32, "y": F32, "z": F32, "w": F32}, builtin=True)
+        self.structs["Vec2"] = StructType("Vec2", {"x": (F32, True), "y": (F32, True)}, builtin=True)
+        self.structs["Vec3"] = StructType("Vec3", {"x": (F32, True), "y": (F32, True), "z": (F32, True)}, builtin=True)
+        self.structs["Quat"] = StructType("Quat", {"x": (F32, True), "y": (F32, True), "z": (F32, True), "w": (F32, True)}, builtin=True)
         self.structs["Matrix4"] = StructType("Matrix4", {}, builtin=True)
         self.structs["Arena"] = StructType("Arena", {}, builtin=True)
         self.structs["StrBuilder"] = StructType("StrBuilder", {}, builtin=True)
@@ -461,11 +461,11 @@ class TypeChecker:
         self._struct_instances[key] = st
         env = dict(zip(info.type_params, args))
         fields = {}
-        for (fname, fte, fpos) in info.fields:
+        for (fname, fte, fpos, fpub) in info.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'",
                                  self.filename, fpos)
-            fields[fname] = self._resolve_type(fte, env)
+            fields[fname] = (self._resolve_type(fte, env), fpub)
         st.fields = fields
         return st
 
@@ -575,7 +575,7 @@ class TypeChecker:
                     self.filename, d.pos)
         if d.type_params:
             fields = {}
-            for (fname, _ftype, fpos) in d.fields:
+            for (fname, _ftype, fpos, _fpub) in d.fields:
                 if fname in fields:
                     raise CheckError(f"duplicate field '{fname}'",
                                      self.filename, fpos)
@@ -584,11 +584,12 @@ class TypeChecker:
                 d.name, d.type_params, d.fields)
             return
         fields = {}
-        for (fname, ftype, fpos) in d.fields:
+        for (fname, ftype, fpos, fpub) in d.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'", self.filename, fpos)
-            fields[fname] = self._resolve_type(ftype)
-        self.structs[d.name] = StructType(d.name, fields, builtin=False)
+            fields[fname] = (self._resolve_type(ftype), fpub)
+        self.structs[d.name] = StructType(d.name, fields, builtin=False,
+                                          decl_file=d.pos.file)
 
     def _register_class(self, d):
         if (d.name in self.structs or d.name in self.enums
@@ -618,7 +619,8 @@ class TypeChecker:
             if d.parent in self.classes:
                 parent_ct = self.classes[d.parent]
         # Forward-register so method param types can reference this class.
-        self.classes[d.name] = ClassType(d.name, {}, {}, parent=d.parent)
+        self.classes[d.name] = ClassType(d.name, {}, {}, parent=d.parent,
+                                         decl_file=d.pos.file)
         # Merge inherited fields into this class's field table.
         all_fields = {}
         if parent_ct is not None:
@@ -630,18 +632,18 @@ class TypeChecker:
                 cur = self.classes.get(cur_name) if cur_name in self.classes else None
                 if cur is None:
                     break
-                for (f, t) in cur.fields.items():
-                    all_fields[f] = t
+                for (f, (t, _pub)) in cur.fields.items():
+                    all_fields[f] = (t, _pub)
                 cur_name = cur.parent
         fields = {}
-        for (fname, ftype, fpos) in d.fields:
+        for (fname, ftype, fpos, fpub) in d.fields:
             if fname in fields:
                 raise CheckError(f"duplicate field '{fname}'",
                                  self.filename, fpos)
             if fname in all_fields:
                 raise CheckError(f"field '{fname}' hides inherited field",
                                  self.filename, fpos)
-            fields[fname] = self._resolve_type(ftype)
+            fields[fname] = (self._resolve_type(ftype), fpub)
             all_fields[fname] = fields[fname]
         # store own fields only in ClassType.fields (keep it simple for ctor)
         # but typechecker `_all_fields` helper flattens when checking members/ctors.
@@ -1033,6 +1035,14 @@ class TypeChecker:
                 # regardless of how the binding itself was declared.
                 if isinstance(ot, (PtrType, ListType)):
                     return True
+                # Enforce per-field visibility on writes.
+                if isinstance(ot, (StructType, ClassType)):
+                    if node.field in ot.fields:
+                        (_ft, fpub) = ot.fields[node.field]
+                        if not fpub and ot.decl_file is not None \
+                                and expr.pos.file is not None \
+                                and expr.pos.file != ot.decl_file:
+                            return False
                 node = node.obj
                 continue
             break
@@ -1327,9 +1337,15 @@ class TypeChecker:
                 raise CheckError(f"enum values have no fields; write {ot}.Member",
                                  self.filename, expr.pos)
             if isinstance(ot, StructType) and expr.field in ot.fields:
-                t = ot.fields[expr.field]
-                expr.type = t
-                return t
+                (ftype, fpub) = ot.fields[expr.field]
+                if not fpub and ot.decl_file is not None \
+                        and expr.pos.file is not None \
+                        and expr.pos.file != ot.decl_file:
+                    raise CheckError(
+                        f"field '{expr.field}' is private to '{ot.name}'",
+                        self.filename, expr.pos)
+                expr.type = ftype
+                return ftype
             if isinstance(ot, ClassType):
                 # Walk parents for inherited fields.
                 cur = ot
@@ -1337,9 +1353,15 @@ class TypeChecker:
                 while cur is not None and cur.name not in seen:
                     seen.add(cur.name)
                     if expr.field in cur.fields:
-                        t = cur.fields[expr.field]
-                        expr.type = t
-                        return t
+                        (ftype, fpub) = cur.fields[expr.field]
+                        if not fpub and cur.decl_file is not None \
+                                and expr.pos.file is not None \
+                                and expr.pos.file != cur.decl_file:
+                            raise CheckError(
+                                f"field '{expr.field}' is private to '{cur.name}'",
+                                self.filename, expr.pos)
+                        expr.type = ftype
+                        return ftype
                     cur = self.classes.get(cur.parent) if cur.parent else None
                 # A bare method name is not a value (it must be called).
                 if expr.field in ot.methods:
@@ -1731,7 +1753,7 @@ class TypeChecker:
             ot = self._check_expr(f.obj)
             if isinstance(ot, StructType):
                 if f.field in ot.fields:
-                    ft = ot.fields[f.field]
+                    (ft, _pub) = ot.fields[f.field]
                     if isinstance(ft, FuncType):
                         return self._check_indirect_call(call, ft)
                     raise CheckError(f"field '{f.field}' is not callable (type {ft})",
@@ -2304,8 +2326,9 @@ class TypeChecker:
                                  self.filename, call.pos)
             out = []
             for f, arg in zip(st.fields, call.args):
-                at = self._check_expr(arg, st.fields[f])
-                self._coerce_value(arg, at, st.fields[f], call.pos,
+                (ftype, _pub) = st.fields[f]
+                at = self._check_expr(arg, ftype)
+                self._coerce_value(arg, at, ftype, call.pos,
                                    f"field '{f}'")
                 out.append(arg)
             call.args = out
@@ -2340,7 +2363,7 @@ class TypeChecker:
             for pname, arg in zip(params, expected.type_args):
                 bindings[pname] = arg
         else:
-            for fname, fte, _fpos in info.fields:
+            for fname, fte, _fpos, _fpub in info.fields:
                 arg = by_name[fname]
                 at = self._check_expr(arg)
                 at = self._default_type(at, arg)
@@ -2489,8 +2512,15 @@ class TypeChecker:
             if nm in seen:
                 raise CheckError(f"duplicate field '{nm}'", self.filename, call.pos)
             seen.add(nm)
-            at = self._check_expr(arg, st.fields[nm])
-            self._coerce_value(arg, at, st.fields[nm], call.pos, f"field '{nm}'")
+            (ftype, fpub) = st.fields[nm]
+            if not fpub and st.decl_file is not None \
+                    and call.pos.file is not None \
+                    and call.pos.file != st.decl_file:
+                raise CheckError(
+                    f"field '{nm}' is private to '{st.name}'",
+                    self.filename, call.pos)
+            at = self._check_expr(arg, ftype)
+            self._coerce_value(arg, at, ftype, call.pos, f"field '{nm}'")
             by_name[nm] = arg
         if len(seen) != len(st.fields):
             missing = set(st.fields) - seen
@@ -2512,8 +2542,15 @@ class TypeChecker:
             if nm in seen:
                 raise CheckError(f"duplicate field '{nm}'", self.filename, call.pos)
             seen.add(nm)
-            at = self._check_expr(arg, ct.fields[nm])
-            self._coerce_value(arg, at, ct.fields[nm], call.pos,
+            (ftype, fpub) = ct.fields[nm]
+            if not fpub and ct.decl_file is not None \
+                    and call.pos.file is not None \
+                    and call.pos.file != ct.decl_file:
+                raise CheckError(
+                    f"field '{nm}' is private to '{ct.name}'",
+                    self.filename, call.pos)
+            at = self._check_expr(arg, ftype)
+            self._coerce_value(arg, at, ftype, call.pos,
                                 f"field '{nm}'")
             by_name[nm] = arg
         if len(seen) != len(ct.fields):

@@ -148,6 +148,26 @@ class ClassesTests(unittest.TestCase):
             "    print_i32(f.x)\n",
             "unknown field")
 
+    def test_pub_struct_field_read_write(self):
+        self.expect(
+            "struct Point:\n    pub x: i32\n    pub y: i32\n\n"
+            "func main() -> void:\n"
+            "    mut p = Point(x: 3, y: 4)\n"
+            "    p.x = 10\n"
+            "    print_i32(p.x)\n"
+            "    print_i32(p.y)\n",
+            "10\n4")
+
+    def test_pub_class_field_read_write(self):
+        self.expect(
+            "class Point:\n    pub x: i32\n    pub y: i32\n\n"
+            "func main() -> void:\n"
+            "    mut p = Point(x: 3, y: 4)\n"
+            "    p.y = 7\n"
+            "    print_i32(p.x)\n"
+            "    print_i32(p.y)\n",
+            "3\n7")
+
 
 if __name__ == '__main__':
     unittest.main()

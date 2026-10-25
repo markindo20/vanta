@@ -40,8 +40,8 @@ class ModuleTests(unittest.TestCase):
                 return n * n
 
             pub struct Point:
-                x: i32
-                y: i32
+                pub x: i32
+                pub y: i32
 
             pub enum Shape:
                 Dot
@@ -109,7 +109,7 @@ class ModuleTests(unittest.TestCase):
             module alpha
 
             pub struct Color:
-                r: i32
+                pub r: i32
 
             pub func value() -> i32:
                 return 10
@@ -118,7 +118,7 @@ class ModuleTests(unittest.TestCase):
             module beta
 
             pub struct Color:
-                b: i32
+                pub b: i32
 
             pub func value() -> i32:
                 return 20
@@ -140,7 +140,7 @@ class ModuleTests(unittest.TestCase):
     def test_legacy_flat_import_still_works(self):
         self.write('legacy_lib.vnt', '''
             struct Sprite:
-                pixel: i32
+                pub pixel: i32
 
             func sprite_at(pixel: i32) -> Sprite:
                 return Sprite(pixel: pixel)
@@ -258,8 +258,8 @@ class ModuleTests(unittest.TestCase):
             import "geometry.vnt" as geo
 
             struct Point:
-                x: i32
-                y: i32
+                pub x: i32
+                pub y: i32
 
             func main() -> void:
                 let geo = Point(x: 1, y: 2)
@@ -469,11 +469,11 @@ class ModuleTests(unittest.TestCase):
         self.write('bad.vnt', '''
             module bad
 
-            pub struct A:
-                x: i32
+            struct A:
+                pub x: i32
 
             pub struct B:
-                x: i32
+                pub x: i32
 
             pub func broken(flag: bool):
                 if flag:

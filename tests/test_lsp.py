@@ -1279,7 +1279,7 @@ func main() -> i32:
 module game
 
 pub struct Enemy:
-    hp: i32
+    pub hp: i32
 ''')
         label_path = self.write('label.vnt', '''\
 module label

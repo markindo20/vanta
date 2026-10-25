@@ -8,8 +8,8 @@ func square(n: i32) -> i32:
     return n * n
 
 pub struct Point:
-    x: i32
-    y: i32
+    pub x: i32
+    pub y: i32
 
 pub enum Shape:
     Dot

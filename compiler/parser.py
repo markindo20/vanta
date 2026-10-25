@@ -212,11 +212,15 @@ class Parser:
         self.expect(TT.INDENT)
         fields = []
         while not self.check(TT.DEDENT):
+            is_public = False
+            if self.check(TT.PUB):
+                self.advance()
+                is_public = True
             fn = self.expect(TT.IDENT)
             self.expect(TT.COLON)
             ft = self.parse_type()
             self.expect(TT.NEWLINE)
-            fields.append((fn.value, ft, A.Pos(fn.line, fn.col)))
+            fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public))
         self.expect(TT.DEDENT)
         return A.StructDecl(name, fields, is_component,
                             A.Pos(tok.line, tok.col),
@@ -282,11 +286,15 @@ class Parser:
                 fd = self.parse_func(False)
                 methods.append(fd)
             else:
+                is_public = False
+                if self.check(TT.PUB):
+                    self.advance()
+                    is_public = True
                 fn = self.expect(TT.IDENT)
                 self.expect(TT.COLON)
                 ft = self.parse_type()
                 self.expect(TT.NEWLINE)
-                fields.append((fn.value, ft, A.Pos(fn.line, fn.col)))
+                fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public))
         self.expect(TT.DEDENT)
         return A.ClassDecl(name, parent, fields, methods,
                            A.Pos(tok.line, tok.col))

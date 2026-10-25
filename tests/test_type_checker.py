@@ -2488,8 +2488,8 @@ class TypeCheckerTests(unittest.TestCase):
                     "    print_i32(p.left)\n")
         st = next(s for n, s in tc.structs.items()
                   if n.startswith('Pair__g'))
-        self.assertEqual(repr(st.fields['left']), 'i32')
-        self.assertEqual(repr(st.fields['right']), 'f32')
+        self.assertEqual(repr(st.fields['left'][0]), 'i32')
+        self.assertEqual(repr(st.fields['right'][0]), 'f32')
 
     def test_generic_struct_two_instances_are_distinct(self):
         _, tc = run("struct Box<T>:\n"
@@ -2551,6 +2551,46 @@ class TypeCheckerTests(unittest.TestCase):
     def test_match_guard_must_be_bool(self):
         with self.assertRaises(CheckError):
             run("enum S:\n    A\n    B\nfunc f(s: S, n: i32) -> void:\n    match s:\n        S.A if n:\n            print_i32(0)\n")
+
+    # ---------- per-field visibility ----------
+
+    def test_pub_field_stored_public(self):
+        _, tc = run("struct P:\n    pub x: i32\n    y: i32\n")
+        st = tc.structs["P"]
+        self.assertTrue(st.fields["x"][1])
+        self.assertFalse(st.fields["y"][1])
+
+    def test_pub_field_on_class_stored_public(self):
+        _, tc = run("class C:\n    pub x: i32\n    y: i32\n")
+        ct = tc.classes["C"]
+        self.assertTrue(ct.fields["x"][1])
+        self.assertFalse(ct.fields["y"][1])
+
+    def test_pub_field_read_ok(self):
+        run("struct P:\n    pub x: i32\n    secret: i32\n\n"
+            "func main() -> void:\n"
+            "    mut p = P(x: 1, secret: 2)\n"
+            "    print_i32(p.x)\n"
+            "    print_i32(p.secret)\n")
+
+    def test_pub_field_write_ok(self):
+        run("struct P:\n    pub x: i32\n\n"
+            "func main() -> void:\n"
+            "    mut p = P(x: 1)\n"
+            "    p.x = 42\n")
+
+    def test_struct_ctor_pub_field_ok(self):
+        run("struct P:\n    pub x: i32\n    secret: i32\n\n"
+            "func main() -> void:\n"
+            "    let p = P(x: 1, secret: 2)\n"
+            "    print_i32(p.x)\n")
+
+    def test_class_ctor_pub_field_ok(self):
+        run("class C:\n    pub x: i32\n    secret: i32\n\n"
+            "func main() -> void:\n"
+            "    mut c = C(x: 1, secret: 2)\n"
+            "    print_i32(c.x)\n")
+
 
 if __name__ == '__main__':
     unittest.main()

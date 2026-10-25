@@ -49,7 +49,7 @@ class InferType(Type):
 @dataclass(eq=False)
 class StructType(Type):
     name: str
-    fields: Dict[str, Type]
+    fields: Dict[str, Tuple[Type, bool]]
     builtin: bool = False
     # Generic struct instances carry the declaration family and the concrete
     # type arguments, mirroring EnumType. `display` is the source spelling
@@ -57,6 +57,8 @@ class StructType(Type):
     family: Optional[str] = None
     type_args: Tuple[Type, ...] = ()
     display: Optional[str] = None
+    # Source file where the struct was declared, for per-field visibility.
+    decl_file: Optional[str] = None
     @property
     def is_generic_instance(self) -> bool:
         return self.family is not None
@@ -70,13 +72,13 @@ class StructType(Type):
 class ClassType(Type):
     """A class with methods and optional single inheritance.
 
-    `fields` maps field name -> type. `methods` maps method name -> FuncType
+    `fields` maps field name -> (Type, is_public). `methods` maps method name -> FuncType
     (the `self` parameter is already bound to the class instance). `parent`
     names the base class, or None. `vtable` is the internal C++ tag for the
     virtual-method table, emitted by codegen.
     """
     name: str
-    fields: Dict[str, Type]
+    fields: Dict[str, Tuple[Type, bool]]
     methods: Dict[str, 'FuncType']
     parent: Optional[str] = None  # parent class name, resolved later
     builtin: bool = False
@@ -84,6 +86,8 @@ class ClassType(Type):
     type_args: Tuple[Type, ...] = ()
     display: Optional[str] = None
     vtable: Optional[str] = None
+    # Source file where the class was declared, for per-field visibility.
+    decl_file: Optional[str] = None
     @property
     def is_generic_instance(self) -> bool:
         return self.family is not None
@@ -182,7 +186,7 @@ def eq_blocker(t, path=""):
     if isinstance(t, StructType):
         if t.builtin:
             return None if t.name in ("Vec2", "Vec3") else (path, t)
-        for fname, ftype in t.fields.items():
+        for fname, (ftype, _pub) in t.fields.items():
             sub = eq_blocker(ftype, f"{path}.{fname}" if path else fname)
             if sub is not None:
                 return sub

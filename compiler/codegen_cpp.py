@@ -703,7 +703,7 @@ class CodeGen:
         self.emit(f'struct {ct.name} {{')
         self.indent += 1
         # V table pointer at end
-        for fname, ftype in fields:
+        for fname, (ftype, _pub) in fields:
             self.emit(f'{self._ctype(ftype)} v_{fname};')
         self.emit(f'{ct.name}_vtable* vtable;')
         self.indent -= 1
@@ -746,7 +746,7 @@ class CodeGen:
         # still reads parent CT for type inference).
         self.emit(f'struct {ct.name} {{')
         self.indent += 1
-        for fname, ftype in ct.fields.items():
+        for fname, (ftype, _pub) in ct.fields.items():
             self.emit(f'{self._ctype(ftype)} v_{fname};')
         self.emit(f'{ct.name}_vtable* vtable;')
         self.indent -= 1
@@ -785,11 +785,11 @@ class CodeGen:
             if isinstance(t, StructType):
                 if t.builtin:
                     return ()
-                return tuple(t.fields.values())
+                return tuple(ft for (ft, _pub) in t.fields.values())
             if isinstance(t, ClassType):
                 if t.builtin:
                     return ()
-                return tuple(t.fields.values())
+                return tuple(ft for (ft, _pub) in t.fields.values())
             if isinstance(t, EnumType):
                 return tuple(pt for payload in t.payloads.values()
                              for pt in payload)
@@ -864,7 +864,7 @@ class CodeGen:
     def _gen_struct(self, st: StructType):
         self.emit(f'struct {st.name} {{')
         self.indent += 1
-        for fname, ftype in st.fields.items():
+        for fname, (ftype, _pub) in st.fields.items():
             self.emit(f'{self._ctype(ftype)} v_{fname};')
         self.indent -= 1
         self.emit('};')
@@ -913,7 +913,7 @@ class CodeGen:
             self.emit('')
         for st in struct_eqs:
             terms = [self._eq_expr(ft, f'a.v_{fn}', f'b.v_{fn}')
-                     for fn, ft in st.fields.items()]
+                     for fn, (ft, _pub) in st.fields.items()]
             body = ' && '.join(terms) if terms else 'true'
             self.emit(f'inline bool operator==(const {st.name}& a, const {st.name}& b) {{')
             self.indent += 1
@@ -1338,17 +1338,17 @@ class CodeGen:
             if getattr(c, 'is_struct_ctor', False):
                 st = c.type
                 args = ', '.join(self._init_expr(a, ft)
-                                 for a, ft in zip(c.args, st.fields.values()))
+                                 for a, (ft, _pub) in zip(c.args, st.fields.values()))
                 return f'{st.name}{{{args}}}'
             st = self.tc.structs.get(name)
             if st is not None and not st.builtin:
                 args = ', '.join(self._init_expr(a, ft)
-                                 for a, ft in zip(c.args, st.fields.values()))
+                                 for a, (ft, _pub) in zip(c.args, st.fields.values()))
                 return f'{name}{{{args}}}'
             if name in self.tc.classes:
                 ct = self.tc.classes[name]
                 args = ', '.join(self._init_expr(a, ft)
-                                 for a, ft in zip(c.args, ct.fields.values()))
+                                 for a, (ft, _pub) in zip(c.args, ct.fields.values()))
                 return f'{name}{{{args}}}'
             if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)
