@@ -50,6 +50,8 @@ BUILTIN_FN = {
     'signal_on_once': 'vanta::signal_on_once',
     'file_exists': 'vanta::file_exists', 'file_write': 'vanta::file_write',
     'file_read': 'vanta::file_read',
+    'state_arena': 'vanta::state_arena',
+    'hot_should_reload': 'vanta::hot_should_reload',
 }
 
 
@@ -621,10 +623,33 @@ class CodeGen:
                 self.emit('return 0;')
             self.indent -= 1
             self.emit('}')
+            self.emit('extern "C" VANTA_EXPORT void vanta_bind_state'
+                      '(void* base, int32_t bytes) {')
+            self.indent += 1
+            self._generated_line()
+            self.emit('vanta::bind_host_state(base, bytes);')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('extern "C" VANTA_EXPORT void vanta_request_reload(void) {')
+            self.indent += 1
+            self._generated_line()
+            self.emit('vanta::request_host_reload();')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('extern "C" VANTA_EXPORT void vanta_set_hot(int32_t on) {')
+            self.indent += 1
+            self._generated_line()
+            self.emit('vanta::set_hot_mode(on != 0);')
+            self.indent -= 1
+            self.emit('}')
             self.emit('extern "C" VANTA_EXPORT void vanta_migrate(void* prev) {')
             self.indent += 1
             self._generated_line()
-            self.emit('(void)prev;')
+            reload_fn = next((f for f in funcs if f.name == '__reload'), None)
+            if reload_fn is not None:
+                self.emit('vanta_user::fn___reload(prev);')
+            else:
+                self.emit('(void)prev;')
             self.indent -= 1
             self.emit('}')
             self.emit('')

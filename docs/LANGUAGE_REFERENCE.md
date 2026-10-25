@@ -730,6 +730,14 @@ arena.reset()               # rewinds the allocation offset to 0
 - Indexing a `ptr<T>` uses `p[i]`.
 - `arena.reset()` rewinds the allocation offset; it does not zero memory.
 
+`Arena(bytes, "name")` maps a **named** segment instead: the OS keeps the
+bytes alive while any process holds the mapping, so a second process that
+asks for the same name sees the same memory. The name form is how state
+survives a rebuilt program; see
+[state-preserving hot reload](#state-preserving-hot-reload-v120). Outside a
+host session, `state_arena()` (v1.2.0) returns a private arena, so a program
+written for `vanta hot` also runs under plain `vanta run`.
+
 Pointer values can also come from `extern` calls and live in locals. A pointer
 local can be reassigned with `mut`, user functions may take and return
 pointers, and any `ptr<T>` is accepted where `ptr<void>` is expected — C's
@@ -753,7 +761,42 @@ error: cannot pass Arena to a function
 This is the only ownership rule enforced. `ptr<T>` has **no** borrow checking,
 so dangling or aliased pointers are not detected.
 
-### Checked pointer access: `p.at(i, size)` (v0.25.0)
+### State-preserving hot reload (v1.2.0)
+
+`vanta hot <file>` keeps one flat byte segment alive for the whole session and
+binds it into every rebuilt generation. A program whose working set comes from
+`state_arena()` finds the same bytes at the same offsets after a swap, so state
+that survives a source change is an ordinary program:
+
+```vanta
+let world = state_arena()
+let ticks = world.alloc::<i32>(1)
+ticks[0] = ticks[0] + 1
+print_i32(ticks[0])   # 1, then 2, then 3 … across rebuilds
+```
+
+Without a host session (plain `vanta run`) `state_arena()` falls back to a
+private arena, so the same source runs unchanged either way. `__reload(prev)`,
+when declared, runs once per generation before `main`; use it for one-time
+replay that `state_arena()` does not cover.
+
+A program with an event loop cooperates by polling `hot_should_reload()` and
+returning; the host then rebuilds and starts the next generation:
+
+```vanta
+while running:
+    if hot_should_reload():
+        running = false
+    # … normal frame work …
+```
+
+Outside `vanta hot`, `hot_should_reload()` always returns `false`, so a loop
+runs to completion under a normal run.
+
+Reloads are deterministic: `--reloads N` rebuilds/swaps N extra times without
+editing a file, and `file_write`/`file_read` can capture per-generation
+checkpoints. See `examples/stateful_hot.vnt`.
+
 
 `p.at(i, size)` is the pointer counterpart of `xs.at(i)`. The pointer does not
 carry its length, so the caller supplies the accessible element count and the
@@ -1261,6 +1304,8 @@ let r = from_quat(q)
 | `ptr_cast` | `ptr_cast::<T>(p) -> ptr<T>` | reinterprets the element type; `T` may not be a function type; see [pointer casts](#pointer-casts-ptr_castt-v0170) |
 | `ptr_offset` | `(ptr<T>, i32) -> ptr<T>` | moves `n` elements; `T` may not be `void`; see [pointer offsets](#pointer-offsets-ptr_offsetp-n-v0180) |
 | `ptr_null` | `ptr_null::<T>() -> ptr<T>` | the null pointer; `T` may be a function type (then it is a null callback); see [null pointers](#null-pointers-ptr_nullt-v0190) |
+| `state_arena` | `() -> Arena` | the reload-surviving arena under `vanta hot`; a private arena otherwise (v1.2.0) |
+| `hot_should_reload` | `() -> bool` | `true` once the host has asked for a reload; always `false` outside `vanta hot` (v1.2.0) |
 
 The random state is fixed at startup, so a program that never calls `rand_seed`
 is **reproducible across runs** — useful for tests. Seeding with a different

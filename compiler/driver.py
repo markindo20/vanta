@@ -1215,39 +1215,83 @@ def cmd_get(args):
 
 
 def cmd_hot(args):
-    """Phase II.B.1: load the shared unit in this process and reload it.
+    """Phase II.D: reload a shared unit around a host-owned state segment.
 
-    The generated library exports `vanta_run_main` and `vanta_migrate`.
-    We `ctypes.CDLL` each rebuilt artifact into the same Python process,
-    call the migration hook (currently a no-op), then run. A program that
-    returns immediately is reloaded only after its next source change;
-    programs with an event loop keep running until they exit on their own.
+    The host keeps one flat byte buffer for the session and binds it into
+    every rebuilt unit before running it. Programs that keep their working
+    set in `state_arena()` find the same bytes at the same offsets after a
+    swap. A program with a loop can poll `hot_should_reload()` and return,
+    which lets the host rebuild and start the next generation; a program
+    that returns on its own is rebuilt when its source changes.
+
+    `--reloads N` runs the rebuild/swap path N extra times without editing a
+    file. That is the deterministic smoke test for the migration path.
     """
     import ctypes
-    if not getattr(args, 'source', None) or not os.path.exists(args.source):
-        sys.stderr.write("error: not found: %s\n" % getattr(args, 'source', None))
+    import threading
+    source = getattr(args, 'source', None)
+    if not source or not os.path.exists(source):
+        sys.stderr.write("error: not found: %s\n" % source)
         return 1
+    state_size = int(getattr(args, 'state_size', 0) or (1 << 20))
+    if state_size < 4096:
+        sys.stderr.write("error: --state-size must be at least 4096 bytes\n")
+        return 1
+    extra_generations = getattr(args, 'reloads', None)
     workdir = tempfile.mkdtemp(prefix='vanta_hot_')
-    last_digest = None
-    generation = 0
+    state = ctypes.create_string_buffer(state_size)
+    state_base = ctypes.addressof(state)
+    # ctypes.CDLL does not use _compiler_cmd's child-only PATH, so expose the
+    # toolchain DLL directory to this process before the first load.
+    dll_handles = []
+    _, tool_path = find_cxx_compiler()
+    if os.name == 'nt' and tool_path:
+        search = _windows_dll_search_dirs(tool_path)
+        for lib_dir in list(getattr(args, 'lib_dir', None) or []):
+            if os.path.basename(lib_dir).lower() == 'lib':
+                candidate = os.path.join(os.path.dirname(lib_dir), 'bin')
+                if os.path.isdir(candidate):
+                    search.append(candidate)
+        search = _dedupe_paths(search)
+        os.environ['PATH'] = (os.pathsep.join(search) + os.pathsep +
+                              os.environ.get('PATH', ''))
+        for directory in search:
+            try:
+                dll_handles.append(os.add_dll_directory(directory))
+            except OSError:
+                pass
     previous = None
-    sys.stdout.write("vanta hot: in-process loader for %s (Ctrl+C to stop)\n" % args.source)
+    generation = 0
+    last_digest = None
+    force = True
+    previous_hot_env = os.environ.get('VANTA_HOT')
+    os.environ['VANTA_HOT'] = '1'
+    sys.stdout.write("vanta hot: %s (Ctrl+C to stop)\n" % source)
+    sys.stdout.write("state segment: %d bytes; keep state in state_arena()\n"
+                     % state_size)
     sys.stdout.flush()
-    while True:
-        try:
-            digest = _source_digest(_watched_files(args.source))
-        except Exception as exc:
-            sys.stderr.write("error scanning: %s\n" % exc)
-            digest = None
-        if digest is not None and digest != last_digest:
+    try:
+        while True:
+            if not force:
+                try:
+                    digest = _source_digest(_watched_files(source))
+                except Exception as exc:
+                    sys.stderr.write("error scanning: %s\n" % exc)
+                    digest = last_digest
+                if digest == last_digest:
+                    time.sleep(0.5)
+                    continue
+            force = False
             generation += 1
             ext = '.dll' if os.name == 'nt' else '.so'
             lib_path = os.path.join(workdir, 'unit_%d%s' % (generation, ext))
             build_args = argparse.Namespace(
-                source=args.source, output=lib_path,
+                source=source, output=lib_path,
                 release=getattr(args, 'release', False), debug=False,
                 bundle=False, emit_cpp=None,
-                include_dir=[], lib_dir=[], link=[], shared=True,
+                include_dir=list(getattr(args, 'include_dir', None) or []),
+                lib_dir=list(getattr(args, 'lib_dir', None) or []),
+                link=list(getattr(args, 'link', None) or []), shared=True,
                 checked=getattr(args, 'checked', False))
             sys.stdout.write("\n--- build #%d ---\n" % generation)
             sys.stdout.flush()
@@ -1258,31 +1302,92 @@ def cmd_hot(args):
             except Exception as exc:
                 sys.stderr.write("build error: %s\n" % exc)
                 rc = 1
-            if rc == 0:
+            if rc != 0:
+                # Do not spin on the same broken source; wait for an edit
+                # (or stop if the caller asked for a fixed number of runs).
                 try:
-                    library = ctypes.CDLL(os.path.abspath(lib_path))
-                    if previous is not None:
+                    last_digest = _source_digest(_watched_files(source))
+                except Exception:
+                    last_digest = None
+                if extra_generations is not None:
+                    sys.stderr.write("hot: build failed; stopping\n")
+                    return 1
+                continue
+            try:
+                library = ctypes.CDLL(os.path.abspath(lib_path))
+                library.vanta_set_hot.argtypes = [ctypes.c_int32]
+                library.vanta_set_hot(1)
+                library.vanta_bind_state.argtypes = [ctypes.c_void_p,
+                                                     ctypes.c_int32]
+                library.vanta_bind_state(ctypes.c_void_p(state_base),
+                                         state_size)
+                if previous is not None:
+                    library.vanta_migrate.argtypes = [ctypes.c_void_p]
+                    library.vanta_migrate(ctypes.c_void_p(state_base))
+                run = library.vanta_run_main
+                run.restype = ctypes.c_int
+            except Exception as exc:
+                sys.stderr.write("load error: %s\n" % exc)
+                if extra_generations is not None:
+                    return 1
+                last_digest = None
+                continue
+            previous = library
+            try:
+                last_digest = _source_digest(_watched_files(source))
+            except Exception:
+                last_digest = None
+
+            # Keep the unit on the main thread (SDL and some platform APIs
+            # require it) and let a watchdog ask for a reload from the side.
+            stop_watch = threading.Event()
+            changed = {'value': False}
+
+            def watch():
+                while not stop_watch.wait(0.25):
+                    try:
+                        now = _source_digest(_watched_files(source))
+                    except Exception:
+                        continue
+                    if now != last_digest:
+                        changed['value'] = True
+                        sys.stdout.write(
+                            "reload requested; waiting for the unit to "
+                            "return (poll hot_should_reload() to "
+                            "cooperate)\n")
                         try:
-                            handle = ctypes.cast(previous, ctypes.c_void_p)
-                            library.vanta_migrate(handle)
-                        except Exception as exc:
-                            sys.stderr.write("migrate error: %s\n" % exc)
-                    run = library.vanta_run_main
-                    run.restype = ctypes.c_int
-                    code = run()
-                    previous = library
-                    if code not in (0, None):
-                        sys.stdout.write("(exit %d)\n" % code)
-                except Exception as exc:
-                    sys.stderr.write("load error: %s\n" % exc)
-            last_digest = digest
-        try:
-            time.sleep(0.5)
-        except KeyboardInterrupt:
-            sys.stdout.write("\nvanta hot stopped\n")
-            sys.stdout.flush()
-            shutil.rmtree(workdir, ignore_errors=True)
-            return 0
+                            library.vanta_request_reload()
+                        except Exception:
+                            pass
+                        return
+
+            watcher = threading.Thread(target=watch, daemon=True)
+            watcher.start()
+            try:
+                code = run()
+            finally:
+                stop_watch.set()
+                watcher.join(timeout=1.0)
+            if code not in (0, None):
+                sys.stdout.write("(exit %s)\n" % code)
+            if changed['value']:
+                force = True
+            if extra_generations is not None:
+                if extra_generations <= 0:
+                    break
+                extra_generations -= 1
+                force = True
+    except KeyboardInterrupt:
+        sys.stdout.write("\nvanta hot stopped\n")
+        sys.stdout.flush()
+        return 0
+    finally:
+        if previous_hot_env is None:
+            os.environ.pop('VANTA_HOT', None)
+        else:
+            os.environ['VANTA_HOT'] = previous_hot_env
+        shutil.rmtree(workdir, ignore_errors=True)
+    return 0
 
 
 def cmd_run(args):
@@ -1888,6 +1993,18 @@ def main(argv):
     p_hot.add_argument('source')
     p_hot.add_argument('--release', action='store_true')
     p_hot.add_argument('--checked', action='store_true')
+    p_hot.add_argument('--state-size', type=int, default=1 << 20,
+                        help='bytes in the host-owned state segment '
+                             '(default 1048576)')
+    p_hot.add_argument('--reloads', type=int, default=None,
+                        help='rebuild and swap N extra times, then exit '
+                             '(deterministic reload check)')
+    p_hot.add_argument('--include-dir', action='append', default=[],
+                        help='add include directory for C++ compilation')
+    p_hot.add_argument('--lib-dir', action='append', default=[],
+                        help='add library directory for linking')
+    p_hot.add_argument('--link', action='append', default=[],
+                        help='link against library (e.g. SDL2)')
 
     p_get = sub.add_parser('get', help='fetch a dependency into a local vendor directory')
     p_get.add_argument('source', help='local path or git URL to fetch')

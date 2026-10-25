@@ -6,7 +6,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdarg>
-#ifndef _WIN32
+#ifdef _WIN32
+# ifndef NOMINMAX
+#  define NOMINMAX
+# endif
+# include <windows.h>
+#else
 # include <fcntl.h>
 # include <sys/mman.h>
 # include <sys/stat.h>
@@ -16,6 +21,7 @@
 #include <string>
 #include <new>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 #include <cctype>
 #include <string>
@@ -312,6 +318,93 @@ inline Matrix4 mat4_from_quat(Quat q) {
     return M;
 }
 
+// ---------- Host-bound state segment ----------
+// `vanta hot` owns one flat byte segment per session and binds it to every
+// generation of the reloadable unit. An arena obtained from state_arena()
+// hands out memory from that segment, so values written by one generation
+// are read back by the next at the same offsets.
+//
+// Managed segments start with this header. User allocations begin at
+// kStateDataOffset so the bookkeeping never collides with program data.
+struct StateHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t bytes;
+    uint32_t used;
+    uint32_t alloc_count;
+    uint32_t layout_count;
+    uint32_t flags;
+    uint32_t reserved;
+};
+
+constexpr uint32_t kStateMagic = 0x41545356u;   // "VSTA" (little-endian)
+constexpr uint32_t kStateVersion = 1u;
+constexpr uint32_t kStateMaxLayout = 256u;
+constexpr uint32_t kStateHeaderBytes = 64u;
+constexpr uint32_t kStateLayoutStride = 12u;
+constexpr uint32_t kStateDataOffset =
+    kStateHeaderBytes + kStateMaxLayout * kStateLayoutStride;
+constexpr uint32_t kStateFlagReload = 1u;
+
+inline StateHeader* g_state_header = nullptr;
+inline char* g_state_base = nullptr;
+inline bool g_hot_explicit = false;
+
+inline bool hot_mode() {
+    // The host sets this explicitly through vanta_set_hot: Python's
+    // SetEnvironmentVariable updates the process block, but a MinGW/UCRT
+    // getenv reads the copy captured at DLL startup and would miss it.
+    return g_hot_explicit || std::getenv("VANTA_HOT") != nullptr;
+}
+
+inline void set_hot_mode(bool on) { g_hot_explicit = on; }
+
+inline void init_state_header(char* base, uint32_t bytes) {
+    std::memset(base, 0, (size_t)kStateDataOffset);
+    auto* h = reinterpret_cast<StateHeader*>(base);
+    h->magic = kStateMagic;
+    h->version = kStateVersion;
+    h->bytes = bytes;
+    h->used = kStateDataOffset;
+}
+
+// Called by the host before every generation. A fresh segment is initialized;
+// an existing, compatible one keeps its contents.
+inline void bind_host_state(void* base, int32_t bytes) {
+    if (!base || bytes <= (int32_t)kStateDataOffset) {
+        g_state_header = nullptr;
+        g_state_base = nullptr;
+        return;
+    }
+    char* p = static_cast<char*>(base);
+    auto* h = reinterpret_cast<StateHeader*>(p);
+    if (h->magic != kStateMagic || h->version != kStateVersion ||
+        h->bytes != (uint32_t)bytes) {
+        init_state_header(p, (uint32_t)bytes);
+    }
+    h->flags &= ~kStateFlagReload;
+    g_state_header = h;
+    g_state_base = p;
+}
+
+inline void* host_state_base() { return g_state_base; }
+
+inline int32_t host_state_bytes() {
+    return g_state_header ? (int32_t)g_state_header->bytes : 0;
+}
+
+// The host calls the exported setter when the source changed. Units that want
+// a graceful handoff poll hot_should_reload() in their own loop and return;
+// units that never poll simply keep running, exactly as before.
+inline void request_host_reload() {
+    if (g_state_header) g_state_header->flags |= kStateFlagReload;
+}
+
+inline bool hot_should_reload() {
+    return g_state_header != nullptr &&
+           (g_state_header->flags & kStateFlagReload) != 0;
+}
+
 // ---------- Arena allocator ----------
 class Arena {
 public:
@@ -319,9 +412,23 @@ public:
         data_ = static_cast<char*>(std::malloc((size_t)bytes));
         if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
     }
-#ifdef __linux__
-#elif defined(__APPLE__)
-#endif
+    // A view over the host-owned state segment. The host keeps the bytes
+    // alive across reloads; this object only bumps the shared offset.
+    Arena(char* base, int32_t bytes)
+        : size_((uint32_t)bytes), offset_(0), owned_(false), view_(true) {
+        header_ = reinterpret_cast<StateHeader*>(base);
+        data_ = base;
+        if (!header_ || header_->magic != kStateMagic ||
+            header_->version != kStateVersion ||
+            header_->bytes != size_) {
+            std::fprintf(stderr,
+                         "vanta: invalid state segment; state_arena() needs "
+                         "a host-bound segment\n");
+            std::exit(1);
+        }
+        offset_ = kStateDataOffset;
+        begin_replay_();
+    }
     Arena(int32_t bytes, const char* shared_name)
         : size_((uint32_t)bytes), offset_(0), owned_(false) {
         if (!shared_name || !shared_name[0]) {
@@ -330,33 +437,51 @@ public:
             if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
             return;
         }
-#ifndef _WIN32
-        const int fd = openShared_(shared_name, bytes);
-        if (fd >= 0) {
-            void* view = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-            close(fd);
-            if (view != MAP_FAILED) {
-                data_ = static_cast<char*>(view);
-                shared_ = true;
-                sharedName_ = shared_name;
-                return;
+        char* base = nullptr;
+        uint32_t effective = 0;
+        bool created = false;
+        void* handle = nullptr;
+        if (mapShared_(shared_name, bytes, base, effective, created, handle)) {
+            size_ = effective;
+            auto* h = reinterpret_cast<StateHeader*>(base);
+            if (created || h->magic != kStateMagic ||
+                h->version != kStateVersion || h->bytes != effective) {
+                if (!created) {
+                    std::fprintf(stderr,
+                                 "vanta: shared arena '%s' has an "
+                                 "incompatible header; reinitializing it\n",
+                                 shared_name);
+                }
+                init_state_header(base, effective);
+            } else if (effective != (uint32_t)bytes) {
+                std::fprintf(stderr,
+                             "vanta: shared arena '%s' is %u bytes "
+                             "(requested %d); using the existing size\n",
+                             shared_name, (unsigned)effective, (int)bytes);
             }
+            header_ = h;
+            data_ = base;
+            sharedName_ = shared_name;
+            handle_ = handle;
+            offset_ = kStateDataOffset;
+            begin_replay_();
+            return;
         }
-#endif
+        std::fprintf(stderr,
+                     "vanta: could not map shared arena '%s'; using a "
+                     "private arena for this run\n", shared_name);
         owned_ = true;
         data_ = static_cast<char*>(std::malloc((size_t)bytes));
         if (!data_) { std::fprintf(stderr, "vanta: arena alloc failed\n"); std::exit(1); }
-        return;
     }
     ~Arena() {
         if (owned_) {
             reset();
             std::free(data_);
-        } else if (data_) {
-#ifndef _WIN32
-            munmap(data_, size_);
-            if (!sharedName_.empty()) shm_unlink(sharedName_.c_str());
-#endif
+        } else if (view_) {
+            // The host owns the segment: just drop the view.
+        } else if (data_ && !hot_mode()) {
+            releaseShared_();
         }
     }
     Arena(const Arena&) = delete;
@@ -364,7 +489,50 @@ public:
     Arena(Arena&&) = delete;
     Arena& operator=(Arena&&) = delete;
 
-    void* raw_alloc(uint32_t bytes, uint32_t align) {
+    // Stable-within-a-build tag for the element type. Replaying an arena
+    // that now allocates a different type at the same slot is a state
+    // corruption, so the (size, align) pair alone is not enough.
+    template <typename T>
+    static uint32_t type_tag_() {
+        const char* name = typeid(T).name();
+        uint32_t h = 2166136261u;
+        while (*name) {
+            h ^= (uint32_t)(unsigned char)*name++;
+            h *= 16777619u;
+        }
+        return h;
+    }
+
+    void* raw_alloc(uint32_t bytes, uint32_t align, uint32_t tag = 0) {
+        uint32_t index = 0;
+        if (header_) {
+            index = header_->alloc_count++;
+            if (replaying_) {
+                if (index < replay_count_) {
+                    const uint32_t* entry = layout_entry_(index);
+                    if (entry[0] != bytes || entry[1] != align ||
+                        entry[2] != tag) {
+                        // The program's allocation sequence changed between
+                        // generations. Keep what earlier allocations already
+                        // replayed, then append new values after the old
+                        // high-water mark instead of overwriting the rest.
+                        replaying_ = false;
+                        offset_ = header_->used;
+                        std::fprintf(stderr,
+                                     "vanta: state layout changed at "
+                                     "allocation %u; earlier state was kept "
+                                     "and new values follow it\n",
+                                     (unsigned)index);
+                    }
+                } else if (header_->layout_count < kStateMaxLayout) {
+                    uint32_t* entry = layout_entry_(header_->layout_count);
+                    entry[0] = bytes;
+                    entry[1] = align;
+                    entry[2] = tag;
+                    header_->layout_count += 1;
+                }
+            }
+        }
         uintptr_t base = reinterpret_cast<uintptr_t>(data_) + offset_;
         uintptr_t aligned = (base + (align - 1)) & ~((uintptr_t)align - 1);
         uint32_t new_off = (uint32_t)(aligned - reinterpret_cast<uintptr_t>(data_) + bytes);
@@ -373,6 +541,7 @@ public:
             std::exit(1);
         }
         offset_ = new_off;
+        if (header_ && new_off > header_->used) header_->used = new_off;
         return reinterpret_cast<void*>(aligned);
     }
 
@@ -380,7 +549,7 @@ public:
     T* alloc(int32_t count) {
         T* result = static_cast<T*>(
             raw_alloc((uint32_t)(sizeof(T) * (size_t)count),
-                      (uint32_t)alignof(T)));
+                      (uint32_t)alignof(T), type_tag_<T>()));
         // Construct non-trivial elements (Str and aggregates containing it)
         // so assignment and destruction are well-defined. Trivial types keep
         // the old uninitialized bump-allocation behaviour.
@@ -408,7 +577,12 @@ public:
             it->destroy(it->ptr, it->count);
         }
         cleanups_.clear();
-        offset_ = 0;
+        offset_ = header_ ? kStateDataOffset : 0;
+        if (header_) {
+            header_->used = kStateDataOffset;
+            header_->alloc_count = 0;
+            header_->layout_count = 0;
+        }
     }
 
 private:
@@ -418,27 +592,116 @@ private:
         void (*destroy)(void*, int32_t);
     };
 
-    static int openShared_(const char* name, int32_t bytes) {
-#ifdef __linux__
-        std::string path = std::string("/") + name;
-        errno = 0;
-        int fd = shm_open(path.c_str(), O_CREAT | O_RDWR, 0666);
-        if (fd < 0) return -1;
-        if (ftruncate(fd, bytes) < 0) { close(fd); return -1; }
-        return fd;
+    uint32_t* layout_entry_(uint32_t i) {
+        return reinterpret_cast<uint32_t*>(
+            reinterpret_cast<char*>(header_) + kStateHeaderBytes +
+            i * kStateLayoutStride);
+    }
+
+    // Capture the previous generation's allocation sequence and rewind the
+    // bump pointer. Replaying the same (size, align) pairs at the same
+    // offsets is what makes the stored values readable again.
+    void begin_replay_() {
+        replay_count_ = header_ ? header_->layout_count : 0;
+        if (replay_count_ > kStateMaxLayout) replay_count_ = kStateMaxLayout;
+        replaying_ = true;
+        if (header_) header_->alloc_count = 0;
+    }
+
+    static bool mapShared_(const char* name, int32_t requested,
+                           char*& out, uint32_t& out_bytes, bool& created,
+                           void*& handle_out) {
+        out = nullptr;
+        out_bytes = 0;
+        created = false;
+        handle_out = nullptr;
+        if (requested < (int32_t)kStateDataOffset) return false;
+#ifdef _WIN32
+        HANDLE handle = CreateFileMappingA(
+            INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+            (DWORD)requested, name);
+        if (handle == nullptr) return false;
+        created = (GetLastError() != ERROR_ALREADY_EXISTS);
+        // An existing mapping fixes its own size; the size above is only a
+        // hint then. Probe the header first so the real view is exact.
+        uint32_t probe = (uint32_t)requested;
+        void* head = MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0,
+                                   (SIZE_T)kStateDataOffset);
+        if (head == nullptr) { CloseHandle(handle); return false; }
+        auto* hdr = reinterpret_cast<StateHeader*>(head);
+        if (!created && hdr->magic == kStateMagic &&
+            hdr->version == kStateVersion &&
+            hdr->bytes >= kStateDataOffset) {
+            probe = hdr->bytes;
+        }
+        UnmapViewOfFile(head);
+        void* view = MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0,
+                                   (SIZE_T)probe);
+        if (view == nullptr) { CloseHandle(handle); return false; }
+        // Deliberately keep the handle: closing the last handle destroys a
+        // named mapping even while a view exists, and the next generation
+        // must open the same object.
+        out = static_cast<char*>(view);
+        out_bytes = probe;
+        handle_out = handle;
+        return true;
 #else
-        (void)name; (void)bytes;
-        return -1;
+        std::string path = std::string("/") + name;
+        int fd = shm_open(path.c_str(), O_CREAT | O_RDWR, 0666);
+        if (fd < 0) return false;
+        struct stat st;
+        if (fstat(fd, &st) != 0) { close(fd); return false; }
+        uint32_t probe = (uint32_t)requested;
+        if (st.st_size == 0) {
+            if (ftruncate(fd, requested) != 0) { close(fd); return false; }
+            created = true;
+        } else {
+            probe = (uint32_t)st.st_size;
+        }
+        if (probe < kStateDataOffset) { close(fd); return false; }
+        void* view = mmap(nullptr, probe, PROT_READ | PROT_WRITE,
+                          MAP_SHARED, fd, 0);
+        close(fd);
+        if (view == MAP_FAILED) return false;
+        out = static_cast<char*>(view);
+        out_bytes = probe;
+        return true;
 #endif
     }
+
+    void releaseShared_() {
+        if (!data_) return;
+#ifdef _WIN32
+        UnmapViewOfFile(data_);
+        if (handle_) { CloseHandle((HANDLE)handle_); handle_ = nullptr; }
+#else
+        munmap(data_, size_);
+        if (!sharedName_.empty()) shm_unlink(sharedName_.c_str());
+#endif
+        data_ = nullptr;
+    }
+
+    StateHeader* header_ = nullptr;
+    void* handle_ = nullptr;
+    uint32_t replay_count_ = 0;
+    bool replaying_ = false;
+    bool view_ = false;
     bool owned_ = true;
-    bool shared_ = false;
     std::string sharedName_ = "";
-    char* data_;
+    char* data_ = nullptr;
     uint32_t size_;
     uint32_t offset_;
     std::vector<Cleanup> cleanups_;
 };
+
+// A program that wants its working set to survive a reload allocates from
+// this arena instead of a private one. Without a host-bound segment (a plain
+// `vanta run`) it falls back to a private megabyte, so the same source works
+// in both modes.
+inline Arena state_arena() {
+    if (!g_state_header) return Arena(1024 * 1024);
+    return Arena(g_state_base, (int32_t)g_state_header->bytes);
+}
 
 // ---------- Assertions ----------
 inline void assert_impl(bool cond, int32_t line) {

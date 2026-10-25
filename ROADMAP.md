@@ -10,7 +10,19 @@ present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
 
-## Landed in v0.71.0
+## Landed in v1.2.0
+
+State-preserving hot reload (Phase II.D): `vanta hot` owns one flat byte
+segment per session and binds it into every rebuilt generation.
+`state_arena()` allocates from it, so values survive a source change;
+`hot_should_reload()` lets a loop cooperate with rebuilds; `__reload(prev)`
+runs once per generation. `--reloads N` gives deterministic build/swap cycles.
+936 tests total.
+
+The class model remains partially implemented; scoped out of this release so
+hot reload could ship verified. Next: classes full model + tests, capturing
+lambdas, module-level globals backed by the state segment.
+
 
 Go-to-implementation landed. `textDocument/implementation` jumps from a
 type declaration to its concrete construction sites, or from a function

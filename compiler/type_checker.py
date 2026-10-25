@@ -244,6 +244,8 @@ class TypeChecker:
         bf("file_exists", [("path", STR)], BOOL)
         bf("file_write", [("path", STR), ("data", STR)], I32)
         bf("file_read", [("path", STR)], STR)
+        bf("state_arena", [], self.structs["Arena"])
+        bf("hot_should_reload", [], BOOL)
         bf("assert", [("cond", BOOL)], VOID)
         bf("translation", [("x", F32), ("y", F32), ("z", F32)], self.structs["Matrix4"])
         bf("scale", [("s", F32)], self.structs["Matrix4"])
@@ -976,8 +978,10 @@ class TypeChecker:
         if vt is VOID:
             raise CheckError("cannot bind a variable to void", self.filename, v.pos)
         if isinstance(vt, StructType) and vt.name == "Arena":
-            if not (isinstance(v.value, A.Call) and isinstance(v.value.func, A.Name)
-                    and v.value.func.name == "Arena"):
+            ctor = None
+            if isinstance(v.value, A.Call) and isinstance(v.value.func, A.Name):
+                ctor = v.value.func.name
+            if ctor not in ("Arena", "state_arena"):
                 raise CheckError("Arena values cannot be copied or reassigned", self.filename, v.pos)
         self._declare(v.name, vt, v.mutable, v.pos)
         v.var_type = vt
@@ -1224,7 +1228,8 @@ class TypeChecker:
                 expr.type = ent[0]
                 return ent[0]
             if expr.name in ('len', 'print_fmt', 'write_fmt', 'str_fmt', 'assert', 'enum_to_i32',
-                             'ptr_is_null', 'ptr_cast', 'ptr_offset', 'ptr_null'):
+                             'ptr_is_null', 'ptr_cast', 'ptr_offset', 'ptr_null',
+                             'state_arena', 'hot_should_reload'):
                 raise CheckError(f"cannot use builtin '{expr.name}' as a value",
                                  self.filename, expr.pos)
             if (expr.name in self.structs or expr.name in self.enums

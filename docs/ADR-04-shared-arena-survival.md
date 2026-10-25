@@ -1,7 +1,11 @@
 # ADR-04: State-preserving hot reload, phase II (shared Arena and migrate hook)
 
 ## Status
-Phase II.A substrate delivered as v0.94.0. Phase II.B (lib reload) remains.
+Phase II.A substrate delivered as v0.94.0. Phase II.B (in-process lib reload)
+delivered as v1.0.1. Phase II.C (migrate handoff) and Phase II.D (host-owned
+state segment) delivered as v1.2.0: `vanta hot` binds one flat byte segment
+into every generation and `state_arena()` replays the allocation layout
+deterministically.
 
 ## Context
 Phase I (ADR-03, v0.93.0) relaunches a child process on every source change,

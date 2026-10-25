@@ -2,6 +2,21 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.2.0 - 2026-10-25
+
+- **Phase II.D: state-preserving hot reload**. `vanta hot` owns one flat byte
+  segment per session and binds it into every rebuilt generation.
+  `state_arena()` allocates from it, so values survive a source change across
+  reloads; `hot_should_reload()` lets a loop end the current generation when
+  the host asks for a rebuild, and `__reload(prev)` runs once per generation.
+  `--reloads N` runs deterministic build/swap cycles; `--state-size`,
+  `--include-dir`, `--lib-dir`, and `--link` control the session.
+- `Arena(bytes, "name")` maps a real OS shared segment (Windows file mapping
+  with the handle retained across generations; POSIX `shm_open`/`mmap` on
+  Unix) with a `StateHeader` + 256-entry layout table, so replay is
+  deterministic and layout changes keep earlier bytes and append new ones.
+- Tests: 936 (930 + 6 hot-reload/state tests in tests/test_hot.py).
+
 ## v1.1.1 - 2026-10-24
 
 - **Lexical string interpolation is operational**: `"Hello {expr}"` lexes to

@@ -2,7 +2,9 @@
 
 ## Status
 Phase I delivered as v0.93.0 (supervisor + incremental cache). State
-survival remains open.
+survival is fulfilled by Phase II.D (v1.2.0): the host owns a flat byte
+segment per `vanta hot` session and `state_arena()` keeps process state
+alive across reloads.
 
 ## Context
 GDScript iteration latency is dominated by *editor play*, measured in

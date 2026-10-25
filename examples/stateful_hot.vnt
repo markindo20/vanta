@@ -1,6 +1,32 @@
+# stateful_hot.vnt -- state that survives `vanta hot` rebuilds.
+#
+# `vanta hot examples/stateful_hot.vnt` owns one flat byte segment per
+# session and binds it into every rebuilt generation. `state_arena()` hands
+# out memory from that segment, so `ticks` is the same storage after a swap:
+# the count keeps climbing instead of resetting to 1.
+#
+# The loop polls hot_should_reload(), so editing this file ends the current
+# generation promptly and the host builds and runs the next one. Outside
+# `vanta hot` there is no bound segment, so state_arena() falls back to a
+# private arena and the loop simply runs MAX_TICKS times.
+#
+#   vanta hot examples/stateful_hot.vnt
+#   vanta hot examples/stateful_hot.vnt --reloads 2   # deterministic check
+
+const MAX_TICKS: i32 = 5
+
+func __reload(prev: ptr<void>) -> void:
+    print_str("__reload: the host kept the state segment")
+
 func main() -> void:
-    let world = Arena(262144, "stateful-hot-arena")
-    let counter = world.alloc::<i32>(1)
-    counter[0] = counter[0] + 1
-    print_i32(counter[0])
-    print_str("survives as a named shared segment name across reloads")
+    let world = state_arena()
+    let ticks = world.alloc::<i32>(1)
+    mut n: i32 = 0
+    while n < MAX_TICKS:
+        ticks[0] = ticks[0] + 1
+        print_i32(ticks[0])
+        if hot_should_reload():
+            print_str("reload requested; ending this generation")
+            return
+        n = n + 1
+    print_str("done; run under vanta hot to keep the count")

@@ -236,7 +236,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (929 tests) |
+| `tests/` | `unittest` suite (936 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -287,11 +287,28 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `pong.vnt` | The second playable game: paddles, tracking AI, text score, and beeps — built on the game kit |
 | `breakout.vnt` | The third playable game: three tinted sprite walls, animated ball, auto-playing paddle, pause, persisted best score, WAV hits — built on the game kit |
 | `strike.vnt` | The fourth playable game: animated ship, three waves of tinted saucers, text HUD, WAV hits, gamepad fallback, collision tests — built on the game kit |
+| `stateful_hot.vnt` | State-preserving hot reload: `state_arena()` keeps its count across `vanta hot` rebuilds |
+
+## State-preserving hot reload (v1.2.0)
+
+`vanta hot <file>` keeps one host-owned byte segment alive across rebuilds and
+binds it into every generation. `state_arena()` allocates from that segment, so
+values survive a source change; `hot_should_reload()` lets a loop end the
+current generation when the file changes. `--reloads N` runs deterministic
+build/swap cycles without editing a file:
+
+```powershell
+vanta hot examples/stateful_hot.vnt          # state keeps climbing across edits
+vanta hot examples/stateful_hot.vnt --reloads 2   # three generations, state = 3
+```
+
+Outside `vanta hot`, `state_arena()` falls back to a private arena, so the same
+source runs under `vanta run` too.
 
 ## Tests
 
 ```powershell
-| `tests/` | `unittest` suite (929 tests) |
+| `tests/` | `unittest` suite (936 tests) |
 ```
 
 Integration tests compile and run real binaries, so they need a C++17 compiler
