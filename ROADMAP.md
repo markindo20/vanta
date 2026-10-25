@@ -45,8 +45,7 @@ single inheritance (`extends`), construction via named arguments, field
 read/write, `ptr<Self>` self parameter, and inheritance resolution of
 methods at call sites. 945 tests total.
 
-Remaining queue: capturing lambdas, module-level globals backed by the state
-segment, instance-bound signals, `@export`.
+Remaining queue: instance-bound signals, @export.
 
 ## Next: tooling (candidate)
 

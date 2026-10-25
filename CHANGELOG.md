@@ -2,6 +2,23 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.5.0 - 2026-10-25
+
+- **Landed in v1.5.0:** per-field visibility (`pub`) for structs and classes;
+  nested/dotted modules; `VANTA_PATH` search-path resolution; generic
+  type-parameter constraints (`T: Copyable`, `T: Eq`, chained with `+`);
+  top-level `mut`/`let` globals backed by the state segment (validated
+  by hot reload); capturing lambdas/closures; reverse debugging in the DAP
+  adapter; and the v1.4.0 package manager is now paired with improved GDB
+  reverse-recording handling and game-kit visibility fixes.
+- Closures capture analysis rewrites, closure struct allocation from the
+  state arena, and closure calls through `ptr->v_invoke`.
+- Generic constraints are enforced at both registration and instantiation
+  time, including transitive `Arena` copyability rejection.
+- Module loading now falls back through relative, `std/`, and `VANTA_PATH`,
+  resolving dotted names to dotted paths.
+- Tests: 1004.
+
 ## v1.4.0 - 2026-10-25
 
 - **vanta pm: client-side package manager**. New `vanta pm` subcommand with
