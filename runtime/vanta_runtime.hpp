@@ -441,7 +441,18 @@ public:
         uint32_t effective = 0;
         bool created = false;
         void* handle = nullptr;
-        if (mapShared_(shared_name, bytes, base, effective, created, handle)) {
+        std::string safe_name = shared_name;
+        if (safe_name.size() > 24) {
+            uint32_t h = 2166136261u;
+            for (char ch : safe_name) {
+                h ^= (uint32_t)(unsigned char)ch;
+                h *= 16777619u;
+            }
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "v%08x", (unsigned)h);
+            safe_name = std::string(buf);
+        }
+        if (mapShared_(safe_name.c_str(), bytes, base, effective, created, handle)) {
             size_ = effective;
             auto* h = reinterpret_cast<StateHeader*>(base);
             if (created || h->magic != kStateMagic ||
@@ -461,8 +472,7 @@ public:
             }
             header_ = h;
             data_ = base;
-            sharedName_ = shared_name;
-            handle_ = handle;
+            sharedName_ = safe_name;
             offset_ = kStateDataOffset;
             begin_replay_();
             return;
@@ -676,7 +686,10 @@ private:
         if (handle_) { CloseHandle((HANDLE)handle_); handle_ = nullptr; }
 #else
         munmap(data_, size_);
-        if (!sharedName_.empty()) shm_unlink(sharedName_.c_str());
+        if (!sharedName_.empty()) {
+            std::string path = std::string("/") + sharedName_;
+            shm_unlink(path.c_str());
+        }
 #endif
         data_ = nullptr;
     }
