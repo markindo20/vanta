@@ -22,9 +22,9 @@ class ModuleTests(unittest.TestCase):
             f.write(textwrap.dedent(source).lstrip('\n'))
         return path
 
-    def check(self, name='main.vnt'):
+    def check(self, name='main.vnt', search_paths=None):
         path = os.path.join(self.dir, name)
-        program = load_program(path)
+        program = load_program(path, search_paths=search_paths)
         tc = TypeChecker(program, path)
         tc.register()
         tc.check()
@@ -690,6 +690,141 @@ class ModuleTests(unittest.TestCase):
         with self.assertRaises(LoadError) as cm:
             self.check()
         self.assertIn("module 'math.vector' is already defined", str(cm.exception))
+
+    # ---------- search path imports (VANTA_PATH) ----------
+
+    def test_search_path_resolves_import(self):
+        lib = os.path.join(self.dir, 'lib')
+        os.makedirs(lib, exist_ok=True)
+        self.write(os.path.join('lib', 'math.vnt'), '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('main.vnt', '''
+            import "math.vnt"
+
+            func main() -> i32:
+                return add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib])
+        self.assertIn('vanta_m_math__add', tc.functions)
+
+    def test_search_path_module_name_dots_to_slashes(self):
+        lib = os.path.join(self.dir, 'lib')
+        os.makedirs(os.path.join(lib, 'math'), exist_ok=True)
+        self.write(os.path.join('lib', 'math', 'vector.vnt'), '''
+            module math.vector
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('main.vnt', '''
+            import "math.vector"
+
+            func main() -> i32:
+                return add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib])
+        self.assertIn('vanta_m_math__vector__add', tc.functions)
+
+    def test_search_path_auto_appends_vnt(self):
+        lib = os.path.join(self.dir, 'lib')
+        os.makedirs(lib, exist_ok=True)
+        self.write(os.path.join('lib', 'math.vnt'), '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('main.vnt', '''
+            import "math"
+
+            func main() -> i32:
+                return add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib])
+        self.assertIn('vanta_m_math__add', tc.functions)
+
+    def test_relative_import_takes_priority_over_search_path(self):
+        # A sibling file with the same name must win over a search path copy.
+        lib = os.path.join(self.dir, 'lib')
+        os.makedirs(lib, exist_ok=True)
+        self.write(os.path.join('lib', 'math.vnt'), '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('math.vnt', '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a - b
+        ''')
+        self.write('main.vnt', '''
+            import "math.vnt"
+
+            func main() -> i32:
+                return add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib])
+        self.assertIn('vanta_m_math__add', tc.functions)
+
+    def test_search_path_multiple_directories_searched_in_order(self):
+        lib1 = os.path.join(self.dir, 'lib1')
+        lib2 = os.path.join(self.dir, 'lib2')
+        os.makedirs(lib1, exist_ok=True)
+        os.makedirs(lib2, exist_ok=True)
+        self.write(os.path.join('lib1', 'math.vnt'), '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write(os.path.join('lib2', 'math.vnt'), '''
+            module math
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a - b
+        ''')
+        self.write('main.vnt', '''
+            import "math.vnt"
+
+            func main() -> i32:
+                return add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib1, lib2])
+        self.assertIn('vanta_m_math__add', tc.functions)
+
+    def test_search_path_missing_import_is_error(self):
+        self.write('main.vnt', '''
+            import "nonexistent.vnt"
+
+            func main() -> i32:
+                return 1
+        ''')
+        with self.assertRaises(LoadError):
+            self.check(search_paths=[os.path.join(self.dir, 'lib')])
+
+    def test_search_path_qualified_alias_import(self):
+        lib = os.path.join(self.dir, 'lib')
+        os.makedirs(os.path.join(lib, 'math'), exist_ok=True)
+        self.write(os.path.join('lib', 'math', 'vector.vnt'), '''
+            module math.vector
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('main.vnt', '''
+            import "math.vector" as v
+
+            func main() -> i32:
+                return v.add(2, 3)
+        ''')
+        _program, tc = self.check(search_paths=[lib])
+        self.assertIn('vanta_m_math__vector__add', tc.functions)
 
 
 if __name__ == '__main__':

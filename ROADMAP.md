@@ -31,6 +31,13 @@ Enforced in the type checker on reads, writes, and constructor arguments.
 `module math.vector`. Dots become `__` in the internal C++ prefix
 (`vanta_m_math__vector__`). Duplicate dotted module names are rejected.
 
+**Package/search-path story.** Imports can now resolve through the
+directories in `VANTA_PATH` (OS path-separator separated) when they don't
+resolve relative to the importer or the stdlib. `import "math.vector"` also
+resolves to `<search-dir>/math/vector.vnt` (dots become path separators,
+`.vnt` is appended when missing). Relative imports and `std/` still take
+priority.
+
 ## Landed in v1.3.0
 
 Classes — full model + tests: `class` declarations with fields and methods,
@@ -493,11 +500,7 @@ public declarations. `examples/modules_demo/` is the worked example.
 
 ## Next: language (candidate)
 
-1. **Package/search-path story - medium.** A general module search path so
-   path-only imports become less painful when projects grow; pairs with
-   nested modules. Currently imports are paths only (`import "file.vnt"`),
-   with `std/` as the only special prefix.
-2. **Generic follow-ups - large.** Generic enum payloads now cover
+1. **Generic follow-ups - large.** Generic enum payloads now cover
    `Option`, `Result`, and reusable error containers. Generic structs,
    generic functions, and constraints each need their own design and are not
    assumed by this milestone.

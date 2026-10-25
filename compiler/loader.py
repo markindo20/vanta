@@ -124,7 +124,7 @@ class _Module:
 
 
 class _Loader:
-    def __init__(self, sources=None):
+    def __init__(self, sources=None, search_paths=None):
         self._modules = {}      # real path -> _Module
         self._active = []       # [(real path, display path)] in progress
         self._order = []        # modules in dependency-first order
@@ -133,6 +133,7 @@ class _Loader:
             _source_key(path): text
             for path, text in (sources or {}).items()
         }
+        self.search_paths = list(search_paths or [])
 
     def load(self, entry_path):
         self._load(entry_path, None, None)
@@ -213,7 +214,8 @@ class _Loader:
         return mod
 
     def _import_target(self, path, imp):
-        """Resolve an import relative to the importer, then the stdlib.
+        """Resolve an import relative to the importer, then the stdlib,
+        then the configured search paths (VANTA_PATH).
 
         `std/...` is the only special prefix. An actual sibling file with the
         same path wins, so projects can vendor their own copy. In-memory
@@ -230,7 +232,30 @@ class _Loader:
                 os.path.join(STDLIB_DIR, rel[len('std/'):]))
             if self._exists(candidate):
                 return candidate
+        for base in self.search_paths:
+            for candidate in self._search_path_candidates(base, imp.path):
+                if self._exists(candidate):
+                    return candidate
         return target
+
+    @staticmethod
+    def _search_path_candidates(base, import_path):
+        """Yield candidate file paths under *base* for *import_path*.
+
+        Tries the path as-is, with `.vnt` appended, with dots converted to
+        directory separators, and dotted with `.vnt` appended. This lets
+        `import "math.vector"` resolve to `<base>/math/vector.vnt` while
+        `import "math/vector.vnt"` resolves to `<base>/math/vector.vnt`.
+        """
+        rel = import_path.replace('\\', '/')
+        yield os.path.normpath(os.path.join(base, rel))
+        if not rel.endswith('.vnt'):
+            yield os.path.normpath(os.path.join(base, rel + '.vnt'))
+        dotted = rel.replace('.', '/')
+        if dotted != rel:
+            yield os.path.normpath(os.path.join(base, dotted))
+            if not dotted.endswith('.vnt'):
+                yield os.path.normpath(os.path.join(base, dotted + '.vnt'))
 
 
 class _Scopes:
@@ -726,12 +751,20 @@ class _Resolver:
                 te.name = self._resolve_type_name(mod, te.name, te.pos)
 
 
-def load_program(entry_path, sources=None):
+def load_program(entry_path, sources=None, search_paths=None):
     """Parse entry_path and its imports into one resolved Program.
 
     `sources` optionally maps filesystem paths to unsaved source text. This is
     used by the language server so diagnostics reflect what is in the editor,
     not only what has been saved.
+
+    `search_paths` is an ordered list of extra directories searched for
+    imports that don't resolve relative to the importer or the stdlib.
+    When omitted, the `VANTA_PATH` environment variable (directories
+    separated by the OS path separator) is used.
     """
-    modules = _Loader(sources).load(entry_path)
+    if search_paths is None:
+        env = os.environ.get('VANTA_PATH')
+        search_paths = env.split(os.pathsep) if env else []
+    modules = _Loader(sources, search_paths).load(entry_path)
     return _Resolver(modules).resolve()
