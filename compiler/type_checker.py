@@ -165,6 +165,7 @@ class TypeChecker:
         self._struct_instance_counter = 0
         self.functions: dict[str, FuncSig] = {}
         self.constants: dict[str, Type] = {}
+        self.globals: dict[str, tuple[Type,bool]] = {}
         # Function types seen anywhere in the program, mapped to the C++
         # alias name codegen will emit for them.
         self.func_types: dict[FuncType, str] = {}
@@ -556,6 +557,8 @@ class TypeChecker:
                     self._register_const(d)
                     if d.is_public and d.type_ann is None:
                         self._check_inferred_public(d, self.constants.get(d.name))
+                elif isinstance(d, A.VarDecl):
+                    self._register_global(d)
                 elif isinstance(d, A.ExternDecl):
                     self._register_extern(d)
             for d in self.program.decls:
@@ -829,6 +832,32 @@ class TypeChecker:
             raise CheckError("constant cannot hold a function value", self.filename, c.pos)
         self.constants[c.name] = vt
 
+    def _register_global(self, g):
+        if (g.name in self.structs or g.name in self.enums
+                or g.name in self.generic_enums or g.name in self.generic_structs
+                or g.name in self.generic_functions):
+            raise CheckError(f"global name '{g.name}' collides with type",
+                             self.filename, g.pos)
+        if g.name in self.functions:
+            raise CheckError(f"duplicate function '{g.name}'", self.filename, g.pos)
+        if g.name in self.constants:
+            raise CheckError(f"duplicate constant '{g.name}'", self.filename, g.pos)
+        if g.name in self.globals:
+            raise CheckError(f"duplicate global '{g.name}'", self.filename, g.pos)
+        declared = self._resolve_type(g.type_ann) if g.type_ann is not None else None
+        vt = self._check_expr(g.value, declared)
+        if declared is not None:
+            self._coerce_value(g.value, vt, declared, g.pos, "global initializer")
+            vt = declared
+        else:
+            vt = self._default_type(vt, g.value)
+        if vt is VOID:
+            raise CheckError("global cannot be void", self.filename, g.pos)
+        if isinstance(vt, StructType) and vt.name == "Arena":
+            raise CheckError("Arena values cannot be globals", self.filename, g.pos)
+        self.globals[g.name] = (vt, bool(g.mutable))
+        g.var_type = vt
+
     def _register_extern(self, d: A.ExternDecl):
         for fd in d.funcs:
             if fd.name in self.functions:
@@ -891,6 +920,8 @@ class TypeChecker:
                 return scope[name]
         if name in self.constants:
             return (self.constants[name], False)
+        if name in self.globals:
+            return self.globals[name]
         return None
 
     def check(self):

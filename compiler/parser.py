@@ -96,6 +96,8 @@ class Parser:
             return self.parse_extern()
         if t.type == TT.CONST:
             return self.parse_const()
+        if t.type == TT.LET or t.type == TT.MUT:
+            return self.parse_var_decl()
         if t.type == TT.IMPORT:
             return self.parse_import()
         self.error(f"expected top-level declaration, got {t.type.name}")

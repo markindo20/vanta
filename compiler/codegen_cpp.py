@@ -559,6 +559,41 @@ class CodeGen:
             self.emit(f'{qual} {self._ctype(t)} v_{cd.name} = {self._expr(cd.value)};')
         if consts:
             self.emit('')
+        # State-segment-backed module globals. Each global lives in the
+        # process-recorded allocation sequence, so its offset is replayed
+        # across `vanta hot` generations before its initializer runs for
+        # the first time.
+        for gname, (gt, _gm) in getattr(self.tc, 'globals', {}).items():
+            struct_name = f'__Global_{gname}'
+            self.emit(f'struct {struct_name} {{')
+            self.indent += 1
+            self.emit(f'{self._ctype(gt)} value;')
+            self.emit('bool initialized = false;')
+            self.indent -= 1
+            self.emit('};')
+            self.emit(f'inline {self._ctype(gt)}& __global_{gname}() {{')
+            self.indent += 1
+            self.emit(f'static {struct_name}* p = nullptr;')
+            self.emit('if (!p) {')
+            self.indent += 1
+            self.emit('static vanta::Arena a = vanta::state_arena();')
+            self.emit(f'p = static_cast<{struct_name}*>('
+                      f'a.alloc<{struct_name}>(1));')
+            self.emit('if (!p->initialized) {')
+            self.indent += 1
+            init = self._expr(
+                next((d.value for d in self.program.decls
+                      if isinstance(d, A.VarDecl) and d.name == gname), None))
+            self.emit(f'p->value = {init};')
+            self.emit('p->initialized = true;')
+            self.indent -= 1
+            self.emit('}')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('return p->value;')
+            self.indent -= 1
+            self.emit('}')
+            self.emit('')
 
         self._gen_equality(struct_types, enums)
         funcs = [d for d in self.program.decls if isinstance(d, A.FuncDecl) and not getattr(d, 'type_params', ())]
@@ -1208,6 +1243,8 @@ class CodeGen:
 
     def _lvalue(self, expr) -> str:
         if isinstance(expr, A.Name):
+            if expr.name in getattr(self.tc, 'globals', {}):
+                return f'vanta_user::__global_{expr.name}()'
             return f'v_{expr.name}'
         if isinstance(expr, A.Member):
             obj_t = expr.obj.type if hasattr(expr.obj, 'type') else None
@@ -1272,6 +1309,8 @@ class CodeGen:
             elems = ', '.join(self._init_expr(el, t.inner) for el in e.elements)
             return f'std::array<{inner_t}, {N}>{{{elems}}}'
         if isinstance(e, A.Name):
+            if e.name in getattr(self.tc, 'globals', {}):
+                return f'vanta_user::__global_{e.name}()'
             if getattr(e, 'is_func_ref', False):
                 if e.name in BUILTIN_FN:
                     return BUILTIN_FN[e.name]

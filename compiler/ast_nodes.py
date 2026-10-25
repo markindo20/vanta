@@ -159,6 +159,7 @@ class VarDecl:
     mutable: bool
     value: Any
     pos: Pos
+    is_public: bool = False
 
 
 @dataclass
