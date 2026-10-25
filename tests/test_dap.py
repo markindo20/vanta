@@ -1085,6 +1085,7 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         self.assertTrue(response['body']['breakpoints'][0]['verified'],
                         response)
 
+    @unittest.skipIf(sys.platform == 'win32', 'host GDB does not support reverse debugging')
     def test_initialize_advertises_reverse_stepping(self):
         capabilities = self.initialize()['body']
         self.assertTrue(capabilities.get('supportsStepBack'),
@@ -1092,6 +1093,7 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         self.assertTrue(capabilities.get('supportsReverseStep'),
                         capabilities)
 
+    @unittest.skipIf(sys.platform == 'win32', 'host GDB does not support reverse debugging')
     def test_reverse_step_goes_back_to_earlier_line(self):
         self.initialize()
         self.launch()
@@ -1108,6 +1110,7 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         event = self.stopped_event(timeout=60)
         self.assertEqual(event['body']['reason'], 'step')
 
+    @unittest.skipIf(sys.platform == 'win32', 'host GDB does not support reverse debugging')
     def test_reverse_continue_stops_at_earlier_breakpoint(self):
         self.initialize()
         self.launch()
@@ -1130,6 +1133,7 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         event = self.stopped_event(timeout=60)
         self.assertEqual(event['body']['reason'], 'breakpoint')
 
+    @unittest.skipIf(sys.platform == 'win32', 'host GDB does not support reverse debugging')
     def test_step_back_goes_back_one_line(self):
         self.initialize()
         self.launch()

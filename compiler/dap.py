@@ -665,6 +665,7 @@ class DapAdapter:
         self._next_var_ref = 1
         self._recording = False
         self._reverse_step_expected = False
+        self._reverse_supported = sys.platform != 'win32'
         self._reverse_step_expected = False
 
     # -- protocol ----------------------------------------------------------
@@ -839,8 +840,8 @@ class DapAdapter:
             'supportsInstructionBreakpoints': True,
             'supportsLoadedSourcesRequest': False,
             'supportsRegisterEvaluate': True,
-            'supportsStepBack': True,
-            'supportsReverseStep': True,
+            'supportsStepBack': self._reverse_supported,
+            'supportsReverseStep': self._reverse_supported,
             'exceptionBreakpointFilters': [
                 {'filter': 'throw', 'label': 'C++ exceptions thrown',
                  'default': False},
