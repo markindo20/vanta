@@ -1612,7 +1612,7 @@ def cmd_test(args):
 
 
 _COMMANDS = ('new', 'check', 'fmt', 'doctor', 'build', 'run', 'debug', 'test',
-             'lsp', 'dap', 'watch', 'repl', 'hot', 'get')
+             'lsp', 'dap', 'watch', 'repl', 'hot', 'get', 'pm')
 
 
 def _normalize_argv(argv):
@@ -2013,6 +2013,18 @@ def main(argv):
     p_get.add_argument('--name', default=None,
                         help='override the dependency name')
 
+    p_pm = sub.add_parser('pm', help='package manager (manifest vanta.toml)')
+    p_pm.add_argument('pm_command', choices=['init', 'add', 'install', 'remove',
+                                            'list', 'lock', 'check'],
+                      help='subcommand')
+    p_pm.add_argument('sources', nargs='*',
+                      help='sources/names for add')
+    p_pm.add_argument('names', nargs='*',
+                      help='names for remove')
+    p_pm.add_argument('--name', default=None,
+                      help='override the dependency/add package name')
+    p_pm.add_argument('--dest', default='vendor', help='destination parent dir')
+
     p_debug = sub.add_parser(
         'debug', help='build with Vanta source locations and debug with GDB')
     p_debug.add_argument('source')
@@ -2072,6 +2084,9 @@ def main(argv):
         return cmd_hot(args)
     if args.cmd == 'get':
         return cmd_get(args)
+    if args.cmd == 'pm':
+        from .packages import cmd_pm
+        return cmd_pm(args)
     if args.cmd == 'debug':
         return cmd_debug(args)
     return 1

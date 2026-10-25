@@ -2,6 +2,21 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.4.0 - 2026-10-25
+
+- **vanta pm: client-side package manager**. New `vanta pm` subcommand with
+  declarative manifest (`vanta.toml`) and lockfile (`vanta.lock`).
+  Subcommands: `init`, `add <sources>`, `install`, `remove <names>`,
+  `list`, `lock`, `check`. Dependency sources: local paths, git URLs, and
+  registry (via `VANTA_REGISTRY` env var). Transitive dependency resolution
+  by reading each dependency's `vanta.toml` and merging into the root
+  manifest. Backward compatible with `vanta get`. Zero central registry
+  requirement for v1.4.0 (registry support via env var only).
+- Added `tests/test_packages.py` covering manifest/lockfile IO, local-path
+  fetching, transitive resolution, add/list/lock/check/remove/install, and
+  error cases.
+- Tests: 965 (945 + 20 package-manager tests).
+
 ## v1.3.0 - 2026-10-25
 
 - **Classes — full model + tests**: `class` declarations with fields and methods,
