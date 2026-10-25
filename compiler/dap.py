@@ -663,6 +663,7 @@ class DapAdapter:
         self._terminated = False
         self._variable_refs: dict[int, dict] = {}
         self._next_var_ref = 1
+        self._recording = False
 
     # -- protocol ----------------------------------------------------------
 
@@ -836,6 +837,8 @@ class DapAdapter:
             'supportsInstructionBreakpoints': True,
             'supportsLoadedSourcesRequest': False,
             'supportsRegisterEvaluate': True,
+            'supportsStepBack': True,
+            'supportsReverseStep': True,
             'exceptionBreakpointFilters': [
                 {'filter': 'throw', 'label': 'C++ exceptions thrown',
                  'default': False},
@@ -1692,6 +1695,40 @@ class DapAdapter:
             self.error(request, exc)
             return
         self.response(request)
+
+    def _ensure_recording(self):
+        """Mark that reverse execution is requested.
+
+        GDB builds that support reverse execution start recording
+        automatically on the first reverse command; older builds will
+        reject the reverse command with a clear error.  This method is a
+        no-op so the adapter never blocks waiting for recording to start.
+        """
+        self._recording = True
+
+    def _request_reverseContinue(self, request, args):
+        self._ensure_recording()
+        self._resume(request, '-exec-reverse-continue', args)
+
+    def _request_reverseStepIn(self, request, args):
+        self._ensure_recording()
+        granularity = args.get('granularity', 'statement')
+        if granularity == 'instruction':
+            self._resume(request, '-exec-reverse-step-instruction', args)
+        else:
+            self._resume(request, '-exec-reverse-step', args)
+
+    def _request_reverseStepOut(self, request, args):
+        self._ensure_recording()
+        self._resume(request, '-exec-reverse-finish', args)
+
+    def _request_stepBack(self, request, args):
+        self._ensure_recording()
+        granularity = args.get('granularity', 'statement')
+        if granularity == 'instruction':
+            self._resume(request, '-exec-reverse-next-instruction', args)
+        else:
+            self._resume(request, '-exec-reverse-next', args)
 
     def _request_evaluate(self, request, args):
         expression = str(args.get('expression') or '')
@@ -2646,6 +2683,7 @@ class DapAdapter:
 
     def _shutdown(self, cleanup=False):
         self._running = False
+        self._recording = False
         if self._gdb is not None:
             try:
                 self._gdb.close()

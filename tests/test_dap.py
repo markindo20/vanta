@@ -1085,6 +1085,67 @@ class DapNavigationIntegrationTests(_DapSessionTestCase):
         self.assertTrue(response['body']['breakpoints'][0]['verified'],
                         response)
 
+    def test_initialize_advertises_reverse_stepping(self):
+        capabilities = self.initialize()['body']
+        self.assertTrue(capabilities.get('supportsStepBack'),
+                        capabilities)
+        self.assertTrue(capabilities.get('supportsReverseStep'),
+                        capabilities)
+
+    def test_reverse_step_goes_back_to_earlier_line(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()  # stopped at line 6 (inside the loop)
+
+        # Reverse step back to an earlier line.
+        self.send('reverseStepIn', {'threadId': 1})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'reverseStepIn', timeout=60)
+        self.assertTrue(response['success'], response)
+        event = self.stopped_event(timeout=60)
+        self.assertEqual(event['body']['reason'], 'step')
+
+    def test_reverse_continue_stops_at_earlier_breakpoint(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 5}, {'line': 7}])
+        self.configuration_done()
+        self.stopped_event()  # stopped at line 5 (first breakpoint)
+
+        # Continue forward past line 7, then reverse back to line 5.
+        self.send('continue', {'threadId': 1})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'continue', timeout=60)
+        # Stopped at line 7 (second breakpoint).
+        event = self.stopped_event(timeout=60)
+        self.assertEqual(event['body']['reason'], 'breakpoint')
+
+        # Reverse continue back to line 5.
+        self.send('reverseContinue', {'threadId': 1})
+        self.expect(lambda m: m.get('type') == 'response' and
+                    m.get('command') == 'reverseContinue', timeout=60)
+        event = self.stopped_event(timeout=60)
+        self.assertEqual(event['body']['reason'], 'breakpoint')
+
+    def test_step_back_goes_back_one_line(self):
+        self.initialize()
+        self.launch()
+        self.set_breakpoints([{'line': 6}])
+        self.configuration_done()
+        self.stopped_event()  # stopped at line 6
+
+        # Step back one line.
+        self.send('stepBack', {'threadId': 1, 'granularity': 'statement'})
+        response = self.expect(
+            lambda m: m.get('type') == 'response' and
+            m.get('command') == 'stepBack', timeout=60)
+        self.assertTrue(response['success'], response)
+        event = self.stopped_event(timeout=60)
+        self.assertEqual(event['body']['reason'], 'step')
+
     def test_the_current_instruction_can_be_disassembled(self):
         self.initialize()
         self.launch()
