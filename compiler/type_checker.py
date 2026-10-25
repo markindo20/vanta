@@ -1310,7 +1310,9 @@ class TypeChecker:
             body=new_body,
             is_system=False,
             pos=expr.pos)
-        expr.invoke_name = fd.name
+        # _func_sig prefixes with 'fn_', so the actual C++ name is
+        # 'fn_fn_closure__{idx}'. Record that for the make function.
+        expr.invoke_name = "fn_fn_closure__%d" % idx
         self.program.decls.append(fd)
         self._register_func(fd)
         self._check_func(fd)
