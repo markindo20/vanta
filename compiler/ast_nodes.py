@@ -135,6 +135,18 @@ class ClassDecl:
     type_param_constraints: Dict[str, List[str]] = field(default_factory=dict)
     is_exported: bool = False
     decorators: List[str] = field(default_factory=list)
+    signals: List[Any] = field(default_factory=list)  # (name, params, ret, pos)
+
+
+@dataclass
+class SignalDecl:
+    name: str
+    params: List[Param]
+    ret: Optional[TypeExpr]
+    pos: Pos
+    is_public: bool = False
+    is_exported: bool = False
+    decorators: List[str] = field(default_factory=list)
 
 
 @dataclass

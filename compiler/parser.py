@@ -325,11 +325,40 @@ class Parser:
         self.expect(TT.NEWLINE)
         self.expect(TT.INDENT)
         fields = []
+        signals = []
         methods = []
         while not self.check(TT.DEDENT):
             decorators = []
             while self.check(TT.AT):
                 decorators.append(self._parse_decorator())
+            if self.check(TT.IDENT) and self.peek().value == "signal":
+                self.advance()
+                name_tok = self.expect(TT.IDENT)
+                params = []
+                if self.match(TT.LPAREN):
+                    if not self.check(TT.RPAREN):
+                        while True:
+                            p_tok = self.expect(TT.IDENT)
+                            self.expect(TT.COLON)
+                            ptype = self.parse_type()
+                            params.append(A.Param(p_tok.value, ptype,
+                                                  A.Pos(p_tok.line, p_tok.col)))
+                            if not self.match(TT.COMMA):
+                                break
+                    self.expect(TT.RPAREN)
+                ret = None
+                if self.match(TT.ARROW):
+                    ret = self.parse_type()
+                self.expect(TT.COLON)
+                self.expect(TT.NEWLINE)
+                signal = A.SignalDecl(name_tok.value, params, ret,
+                                      A.Pos(name_tok.line, name_tok.col))
+                if decorators:
+                    signal.decorators.extend(decorators)
+                    if "@export" in decorators:
+                        signal.is_exported = True
+                signals.append(signal)
+                continue
             if self.check(TT.FUNC):
                 fd = self.parse_func(False)
                 if decorators:
@@ -349,7 +378,7 @@ class Parser:
                 fields.append((fn.value, ft, A.Pos(fn.line, fn.col), is_public, decorators))
         self.expect(TT.DEDENT)
         return A.ClassDecl(name, parent, fields, methods,
-                           A.Pos(tok.line, tok.col))
+                           A.Pos(tok.line, tok.col), signals=signals)
         """Parse a comma-separated type argument list, without the brackets."""
         args = []
         while True:

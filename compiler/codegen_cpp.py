@@ -1477,8 +1477,15 @@ class CodeGen:
                 return f'{name}{{{args}}}'
             if name in self.tc.classes:
                 ct = self.tc.classes[name]
-                args = ', '.join(self._init_expr(a, ft)
-                                 for a, (ft, _pub) in zip(c.args, ct.fields.values()))
+                _args = []
+                _raw = 0
+                for _fname, (ft, _pub) in ct.fields.items():
+                    if _fname == '_sig_handle':
+                        _args.append('vanta::signal_instance_new()')
+                    else:
+                        _args.append(self._init_expr(c.args[_raw], ft))
+                    _raw += 1
+                args = ', '.join(_args)
                 return f'{name}{{{args}}}'
             if name in BUILTIN_FN:
                 args = ', '.join(self._expr(a) for a in c.args)

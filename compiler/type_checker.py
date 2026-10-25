@@ -674,6 +674,10 @@ class TypeChecker:
             all_fields[fname] = fields[fname]
         # store own fields only in ClassType.fields (keep it simple for ctor)
         # but typechecker `_all_fields` helper flattens when checking members/ctors.
+        if '_sig_handle' not in all_fields:
+            fields['_sig_handle'] = (I32, False)
+            all_fields['_sig_handle'] = fields['_sig_handle']
+
         # register method signatures
         methods = {}
         for fd in d.methods:
@@ -691,9 +695,18 @@ class TypeChecker:
                 raise CheckError(f"duplicate function '{qual}'",
                                  self.filename, fd.pos)
             self.functions[qual] = FuncSig(qual, params, ret, is_extern=False)
+        signals = {}
+        for sd in d.signals:
+            params = []
+            for pp in sd.params:
+                params.append((pp.name, self._resolve_type(pp.type)))
+            ret = self._resolve_type(sd.ret) if sd.ret is not None else VOID
+            signals[sd.name] = FuncType(tuple(params), ret)
+
         ct = self.classes[d.name]
         ct.fields = dict(all_fields)
         ct.methods = methods
+        ct.signals = dict(signals)
 
     def _check_class_methods(self, d):
         ct = self.classes[d.name]
@@ -2994,8 +3007,11 @@ class TypeChecker:
             by_name[nm] = arg
         if len(seen) != len(ct.fields):
             missing = set(ct.fields) - seen
-            raise CheckError(f"missing fields: {', '.join(sorted(missing))}",
-                             self.filename, call.pos)
+            if '_sig_handle' in missing:
+                missing.discard('_sig_handle')
+                by_name['_sig_handle'] = A.IntLit(0, call.pos)
+            if missing:
+                raise CheckError("missing fields: " + ", ".join(sorted(missing)), self.filename, call.pos)
         call.args = [by_name[f] for f in ct.fields]
         call.arg_names = None
         call.type = ct
