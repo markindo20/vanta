@@ -13,6 +13,7 @@ class TT(Enum):
     TRUE = auto(); FALSE = auto()
     AND = auto(); OR = auto(); NOT = auto()
     EXTENDS = auto()
+    AT = auto()
     PLUS = auto(); MINUS = auto(); STAR = auto(); SLASH = auto(); PERCENT = auto()
     EQ = auto(); NEQ = auto(); LT = auto(); LTE = auto(); GT = auto(); GTE = auto()
     ASSIGN = auto(); PLUS_EQ = auto(); MINUS_EQ = auto(); STAR_EQ = auto(); SLASH_EQ = auto()

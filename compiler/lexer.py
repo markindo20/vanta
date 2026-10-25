@@ -164,6 +164,10 @@ class Lexer:
                 self._lex_number(); continue
             if ch.isalpha() or ch == '_':
                 self._lex_ident(); continue
+            if ch == '@':
+                self._emit(TT.AT, '@', self.line, self.col)
+                self._adv()
+                continue
             self._lex_op()
 
         if self.tokens and self.tokens[-1].type not in (TT.NEWLINE, TT.DEDENT):
