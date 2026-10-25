@@ -389,11 +389,11 @@ are real:
   `ptr<void>` widening
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
-- modules are one file each: imports are paths, with no nested modules,
-  or general search path (only `std/` falls back to the shipped standard
-  library); `pub` controls top-level declarations, not individual struct
-  fields, and a public declaration cannot expose a private type, including
-  through an inferred function or constant type
+- modules support dotted names (`module math.vector`); imports are still
+  paths, with a `std/` search path for the standard library; `pub` controls
+  top-level declarations, and per-field visibility (`pub x: i32`) controls
+  individual struct/class fields; a public declaration cannot expose a
+  private type
 - `vanta get <source>` still works but is superseded by `vanta pm add
   <source>`, which records dependencies in `vanta.toml` / `vanta.lock` and
   populates `vendor/`. Prefer `vanta pm add`; `vanta get` is kept for

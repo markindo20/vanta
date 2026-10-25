@@ -280,7 +280,7 @@ class _Resolver:
     def _collect_symbols(self):
         for mod in self.modules:
             mod.prefix = ('' if mod.is_legacy
-                          else f'vanta_m_{mod.declared_name}__')
+                          else f'vanta_m_{mod.declared_name.replace(".", "__")}__')
             for d in mod.decls:
                 if isinstance(d, A.FuncDecl):
                     source = d.name

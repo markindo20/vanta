@@ -19,7 +19,17 @@ Dependency sources: local paths, git URLs, and registry (via `VANTA_REGISTRY`
 env var). Transitive dependency resolution by reading each dependency's
 `vanta.toml` and merging into the root manifest. Backward compatible with
 `vanta get`; zero central registry requirement for v1.4.0 (registry support
-via env var only). Adds `tests/test_packages.py` (20 tests). 965 tests total.
+via env var only). Adds `tests/test_packages.py` (23 tests). 968 tests total.
+
+## Landed in v1.5.0
+
+**Per-field visibility.** Struct and class fields can be marked `pub` to make
+them accessible outside the declaring file; fields default to private.
+Enforced in the type checker on reads, writes, and constructor arguments.
+
+**Nested modules.** Module declarations support dotted names:
+`module math.vector`. Dots become `__` in the internal C++ prefix
+(`vanta_m_math__vector__`). Duplicate dotted module names are rejected.
 
 ## Landed in v1.3.0
 
@@ -483,10 +493,10 @@ public declarations. `examples/modules_demo/` is the worked example.
 
 ## Next: language (candidate)
 
-1. **Module follow-ups - medium.** Per-field visibility, nested modules, and
-   a package/search-path story were deliberately out of v0.30.0. They become
-   worth doing when a library wants to hide struct representation or when
-   path-only imports become painful.
+1. **Package/search-path story - medium.** A general module search path so
+   path-only imports become less painful when projects grow; pairs with
+   nested modules. Currently imports are paths only (`import "file.vnt"`),
+   with `std/` as the only special prefix.
 2. **Generic follow-ups - large.** Generic enum payloads now cover
    `Option`, `Result`, and reusable error containers. Generic structs,
    generic functions, and constraints each need their own design and are not

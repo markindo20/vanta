@@ -651,6 +651,46 @@ class ModuleTests(unittest.TestCase):
         self.assertIn('vanta_m_alpha__Option', families)
         self.assertIn('vanta_m_beta__Option', families)
 
+    def test_dotted_module_name(self):
+        self.write('math/vector.vnt', '''
+            module math.vector
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('main.vnt', '''
+            import "math/vector.vnt" as v
+
+            func main() -> i32:
+                return v.add(2, 3)
+        ''')
+        _program, tc = self.check()
+        self.assertIn('vanta_m_math__vector__add', tc.functions)
+
+    def test_dotted_module_duplicate_is_error(self):
+        self.write('math/vector.vnt', '''
+            module math.vector
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('other/vector.vnt', '''
+            module math.vector
+
+            pub func sub(a: i32, b: i32) -> i32:
+                return a - b
+        ''')
+        self.write('main.vnt', '''
+            import "math/vector.vnt" as v
+            import "other/vector.vnt" as o
+
+            func main() -> i32:
+                return v.add(1, 2)
+        ''')
+        with self.assertRaises(LoadError) as cm:
+            self.check()
+        self.assertIn("module 'math.vector' is already defined", str(cm.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

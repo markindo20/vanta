@@ -102,8 +102,10 @@ class Parser:
 
     def parse_module(self):
         tok = self.advance()
-        name = self.expect(TT.IDENT, "expected a module name").value
-        self.expect(TT.NEWLINE)
+        parts = [self.expect(TT.IDENT, "expected a module name").value]
+        while self.match(TT.DOT):
+            parts.append(self.expect(TT.IDENT, "expected a module name").value)
+        name = '.'.join(parts)
         return A.ModuleDecl(name, A.Pos(tok.line, tok.col))
 
     def parse_const(self):
