@@ -5,10 +5,21 @@ tests, and documentation together, and nothing ships undocumented or
 untested. This file is a candidate backlog, not a promise â€” priorities move
 as the games show what actually hurts.
 
-Current release: **v1.3.0** ([changelog](CHANGELOG.md)). The language's
+Current release: **v1.4.0** ([changelog](CHANGELOG.md)). The language's
 present limits are listed at the end of the [README](README.md#status); this
 file turns those limits into work. Within each section the small,
 high-leverage items come first; relative size is noted.
+
+## Landed in v1.4.0
+
+**vanta pm — client-side package manager.** New `vanta pm` subcommand with
+declarative manifest (`vanta.toml`) and lockfile (`vanta.lock`). Subcommands:
+`init`, `add <sources>`, `install`, `remove <names>`, `list`, `lock`, `check`.
+Dependency sources: local paths, git URLs, and registry (via `VANTA_REGISTRY`
+env var). Transitive dependency resolution by reading each dependency's
+`vanta.toml` and merging into the root manifest. Backward compatible with
+`vanta get`; zero central registry requirement for v1.4.0 (registry support
+via env var only). Adds `tests/test_packages.py` (20 tests). 965 tests total.
 
 ## Landed in v1.3.0
 
@@ -18,9 +29,20 @@ read/write, `ptr<Self>` self parameter, and inheritance resolution of
 methods at call sites. 945 tests total.
 
 Remaining queue: capturing lambdas, module-level globals backed by the state
-segment, registry package manager, instance-bound signals, `@export`.
+segment, instance-bound signals, `@export`.
 
-## Landed in v1.2.0
+## Next: tooling (candidate)
+
+1. **Registry package manager - medium.** Ship a real registry workflow on
+   top of `vanta pm add`: `VANTA_REGISTRY` pointing at an HTTP base serving
+   `<base>/<name>/<ver>/source.tar.gz`, plus `vanta pm add <name>@<ver>`
+   resolution and lockfile pinning. Integration tests with a local registry
+   directory and an HTTP registry smoke test.
+2. **Module follow-ups - medium.** Per-field visibility, nested modules, and
+   a package/search-path story become worth doing when a library wants to hide
+   struct representation or when path-only imports become painful.
+3. **Generic follow-ups - large.** Generic structs, generic functions, and
+   constraints each need their own design.
 
 State-preserving hot reload (Phase II.D): `vanta hot` owns one flat byte
 segment per session and binds it into every rebuilt generation.

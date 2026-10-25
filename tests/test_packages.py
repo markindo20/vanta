@@ -209,6 +209,49 @@ class PackagesTests(unittest.TestCase):
         rc = cmd_pm(make_args(pm_command='bogus'))
         self.assertEqual(rc, 1)
 
+    # ---------- registry integration ----------
+
+    def _make_registry(self, base, name, ver, files):
+        root = os.path.join(base, name, ver)
+        for rel, content in files.items():
+            self._write_file(os.path.join(root, rel), content)
+        return root
+
+    def test_add_registry_dep_local_base(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        base = os.path.join(self._tmp.name, 'registry')
+        self._make_registry(base, 'regdep', '1.0.0', {
+            'vanta.toml': '[package]\nname = "regdep"\nversion = "1.0.0"\n',
+            'lib.vnt': 'func main() -> void: print_i32(7)\n',
+        })
+        old = os.environ.get('VANTA_REGISTRY')
+        os.environ['VANTA_REGISTRY'] = base
+        try:
+            rc = cmd_pm(make_args(pm_command='add',
+                                  sources=['regdep@1.0.0'], names=[]))
+        finally:
+            if old is None:
+                os.environ.pop('VANTA_REGISTRY', None)
+            else:
+                os.environ['VANTA_REGISTRY'] = old
+        self.assertEqual(rc, 0)
+        manifest = _read_manifest()
+        self.assertEqual(manifest['dependencies']['regdep'], {'registry': '1.0.0'})
+        lock = read_lock()
+        self.assertEqual(lock['packages']['regdep']['source'],
+                         'registry:regdep@1.0.0')
+        self.assertTrue(os.path.exists(os.path.join(VENDOR, 'regdep', 'lib.vnt')))
+
+    def test_add_registry_missing_env_errors(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        old = os.environ.pop('VANTA_REGISTRY', None)
+        try:
+            rc = cmd_pm(make_args(pm_command='add', sources=['regdep@1.0.0'], names=[]))
+        finally:
+            if old is not None:
+                os.environ['VANTA_REGISTRY'] = old
+        self.assertEqual(rc, 1)
+
 
 def io_capture(fn):
     import io as _io

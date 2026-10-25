@@ -236,7 +236,7 @@ by a committed script (`gen_assets.py`) — nothing is vendored.
 | `runtime/vanta_runtime.hpp` | C++17 runtime: math types, `Arena`, IO, `rand` (shipped in the wheel) |
 | `stdlib/` | Shipped Vanta library modules: `option.vnt` and `result.vnt` |
 | `examples/` | Sample programs, one per feature area |
-| `tests/` | `unittest` suite (965 tests) |
+| `tests/` | `unittest` suite (967 tests) |
 | `editors/vscode/` | VS Code language client, debugger contribution, syntax grammar, and VSIX build |
 | `docs/` | Language reference, editor guide, debugger guide, and architecture notes |
 
@@ -308,7 +308,7 @@ source runs under `vanta run` too.
 ## Tests
 
 ```powershell
-| `tests/` | `unittest` suite (965 tests) |
+| `tests/` | `unittest` suite (967 tests) |
 ```
 
 Integration tests compile and run real binaries, so they need a C++17 compiler
@@ -390,10 +390,15 @@ are real:
   is the only implicit pointer conversion, and `ptr_cast::<T>(p)` /
   `ptr_offset(p, n)` are the unchecked explicit escape hatches
 - modules are one file each: imports are paths, with no nested modules,
-  package manager, or general search path (only `std/` falls back to the
-  shipped standard library); `pub` controls top-level declarations, not
-  individual struct fields, and a public declaration cannot expose a private
-  type, including through an inferred function or constant type
+  or general search path (only `std/` falls back to the shipped standard
+  library); `pub` controls top-level declarations, not individual struct
+  fields, and a public declaration cannot expose a private type, including
+  through an inferred function or constant type
+- `vanta get <source>` still works but is superseded by `vanta pm add
+  <source>`, which records dependencies in `vanta.toml` / `vanta.lock` and
+  populates `vendor/`. Prefer `vanta pm add`; `vanta get` is kept for
+  compatibility and may be removed in a future release. Migrate with
+  `vanta pm init` followed by `vanta pm add <source>` per prior dependency.
 
 Editor support covers diagnostics, completion, signature help, hover,
 definition, references, rename, quick fixes, workspace symbols, semantic
