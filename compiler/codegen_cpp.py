@@ -1271,38 +1271,44 @@ class CodeGen:
 
     def _gen_emit(self, stmt: A.EmitStmt):
         # Inside a class method, `self` is the first parameter (v_self, a pointer).
-        # Dispatch to correct runtime helper depending on signal payload.
+        # Dispatch is based entirely on the signal's declared payload types:
+        # we read the typed handler pointer from each live registry entry and
+        # call it with the emitted argument values.  This supports any supported
+        # payload combination up to arity 4.
         ct = getattr(self, '_current_class', None)
-        kind = 'i32'
+        payload_params = []
         if ct is not None and stmt.signal in getattr(ct, 'signals', {}):
-            ft = ct.signals[stmt.signal]
-            params = list(ft.params)[1:]
-            if len(params) == 0:
-                kind = 'void'
-            elif len(params) == 1 and params[0][1] is STR:
-                kind = 'str'
-            elif (len(params) >= 2 and all(
-                    p[1] is I32 for p in params)):
-                kind = 'multi'
-            else:
-                kind = 'i32'
+            sig_ft = ct.signals[stmt.signal]
+            payload_params = list(sig_ft.params)[1:]
         safe_handle = 'v_self->v__sig_handle'
         name_lit = f'vanta::Str::literal("{stmt.signal}", {len(stmt.signal)})'
-        if kind == 'void':
-            self.emit(f'vanta::signal_emit_void_instance({safe_handle}, {name_lit});')
-        elif kind == 'str':
-            args = ', '.join([safe_handle, name_lit, self._expr(stmt.args[0])])
-            self.emit(f'vanta::signal_emit_str_instance({args});')
-        elif kind == 'multi':
-            n = len(stmt.args)
-            helper = f'signal_emit_instance_i32_{n}'
-            args = ', '.join([safe_handle, name_lit] +
-                              [self._expr(a) for a in stmt.args])
-            self.emit(f'vanta::{helper}({args});')
+        arg_exprs = ', '.join(self._expr(a) for a in stmt.args)
+        if payload_params:
+            type_list = ', '.join(self._ctype(p[1]) for p in payload_params)
+            handler_type = f'void (*)({type_list})'
         else:
-            args = ', '.join([safe_handle, name_lit] +
-                              [self._expr(a) for a in stmt.args])
-            self.emit(f'vanta::signal_emit_instance({args});')
+            handler_type = 'void (*)()'
+        self.emit('{')
+        self.indent += 1
+        self.emit('auto& __reg = vanta::instance_signal_registry();')
+        self.emit('for (std::size_t __i = 0; __i < __reg.size();) {')
+        self.indent += 1
+        self.emit(f'if (__reg[__i].instance == {safe_handle} && vanta::str_eq(__reg[__i].name, {name_lit})) {{')
+        self.indent += 1
+        self.emit(f'auto __handler = reinterpret_cast<{handler_type}>(__reg[__i].hptr);')
+        if arg_exprs:
+            self.emit(f'__handler({arg_exprs});')
+        else:
+            self.emit(f'__handler();')
+        self.emit('if (__reg[__i].once) { __reg.erase(__reg.begin() + __i); continue; }')
+        self.indent -= 1
+        self.emit('}')
+        self.emit('++__i;')
+        self.indent -= 1
+        self.emit('}')
+        self.indent -= 1
+        self.emit('}')
+
 
     def _gen_for(self, stmt):
         if stmt.step is None:

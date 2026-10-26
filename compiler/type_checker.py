@@ -66,7 +66,7 @@ def _payload_enum_name(t, seen=None) -> str | None:
 
 
 def _is_function_pointer(t) -> bool:
-    """True for a function type or a chain of pointers to one — the shapes a
+    """True for a function type or a chain of pointers to one â€” the shapes a
     C signature can spell as a function-pointer declarator."""
     while isinstance(t, PtrType):
         t = t.inner
@@ -727,23 +727,20 @@ class TypeChecker:
             # First parameter is `self` as a pointer, like methods.
             if len(sd.params) <= 0:
                 pass
-            # Only support void, single i32, single str, and i32 x 2..4 for now.
+            # Allow deep payload types: any zero-to-four parameters supported:
+            # i32, u32, f32, f64, bool, str, ptr<T>, optionally mixed.
             ptypes = [self._resolve_type(pp.type) for pp in sd.params]
-            allowed = False
+            supported = False
             if len(ptypes) == 0:
-                allowed = True
-            elif len(ptypes) == 1 and (ptypes[0] is I32 or ptypes[0] is STR):
-                allowed = True
-            elif len(ptypes) >= 2 and len(ptypes) <= 4 and all(
-                    p is I32 for p in ptypes):
-                allowed = True
-            else:
-                allowed = False
-            if not allowed:
+                supported = True
+            elif 1 <= len(ptypes) <= 4 and all(
+                    self._signal_payload_supported(t) for t in ptypes):
+                supported = True
+            if not supported:
                 raise CheckError(
-                    "signal payloads must be empty, a single i32/str/bool, "
-                    "or 2..4 i32 values",
-                    self.filename, sd.pos)
+                    "signal payloads must be zero to four parameters of "
+                    "supported types (i32, u32, f32, f64, bool, str, or "
+                    "ptr<T>)", self.filename, sd.pos)
             params.append(("self", PtrType(self.classes[d.name])))
             for pp in sd.params:
                 params.append((pp.name, self._resolve_type(pp.type)))
@@ -1141,7 +1138,7 @@ class TypeChecker:
     def _is_assignable(self, expr) -> bool:
         # Walk the storage chain (field accesses, indexes, and checked at()
         # accesses) down to its root. An index applied to a pointer makes the
-        # chain writable no matter how the binding was declared — pointer
+        # chain writable no matter how the binding was declared â€” pointer
         # memory is mutable through a plain `let`. In every other case the
         # root binding must be `mut`; parameters and `let` bindings are
         # immutable at any depth.
@@ -1157,7 +1154,7 @@ class TypeChecker:
                 # A checked xs.at(i) is a storage location: keep walking
                 # through its receiver. Any other call is a temporary. A
                 # List is an indirection, so its elements are writable
-                # through a plain `let` — like pointer memory.
+                # through a plain `let` â€” like pointer memory.
                 if getattr(node, 'is_checked_at', False):
                     recv = node.func.obj
                     if isinstance(self._check_expr(recv), (ListType, PtrType)):
@@ -1671,6 +1668,13 @@ class TypeChecker:
             return node
 
         return [rewrite(s) for s in body]
+
+    def _signal_payload_supported(self, t) -> bool:
+        if t in (I32, U32, F32, F64, BOOL, STR, INT_LIT, FLOAT_LIT):
+            return True
+        if isinstance(t, PtrType):
+            return True
+        return False
 
     def _check_emit(self, stmt: A.EmitStmt):
         # Must be inside a class method to have access to self._sig_handle
@@ -2251,6 +2255,27 @@ class TypeChecker:
                 return self._check_ptr_offset(call)
             if name == 'ptr_null':
                 return self._check_ptr_null(call)
+            if name.startswith('signal_on'):
+                sig = self.functions[name]
+                if len(call.args) != len(sig.params):
+                    raise CheckError(
+                        f"signal registration expects {len(sig.params)} "
+                        f"argument(s), got {len(call.args)}", self.filename, call.pos)
+                for idx, (arg, (_, ptype)) in enumerate(
+                        zip(call.args, sig.params)):
+                    at = self._check_expr(arg)
+                    if isinstance(at, StructType) and at.name == "Arena":
+                        raise CheckError("cannot pass Arena to a signal handler",
+                                        self.filename, call.pos)
+                    if idx == len(sig.params) - 1:
+                        if not isinstance(at, FuncType) or at.ret is not VOID:
+                            raise CheckError(
+                                "signal handlers must be functions returning void",
+                                self.filename, call.pos)
+                    else:
+                        self._coerce_value(arg, at, ptype, call.pos, "argument")
+                call.type = sig.ret
+                return sig.ret
             if name == 'str_fmt':
                 return self._check_str_fmt(call)
             if name in ('print_fmt', 'write_fmt'):

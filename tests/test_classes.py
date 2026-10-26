@@ -189,6 +189,26 @@ class ClassesTests(unittest.TestCase):
             "    print_i32(seen)\n",
             "99")
 
+    def test_signal_bool_payload(self):
+        self.expect(
+            "mut seen: i32 = 0\n"
+            "func handler(ok: bool) -> void:\n"
+            "    if ok:\n"
+            "        seen = 1\n"
+            "    else:\n"
+            "        seen = 0\n"
+            "class T:\n"
+            "    signal toggled(ok: bool):\n"
+            "    count: i32\n\n"
+            "    func fire(self: T, v: bool) -> void:\n"
+            "        emit toggled(v)\n\n"
+            "func main() -> void:\n"
+            "    mut t = T(count: 0)\n"
+            "    signal_on_instance(t._sig_handle, \"toggled\", handler)\n"
+            "    t.fire(true)\n"
+            "    print_i32(seen)\n",
+            "1")
+
     def test_class_signal_emit(self):
         self.expect(
             "class Button:\n"
@@ -203,6 +223,28 @@ class ClassesTests(unittest.TestCase):
             "    b.press(5)\n"
             "    print_i32(b.count)\n",
             "0\n5")
+
+    def test_signal_mixed_payload(self):
+        self.expect(
+            "mut seen: i32 = 0\n"
+            "func handler(p: ptr<i32>, n: i32, ok: bool) -> void:\n"
+            "    if ok:\n"
+            "        seen = p[n]\n"
+            "class M:\n"
+            "    signal changed(p: ptr<i32>, n: i32, ok: bool):\n"
+            "    count: i32\n\n"
+            "    func fire(self: M, p: ptr<i32>, n: i32, ok: bool) -> void:\n"
+            "        emit changed(p, n, ok)\n\n"
+            "func main() -> void:\n"
+            "    mut m = M(count: 0)\n"
+            "    let a = state_arena()\n"
+            "    let cell = a.alloc::<i32>(2)\n"
+            "    cell[0] = 7\n"
+            "    cell[1] = 99\n"
+            "    signal_on_instance(m._sig_handle, \"changed\", handler)\n"
+            "    m.fire(cell, 1, true)\n"
+            "    print_i32(seen)\n",
+            "99")
 
     def test_export_function(self):
         self.expect(

@@ -1502,7 +1502,7 @@ inline void signal_on_instance(int32_t instance, Str name,
                               signal_handler_i32_t handler) {
     InstanceSignalEntry e;
     e.instance = instance; e.name = name; e.kind = 0; e.once = false;
-    e.i32h = handler; e.strh = nullptr;
+    e.i32h = handler; e.strh = nullptr; e.hptr = reinterpret_cast<void*>(handler);
     instance_signal_registry().push_back(e);
 }
 
@@ -1510,7 +1510,7 @@ inline void signal_on_str_instance(int32_t instance, Str name,
                                   signal_handler_str_t handler) {
     InstanceSignalEntry e;
     e.instance = instance; e.name = name; e.kind = 1; e.once = false;
-    e.i32h = nullptr; e.strh = handler;
+    e.i32h = nullptr; e.strh = handler; e.hptr = reinterpret_cast<void*>(handler);
     instance_signal_registry().push_back(e);
 }
 
@@ -1518,7 +1518,7 @@ inline void signal_on_once_instance(int32_t instance, Str name,
                                     signal_handler_i32_t handler) {
     InstanceSignalEntry e;
     e.instance = instance; e.name = name; e.kind = 0; e.once = true;
-    e.i32h = handler; e.strh = nullptr;
+    e.i32h = handler; e.strh = nullptr; e.hptr = reinterpret_cast<void*>(handler);
     instance_signal_registry().push_back(e);
 }
 
@@ -1550,7 +1550,7 @@ inline void signal_off_instance(int32_t instance, Str name) {
     auto& reg = instance_signal_registry();
     for (size_t i = 0; i < reg.size();) {
         if (reg[i].instance == instance &&
-            vanta::str_eq(reg[i].name, name) && reg[i].kind == 0) {
+            vanta::str_eq(reg[i].name, name)) {
             reg.erase(reg.begin() + i);
         } else {
             i++;
@@ -1562,7 +1562,7 @@ inline void signal_off_str_instance(int32_t instance, Str name) {
     auto& reg = instance_signal_registry();
     for (size_t i = 0; i < reg.size();) {
         if (reg[i].instance == instance &&
-            vanta::str_eq(reg[i].name, name) && reg[i].kind == 1) {
+            vanta::str_eq(reg[i].name, name)) {
             reg.erase(reg.begin() + i);
         } else {
             i++;
@@ -1571,6 +1571,19 @@ inline void signal_off_str_instance(int32_t instance, Str name) {
 }
 
 // ---------- Instance signals (extended payload kinds) ----------
+// generic template
+// Generic registration aliases for Option B.
+template <typename H> inline void signal_on_instance(int32_t i, Str n, H h, bool o=false) {
+  InstanceSignalEntry e{}; e.instance=i; e.name=n; e.once=o;
+  e.hptr=reinterpret_cast<void*>(h); e.i32h=nullptr; e.strh=nullptr;
+  e.mh1=nullptr; e.mh2=nullptr; e.mh3=nullptr; e.mh4=nullptr;
+  instance_signal_registry().push_back(e); }
+template <typename H> inline void signal_on_once_instance(int32_t i, Str n, H h) { signal_on_instance(i,n,h,true); }
+template <typename H> inline void signal_on_str_instance(int32_t i, Str n, H h, bool o=false) { signal_on_instance(i,n,h,o); }
+template <typename H> inline void signal_on_void_instance(int32_t i, Str n, H h, bool o=false) { signal_on_instance(i,n,h,o); }
+template <typename H> inline void signal_on_instance_i32_2(int32_t i, Str n, H h, bool o=false) { signal_on_instance(i,n,h,o); }
+template <typename H> inline void signal_on_instance_i32_3(int32_t i, Str n, H h, bool o=false) { signal_on_instance(i,n,h,o); }
+template <typename H> inline void signal_on_instance_i32_4(int32_t i, Str n, H h, bool o=false) { signal_on_instance(i,n,h,o); }
 // Void payload (no arguments).
 inline void signal_on_void_instance(int32_t instance, Str name,
                                     void (*handler)()) {
