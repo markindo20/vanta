@@ -1347,6 +1347,104 @@ class IntegrationTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_str_index_runtime(self):
+        src = (
+            "func main() -> void:\n"
+            "    let s = \"Vanta\"\n"
+            "    print_str(s[0])\n"
+            "    print_str(s[4])\n"
+            "    print_bool(s[0] == \"V\")\n"
+            "    print_bool(s[1] == s[0])\n"
+            "    print_i32(str_len(s))\n"
+            "    let joined = str_concat(s[0], s[1])\n"
+            "    print_str(joined)\n"
+            "    print_str(s[0][0])\n"
+            "    let tail = str_concat(\"ab\", \"cd\")[1]\n"
+            "    print_str(tail)\n"
+            "    let i = 1 + 2\n"
+            "    print_str(s[i])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_stridx_')
+        try:
+            path = os.path.join(tmp, 'stridx.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['V', 'a', 'true', 'false', '5',
+                                       'Va', 'V', 'b', 't'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_index_out_of_bounds_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let s = \"abc\"\n"
+            "    let i = 2 + 1\n"
+            "    print_str(s[i])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_stridx_oob_')
+        try:
+            path = os.path.join(tmp, 'oob.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path,
+                'vanta: string index 3 out of bounds (length 3) at line 4')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_index_negative_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let s = \"abc\"\n"
+            "    print_str(s[0 - 1])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_stridx_neg_')
+        try:
+            path = os.path.join(tmp, 'neg.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path,
+                'vanta: string index -1 out of bounds (length 3) at line 3')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_index_empty_string_fails_loudly(self):
+        src = (
+            "func main() -> void:\n"
+            "    let s = \"\"\n"
+            "    print_str(s[0])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vanta_stridx_empty_')
+        try:
+            path = os.path.join(tmp, 'empty.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run_expect_error(
+                path,
+                'vanta: string index 0 out of bounds (length 0) at line 3')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_str_index_is_byte_based(self):
+        tmp = tempfile.mkdtemp(prefix='vanta_stridx_bytes_')
+        try:
+            data = os.path.join(tmp, 'utf8.bin')
+            with open(data, 'wb') as f:
+                f.write(b'\xc3\xa9')  # "é" in UTF-8: two bytes
+            src = (
+                "func main() -> void:\n"
+                f"    let s = file_read(\"{data.replace(chr(92), '/')}\")\n"
+                "    print_i32(str_len(s))\n"
+                "    print_bool(s[0] == s[1])\n"
+            )
+            path = os.path.join(tmp, 'bytes.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['2', 'false'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_checked_index_out_of_bounds_write_fails_loudly(self):
         src = (
             "func main() -> void:\n"

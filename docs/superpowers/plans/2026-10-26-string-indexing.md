@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `s[i]` on a `str` return a bounds-checked, zero-copy one-byte `str`, so `s[i] == "a"` works.
+**Goal:** Make `s[i]` on a `str` return a bounds-checked one-byte `str`, so `s[i] == "a"` works.
 
-**Architecture:** The parser already emits `A.Index`; only its type is missing. The type checker types a `str` index as `str` and rejects element assignment. Codegen lowers the read to `vanta::str_at_checked`, and the runtime builds a `Str::view` that shares the source's refcounted buffer. No grammar or AST change.
+**Architecture:** The parser already emits `A.Index`; only its type is missing. The type checker types a `str` index as `str` and rejects element assignment. Codegen lowers the read to `vanta::str_at_checked`, and the runtime copies the byte into its own NUL-terminated buffer. No grammar or AST change.
 
 **Tech Stack:** Python 3 compiler (`compiler/`), standalone C++17 runtime header (`runtime/vanta_runtime.hpp`), `unittest` suites.
 
@@ -15,7 +15,7 @@
 - `s[i]` has type `str` and holds exactly the byte at offset `i`.
 - Every access is bounds-checked. Negative indices and empty strings abort.
 - Abort text is exactly `vanta: string index I out of bounds (length N) at line L`.
-- The result is a zero-copy view and stays valid after the source value goes out of scope.
+- The result is a one-byte string that owns its byte and stays valid after the source value goes out of scope.
 - `s[i] = ...` is a compile error: `cannot assign to a string element; str is immutable`.
 - Indexing is byte-based, consistent with `str_len` and `str_sub`; no UTF-8 character indexing.
 - No slicing, no version bump, no change to list/array/pointer indexing.
@@ -25,7 +25,7 @@
 
 - Empty string indexed at `0`: aborts with length 0, never reads the buffer.
 - Index equal to `str_len` or negative: aborts with the exact message and Vanta line.
-- A one-byte view used after its source temporary is destroyed: the buffer stays alive.
+- A one-byte result used after its source temporary is destroyed: it owns its byte.
 - Multi-byte UTF-8 input: indexing walks bytes, so a two-byte character has two positions.
 - A non-`i32` index (`s["a"]`): compile error, not a silent coercion.
 
@@ -118,10 +118,9 @@ git commit -m "feat: type-check str indexing as a byte"
 
 ---
 
-### Task 2: Runtime view, checked helper, and codegen
+### Task 2: Checked helper and codegen
 
 **Files:**
-- Modify: `runtime/vanta_runtime.hpp:80-114` (add `Str::view` inside `class Str`)
 - Modify: `runtime/vanta_runtime.hpp:1101-1109` (after `str_sub`, add `str_at_checked`)
 - Modify: `compiler/codegen_cpp.py:1496-1499` (`A.Index` in `_expr`)
 - Modify: `compiler/codegen_cpp.py:1383-1387` (`A.Index` in `_lvalue`)
@@ -130,7 +129,7 @@ git commit -m "feat: type-check str indexing as a byte"
 
 **Interfaces:**
 - Consumes: `s[i]` typed `STR` by Task 1.
-- Produces: `static Str vanta::Str::view(const Str& base, int32_t start, int32_t len)` and `inline Str vanta::str_at_checked(Str s, int32_t index, int32_t line)`. Codegen emits `vanta::str_at_checked(<obj>, <index>, <line>)`.
+- Produces: `inline Str vanta::str_at_checked(Str s, int32_t index, int32_t line)`. Codegen emits `vanta::str_at_checked(<obj>, <index>, <line>)`.
 
 - [ ] **Step 1: Write the failing codegen test**
 
@@ -168,7 +167,7 @@ git commit -m "feat: type-check str indexing as a byte"
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(src)
             self._build_and_run(path, ['V', 'a', 'true', 'false', '5',
-                                       'Va', 'V', 'b', 'n'])
+                                       'Va', 'V', 'b', 't'])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -246,34 +245,18 @@ git commit -m "feat: type-check str indexing as a byte"
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `python -m unittest tests.test_codegen.CodeGenTests.test_str_index_emit tests.test_integration.IntegrationTests.test_str_index_runtime -v`
+Run: `python -m unittest tests.test_codegen.CodegenTests.test_str_index_emit tests.test_integration.IntegrationTests.test_str_index_runtime -v`
 
 Expected: codegen assertion fails because the output contains `v_s[0]`; the integration test fails to compile because `vanta::Str` has no `operator[]`.
 
-- [ ] **Step 4: Add `Str::view` to the runtime**
-
-Inside `class Str`, next to `literal`/`borrow`/`copy`:
-
-```cpp
-    // A view of [start, start+len) in another Str's buffer. The view keeps
-    // the source's refcounted buffer alive; literal storage is static.
-    static Str view(const Str& base, int32_t start, int32_t len) {
-        Str out;
-        out.data_ = base.c_str() + start;
-        out.len_ = len;
-        out.rep_ = base.rep_;
-        if (out.rep_) out.rep_->refs += 1;
-        return out;
-    }
-```
-
-- [ ] **Step 5: Add `str_at_checked` to the runtime**
+- [ ] **Step 4: Add `str_at_checked` to the runtime**
 
 Immediately after `str_sub`:
 
 ```cpp
-// One-byte view with a checked index. The source line makes a bad index a
-// loud stop instead of a read past the buffer.
+// One byte with a checked index, copied into its own NUL-terminated buffer.
+// A view into the middle of an existing string would leak its suffix into
+// printf, strtol, and extern C calls, which all read to the terminator.
 inline Str str_at_checked(Str s, int32_t index, int32_t line) {
     if (index < 0 || index >= s.size()) {
         std::fprintf(stderr,
@@ -282,11 +265,11 @@ inline Str str_at_checked(Str s, int32_t index, int32_t line) {
                      (int)index, (int)s.size(), (int)line);
         std::exit(1);
     }
-    return Str::view(s, index, 1);
+    return Str::copy(s.c_str() + index, 1);
 }
 ```
 
-- [ ] **Step 6: Lower the read in codegen**
+- [ ] **Step 5: Lower the read in codegen**
 
 In `_expr`, the `A.Index` branch becomes:
 
@@ -302,7 +285,7 @@ In `_expr`, the `A.Index` branch becomes:
             return f'{self._expr(e.obj)}[{self._expr(e.index)}]'
 ```
 
-- [ ] **Step 7: Guard `_lvalue`**
+- [ ] **Step 6: Guard `_lvalue`**
 
 At the top of the `A.Index` branch in `_lvalue`:
 
@@ -314,23 +297,23 @@ At the top of the `A.Index` branch in `_lvalue`:
 
 The checker rejects this first; the guard keeps a compiler bug from emitting invalid C++.
 
-- [ ] **Step 8: Run the focused tests**
+- [ ] **Step 7: Run the focused tests**
 
-Run: `python -m unittest tests.test_codegen.CodeGenTests.test_str_index_emit tests.test_integration.IntegrationTests.test_str_index_runtime tests.test_integration.IntegrationTests.test_str_index_out_of_bounds_fails_loudly tests.test_integration.IntegrationTests.test_str_index_negative_fails_loudly tests.test_integration.IntegrationTests.test_str_index_empty_string_fails_loudly tests.test_integration.IntegrationTests.test_str_index_is_byte_based -v`
+Run: `python -m unittest tests.test_codegen.CodegenTests.test_str_index_emit tests.test_integration.IntegrationTests.test_str_index_runtime tests.test_integration.IntegrationTests.test_str_index_out_of_bounds_fails_loudly tests.test_integration.IntegrationTests.test_str_index_negative_fails_loudly tests.test_integration.IntegrationTests.test_str_index_empty_string_fails_loudly tests.test_integration.IntegrationTests.test_str_index_is_byte_based -v`
 
 Expected: all six pass.
 
-- [ ] **Step 9: Run the affected suites**
+- [ ] **Step 8: Run the affected suites**
 
 Run: `python -m unittest tests.test_codegen tests.test_type_checker tests.test_integration -v`
 
 Expected: all pass. If an unrelated integration test is skipped for a missing SDL2/compiler, confirm the skip existed before this change and leave it alone.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add runtime/vanta_runtime.hpp compiler/codegen_cpp.py tests/test_codegen.py tests/test_integration.py
-git commit -m "feat: index strings by byte with a checked zero-copy view"
+git add runtime/vanta_runtime.hpp compiler/codegen_cpp.py tests/test_codegen.py tests/test_integration.py docs/superpowers/specs/2026-10-26-string-indexing-design.md docs/superpowers/plans/2026-10-26-string-indexing.md
+git commit -m "feat: index strings by byte with a checked one-byte copy"
 ```
 
 ---
@@ -393,10 +376,10 @@ Insert after the intro line (`Notable changes to Vanta, newest first.`):
 ```markdown
 ## Unreleased
 
-- **String indexing:** `s[i]` on a `str` yields a one-byte `str` view. Reads are
+- **String indexing:** `s[i]` on a `str` yields a one-byte `str`. Reads are
   always bounds-checked — a negative or past-the-end index stops the program
   with `vanta: string index I out of bounds (length N) at line L` — and the
-  view shares the source's refcounted storage, so it outlives the source value.
+  result owns its byte, so it outlives the source value.
   Indexing is byte-based, consistent with `str_len`/`str_sub`; `s[i] = ...` is
   a compile error because `str` is immutable. Tests: N.
 ```
@@ -409,7 +392,7 @@ Replace line 48 (`Remaining queue: ...`) with:
 
 ```markdown
 Remaining queue: string indexing landed in v1.7.0 (unreleased): `s[i]` returns
-a checked, zero-copy one-byte `str` and is byte-based like `str_len`. Next up:
+a checked one-byte `str` and is byte-based like `str_len`. Next up:
 struct/pointer/bool signal payloads and the remaining LSP `@export` affordances.
 ```
 

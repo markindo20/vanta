@@ -1381,6 +1381,9 @@ class CodeGen:
                 return f'{base}.{expr.field}'
             return f'{base}.v_{expr.field}'
         if isinstance(expr, A.Index):
+            if getattr(expr.obj, 'type', None) is STR:
+                raise RuntimeError(
+                    "cannot assign to a string element; str is immutable")
             if isinstance(getattr(expr.obj, 'type', None), ListType):
                 return (f'{self._lvalue(expr.obj)}.h->data'
                         f'[{self._expr(expr.index)}]')
@@ -1494,7 +1497,12 @@ class CodeGen:
                 return f'{base}.v_{e.field}'
             return f'{base}.v_{e.field}'
         if isinstance(e, A.Index):
-            if isinstance(getattr(e.obj, 'type', None), ListType):
+            obj_type = getattr(e.obj, 'type', None)
+            if obj_type is STR:
+                line = e.pos.line if e.pos else 0
+                return (f'vanta::str_at_checked({self._expr(e.obj)}, '
+                        f'{self._expr(e.index)}, {line})')
+            if isinstance(obj_type, ListType):
                 return f'{self._expr(e.obj)}.h->data[{self._expr(e.index)}]'
             return f'{self._expr(e.obj)}[{self._expr(e.index)}]'
         if isinstance(e, A.Call):

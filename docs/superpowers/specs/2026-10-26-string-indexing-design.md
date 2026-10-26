@@ -12,8 +12,8 @@ str`. Reading a single byte is a constant need when parsing text, walking a
 font's glyph table, and writing little scanners in game code.
 
 This change makes `s[i]` work for a `str` and yield a one-byte `str`, so the
-natural comparison is `s[i] == "a"`. The result is a zero-copy view into the
-original buffer, and every access is bounds-checked.
+natural comparison is `s[i] == "a"`. The result owns its byte, and every access
+is bounds-checked.
 
 ## Goals
 
@@ -21,10 +21,9 @@ original buffer, and every access is bounds-checked.
   a `str` holding exactly the byte at offset `i`.
 - Indexing is safe by default: out-of-range and negative indices abort with
   `vanta: string index I out of bounds (length N) at line L`.
-- The result shares storage with the original string; a loop over characters
-  performs no allocation and does not copy the buffer.
-- A view keeps the source buffer alive after the original `str` value goes out
-  of scope.
+- The result is a one-byte string that owns its byte; each access copies
+  exactly one byte, never the whole buffer.
+- A result stays usable after the original `str` value goes out of scope.
 - Indexing composes: `s[0]`, `s[i][0]`, `str_concat(a, b)[0]`, and a call
   result are all valid.
 
@@ -49,7 +48,10 @@ original buffer, and every access is bounds-checked.
 ## Constraints
 
 - `str` literals are static views (`rep_ == nullptr`); runtime strings are
-  refcounted (`rep_ != nullptr`). A view must handle both.
+  refcounted (`rep_ != nullptr`). A result must be independently valid.
+- A `Str` is NUL-terminated: `print_str`, `str_to_i32`/`str_to_f32`, and
+  `extern` C calls read to the terminator. A view into the middle of a buffer
+  would expose the suffix, so an indexed byte must own a NUL-terminated copy.
 - The runtime header is standalone C++17 with no exceptions; failures print to
   stderr and exit, like `at_checked` and `list_at_checked`.
 - The parser already produces `A.Index`, so the grammar does not change.
@@ -57,10 +59,9 @@ original buffer, and every access is bounds-checked.
 
 ## Approaches considered
 
-1. **`s[i]` returns a checked one-byte `str` view.** Runtime view constructor
-   plus a checked helper; checker types the index as `str`; codegen calls the
-   helper. *(Chosen.)* Gives the desired syntax and safe reads with no
-   per-character allocation.
+1. **`s[i]` returns a checked one-byte `str`.** A checked helper types the index
+   as `str` and codegen calls it. *(Chosen.)* Gives the desired syntax and safe
+   reads; each access copies one byte.
 2. **`s.at(i)` only, no bracket syntax.** Consistent with the checked-access
    spelling used for lists and pointers, but leaves `s[i]` failing and does not
    provide the requested affordance.
@@ -68,9 +69,8 @@ original buffer, and every access is bounds-checked.
    turns a typo into undefined behavior or a silent NUL rather than a loud
    abort, for no meaningful speed benefit.
 
-Approach 1 was chosen because it provides `s[i] == "a"` directly, keeps reads
-safe, and the zero-copy view removes the only cost that made the unchecked
-variant tempting.
+Approach 1 was chosen because it provides `s[i] == "a"` directly and keeps
+reads safe.
 
 ## Decisions
 
@@ -85,16 +85,16 @@ empty string always aborts. The abort text is:
 vanta: string index I out of bounds (length N) at line L
 ```
 
-**View representation.** Add `static Str view(const Str& base, int32_t start,
-int32_t len)` to `Str`. It sets `data_ = base.data_ + start`, `len_ = len`, and
-`rep_ = base.rep_`, incrementing the refcount when `rep_` is present. The
-existing destructor then frees the buffer only when the last view and owner are
-gone. Preconditions (`0 <= start`, `len >= 0`, `start + len <= base.size()`)
-are guaranteed by the checked helper.
+**Representation.** The result owns its byte. The helper returns
+`Str::copy(s.c_str() + index, 1)`, which allocates a two-byte buffer (the byte
+and its terminator). A zero-copy interior view was rejected during
+implementation: `Str` is NUL-terminated, so `print_str(s[0])` would print the
+rest of the source, `str_to_i32(s[0])` would parse the suffix, and an `extern`
+call taking a `str` would see text past the indexed byte.
 
 **Runtime helper.** Add `inline Str str_at_checked(Str s, int32_t index, int32_t
 line)` next to `str_sub`. It aborts on `index < 0 || index >= s.size()`, then
-returns `Str::view(s, index, 1)`.
+returns `Str::copy(s.c_str() + index, 1)`.
 
 **Assignment.** `_check_assign` rejects a string element target with
 `cannot assign to a string element; str is immutable`, before the generic
@@ -107,7 +107,7 @@ internal error for a `str` index rather than emitting invalid C++.
 
 ## Files touched
 
-- `runtime/vanta_runtime.hpp` — `Str::view`, `str_at_checked`.
+- `runtime/vanta_runtime.hpp` — `str_at_checked`.
 - `compiler/type_checker.py` — accept `STR` in `A.Index`, reject assignment to
   an element.
 - `compiler/codegen_cpp.py` — emit the helper for `STR`; guard `_lvalue`.
@@ -139,19 +139,19 @@ func main() -> void:
     print_str(s[0])              # V
     print_str(s[4])              # a
     print_bool(s[0] == "V")      # true
-    print_bool(s[5] == "")       # false — indexing past the end aborts, does not yield ""
+    print_bool(s[1] == "a")      # true
     let joined = str_concat(s[0], s[1])
     print_str(joined)            # Va
     let tail = str_concat("ab", "cd")[1]
-    print_str(tail)              # b — the view keeps the temporary alive
+    print_str(tail)              # b — the byte outlives the temporary
 ```
+
+`s[5]` on `"Vanta"` does not return `""`; it aborts with the bounds message.
 
 ## What is left to the builder
 
 - Exact placement of the checker branch and helper names, following surrounding
   style.
-- Whether `Str::view` is public or a private factory used by the helper (the
-  helper is a free function, so it must be public).
 - Test names and fixture layout, matching the existing suites.
 - Whether the changelog entry lists the feature alone or together with the
   pending v1.7.0 signal/LSP work at release time.
