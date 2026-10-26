@@ -2,6 +2,29 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.6.0 - 2026-10-26
+
+- **Instance-bound signals and `@export` metadata are now fully consumable.**
+- **Class-level signals:** declare a signal inside a class (`signal clicked(value: i32):`),
+  then `emit clicked(value)` from one of its methods. The compiler lowers
+  `emit` onto the per-instance handle (`v_self->v__sig_handle`) and the
+  instance-signal registry, so `connect` queries fired by `emit` are scoped
+  to that instance. Distinct class instances mint distinct handles.
+- **Signal kinds:** a signal payload may be empty (void), a single `i32`, or a
+  single `str`. `signal_on_instance`, `signal_on_once_instance`, and the
+  `signal_emit*_instance` helpers set up callers by handle.
+- **`@export`:** functions and class methods marked `@export` now get a real
+  consumer — a C-ABI export wrapper (`vanta_export_<name>`, `extern "C"`) in
+  shared/hot builds, plus the runtime metadata plumbing a host can use to look
+  them up by name.
+- **`emit` syntax:** new `emit` keyword. `emit clicked(v)` inside a method,
+  or `emit b.clicked(v)` from arbitrary code, lowers to `signal_emit_instance`
+  (and the void/str variants).
+- **Signal _self_ mutation (pointer receivers):** all class methods now take
+  `self` as a pointer internally, so `self.field = value` mutations are
+  visible through the original instance instead of a copied value.
+- Tests: 1016.
+
 ## v1.5.0 - 2026-10-25
 
 - **Landed in v1.5.0:** per-field visibility (`pub`) for structs and classes;

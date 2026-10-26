@@ -12,7 +12,7 @@ high-leverage items come first; relative size is noted.
 
 ## Landed in v1.4.0
 
-**vanta pm — client-side package manager.** New `vanta pm` subcommand with
+**vanta pm ï¿½ client-side package manager.** New `vanta pm` subcommand with
 declarative manifest (`vanta.toml`) and lockfile (`vanta.lock`). Subcommands:
 `init`, `add <sources>`, `install`, `remove <names>`, `list`, `lock`, `check`.
 Dependency sources: local paths, git URLs, and registry (via `VANTA_REGISTRY`
@@ -40,12 +40,12 @@ priority.
 
 ## Landed in v1.3.0
 
-Classes — full model + tests: `class` declarations with fields and methods,
+Classes ï¿½ full model + tests: `class` declarations with fields and methods,
 single inheritance (`extends`), construction via named arguments, field
 read/write, `ptr<Self>` self parameter, and inheritance resolution of
 methods at call sites. 945 tests total.
 
-Remaining queue: instance-bound signals, @export.
+Remaining queue: (all v1.6.0 items shipped) â€” next up: deeper signal payload types and full LSP/formatter support for `@export`.
 
 ## Next: tooling (candidate)
 

@@ -1,4 +1,4 @@
-# Vanta - a game-oriented systems language (v0.70.0)
+# Vanta - a game-oriented systems language (v1.6.0)
 
 Vanta is a small statically-typed language that compiles to C++17. It is
 designed for high-performance game code: predictable memory, explicit
