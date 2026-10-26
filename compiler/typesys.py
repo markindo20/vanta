@@ -91,6 +91,7 @@ class ClassType(Type):
     builtin: bool = False
     family: Optional[str] = None
     type_args: Tuple[Type, ...] = ()
+    signals: Dict[str, 'FuncType'] = field(default_factory=dict)
     display: Optional[str] = None
     vtable: Optional[str] = None
     # Source file where the class was declared, for per-field visibility.

@@ -625,7 +625,27 @@ class CodeGen:
                     pos=fd.pos, is_public=fd.is_public)
                 funcs.append(synth)
         for fd in funcs:
-            self.emit(self._func_sig(fd) + ';')
+            func_name = fd.name
+            # Check if this function returns a closure
+            if hasattr(self.tc, 'funcs_returning_closures') and func_name in self.tc.funcs_returning_closures:
+                closure_type, _ = self.tc.funcs_returning_closures[func_name]
+                sig = self.tc.functions[func_name]
+                params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
+                                   for i, p in enumerate(fd.params))
+                self.emit(f'{self._ctype(closure_type)} fn_{func_name}({params});')
+            else:
+                self.emit(self._func_sig(fd) + ';')
+        # Forward declarations for closure make functions (needed by fn_main etc.)
+        for closure in getattr(self.tc, 'closures', []):
+            st = self.tc.structs.get(closure.ctx_struct_name)
+            if st is not None:
+                cap_params = []
+                for fname, (ftype, _pub) in st.fields.items():
+                    if fname == 'invoke':
+                        continue
+                    cap_params.append(f'{self._ctype(ftype)} cap_{fname}')
+                params_str = ', '.join(cap_params)
+                self.emit(f'{closure.ctx_struct_name}* __make_closure_{closure.name}({params_str});')
         self.emit('')
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
@@ -1071,12 +1091,30 @@ class CodeGen:
 
     def _gen_func(self, fn: A.FuncDecl):
         self._mark(fn.pos)
-        sig = self._func_sig(fn)
-        self.emit(sig + ' {')
+        prev_func = getattr(self, '_current_func', None)
+        self._current_func = fn.name
+        # Check if this function returns a closure (where function type is declared)
+        func_name = fn.name
+        if hasattr(self.tc, 'funcs_returning_closures') and func_name in self.tc.funcs_returning_closures:
+            closure_type, declared_func_type = self.tc.funcs_returning_closures[func_name]
+            # Use closure type for C++ signature
+            cpp_ret_type = self._ctype(closure_type)
+            sig = self.tc.functions[func_name]
+            params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
+                               for i, p in enumerate(fn.params))
+            self.emit(f'{cpp_ret_type} fn_{func_name}({params}) {{')
+        else:
+            sig = self._func_sig(fn)
+            self.emit(sig + ' {')
         self.indent += 1
         for stmt in fn.body:
             self._gen_stmt(stmt)
+        self._current_func = prev_func
         ret_type = self.tc.functions[fn.name].ret
+        # If function returns a closure, use closure type for default return
+        if hasattr(self.tc, 'funcs_returning_closures') and func_name in self.tc.funcs_returning_closures:
+            closure_type, _ = self.tc.funcs_returning_closures[func_name]
+            ret_type = closure_type
         if ret_type is not VOID:
             if ret_type is STR:
                 self.emit('return vanta::Str();')
@@ -1147,10 +1185,11 @@ class CodeGen:
             pname = f'cap_{fname}'
             cap_params.append(f'{self._ctype(ftype)} {pname}')
         params_str = ', '.join(cap_params)
-        self.emit(f'static {closure.ctx_struct_name}* '
+        self.emit(f'{closure.ctx_struct_name}* '
                   f'__make_closure_{closure.name}({params_str}) {{')
         self.indent += 1
-        self.emit(f'auto* __c = vanta::state_arena().alloc<{closure.ctx_struct_name}>();')
+        self.emit(f'static vanta::Arena __arena = vanta::state_arena();')
+        self.emit(f'auto* __c = __arena.alloc<{closure.ctx_struct_name}>(1);')
         self.emit(f'__c->v_invoke = &vanta_user::{closure.invoke_name};')
         for fname, (ftype, _pub) in st.fields.items():
             if fname == 'invoke':
@@ -1176,7 +1215,13 @@ class CodeGen:
         self._mark(getattr(stmt, 'pos', None))
         if isinstance(stmt, A.VarDecl):
             tt = getattr(stmt, 'var_type', None)
-            self.emit(f'{self._ctype(tt)} v_{stmt.name} = {self._expr(stmt.value)};')
+            captured_mut = getattr(self.tc, 'funcs_with_mutable_captures', {}).get(self._current_func, set())
+            if stmt.mutable and stmt.name in captured_mut:
+                self.emit(f'static vanta::Arena __state_arena = vanta::state_arena();')
+                self.emit(f'auto& v_{stmt.name} = *(__state_arena.alloc<{self._ctype(tt)}>(1));')
+                self.emit(f'v_{stmt.name} = {self._expr(stmt.value)};')
+            else:
+                self.emit(f'{self._ctype(tt)} v_{stmt.name} = {self._expr(stmt.value)};')
         elif isinstance(stmt, A.AssignStmt):
             self.emit(f'{self._lvalue(stmt.target)} = {self._expr(stmt.value)};')
         elif isinstance(stmt, A.ReturnStmt):
@@ -1401,14 +1446,25 @@ class CodeGen:
                         f'{self._expr(expr.args[1])}, {line})')
             return (f'vanta::at_checked_ref({self._lvalue(recv)}, '
                     f'{self._expr(expr.args[0])}, {line})')
+        if isinstance(expr, A.UnaryOp) and expr.op == '*':
+            # Pointer dereference: *ptr is a valid lvalue
+            return f'*({self._expr(expr.operand)})'
         raise RuntimeError(f"invalid lvalue {type(expr).__name__}")
 
     def _expr(self, e) -> str:
         if isinstance(e, A.LambdaExpr):
             if e.is_closure:
-                cap_args = ', '.join(self._expr(A.Name(name, e.pos))
-                                     for name in e.captured_names)
-                return f'__make_closure_{e.name}({cap_args})'
+                cap_args = []
+                st = self.tc.structs.get(e.ctx_struct_name)
+                for name in e.captured_names:
+                    var_expr = self._expr(A.Name(name, e.pos))
+                    # If the captured field is a pointer type (mutable capture), pass address
+                    if st and name in st.fields:
+                        ftype, _ = st.fields[name]
+                        if isinstance(ftype, PtrType):
+                            var_expr = f'&{var_expr}'
+                    cap_args.append(var_expr)
+                return f'__make_closure_{e.name}({", ".join(cap_args)})'
             return f'vanta_user::fn_{e.name}'
         if isinstance(e, A.IntLit):
             t = getattr(e, 'type', I32)
@@ -1472,6 +1528,8 @@ class CodeGen:
         if isinstance(e, A.UnaryOp):
             if e.op == 'not':
                 return f'(!{self._expr(e.operand)})'
+            if e.op == '*':
+                return f'*({self._expr(e.operand)})'
             return f'(-{self._expr(e.operand)})'
         if isinstance(e, A.Member):
             if getattr(e, 'is_enum_member', False):

@@ -1111,9 +1111,9 @@ func main() -> void:
     print_i32(apply(square, 7)) # a function as an argument: 49
 ```
 
-- Values are plain function pointers: a `func` value always points at a named
-  function. **There are no closures** — nothing is captured, so a function
-  value cannot remember surrounding variables.
+- Values may be function pointers or closures: a `func` value points at a
+named function or at a capturing lambda. A lambda may capture variables from
+its enclosing scope by value, and `mut` bindings by durable reference.
 - Any named function works as a value: Vanta functions, `extern` functions
   (used under their C name), and builtins such as `print_str` or `sqrt_f32`.
 - Function values fit anywhere a value fits: variables, parameters, return

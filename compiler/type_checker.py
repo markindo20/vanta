@@ -171,6 +171,13 @@ class TypeChecker:
         self.func_types: dict[FuncType, str] = {}
         # Closures encountered during type checking, for codegen.
         self.closures: List[A.LambdaExpr] = []
+        # Functions that return closures where a function type is declared.
+        # Maps function name -> (closure_type, declared_func_type)
+        self.funcs_returning_closures: dict[str, tuple[PtrType, FuncType]] = {}
+        # Mutable captures keyed by the function in which they originate:
+        # maps a function name to the set of local variable names that are
+        # captured by pointer. Used by codegen to give them durable storage.
+        self.funcs_with_mutable_captures: dict[str, set[str]] = {}
         self.scopes = []
         self.current_ret: Type = VOID
         self.loop_depth = 0
@@ -1008,8 +1015,10 @@ class TypeChecker:
         sig = self.functions[fn.name]
         prev_ret = self.current_ret
         prev_rv = self.return_values
+        prev_func = getattr(self, 'current_func', None)
         self.current_ret = sig.ret
         self.return_values = []
+        self.current_func = fn.name
         self._push()
         try:
             for (pname, ptype) in sig.params:
@@ -1024,6 +1033,7 @@ class TypeChecker:
             self._pop()
             self.current_ret = prev_ret
             self.return_values = prev_rv
+            self.current_func = prev_func
 
     def _resolve_inferred_return(self, sig, fn):
         has_bare = any(v is None for (v, _) in self.return_values)
@@ -1093,6 +1103,10 @@ class TypeChecker:
         declared = self._resolve_type(v.type_ann) if v.type_ann is not None else None
         vt = self._check_expr(v.value, declared)
         if declared is not None:
+            if isinstance(declared, FuncType) and self._is_closure_compatible_with_func(vt, declared):
+                raise CheckError(
+                    "capturing closures cannot be assigned to a 'func' variable",
+                    self.filename, v.pos)
             self._coerce_value(v.value, vt, declared, v.pos, "initializer")
             vt = declared
         else:
@@ -1115,7 +1129,12 @@ class TypeChecker:
         if not self._is_assignable(a.target):
             raise CheckError("invalid assignment target", self.filename, a.pos)
         vt = self._check_expr(a.value, tt)
-        self._coerce_value(a.value, vt, tt, a.pos, "assignment")
+        # Allow closure-to-function assignment if signatures match
+        if self._is_closure_compatible_with_func(vt, tt):
+            # Keep the closure type for codegen (don't coerce to function type)
+            pass
+        else:
+            self._coerce_value(a.value, vt, tt, a.pos, "assignment")
         if isinstance(tt, StructType) and tt.name == "Arena":
             raise CheckError("Arena values cannot be assigned", self.filename, a.pos)
 
@@ -1166,6 +1185,14 @@ class TypeChecker:
                             return False
                 node = node.obj
                 continue
+            if isinstance(node, A.UnaryOp) and node.op == '*':
+                # Dereferencing a pointer gives a writable location
+                ot = self._check_expr(node.operand)
+                if isinstance(ot, PtrType):
+                    return True
+                # If not a pointer, continue walking
+                node = node.operand
+                continue
             break
         if isinstance(node, A.Name):
             ent = self._lookup(node.name)
@@ -1187,7 +1214,15 @@ class TypeChecker:
             return
         if self.current_ret is VOID:
             raise CheckError("cannot return a value from a void function", self.filename, r.pos)
-        self._coerce_value(r.value, vt, self.current_ret, r.pos, "return value")
+        # Allow closure-to-function return if signatures match
+        if self._is_closure_compatible_with_func(vt, self.current_ret):
+            # Track this function as returning a closure
+            if hasattr(self, 'current_func') and self.current_func:
+                self.funcs_returning_closures[self.current_func] = (vt, self.current_ret)
+            # Keep the closure type for codegen
+            pass
+        else:
+            self._coerce_value(r.value, vt, self.current_ret, r.pos, "return value")
 
     def _check_if(self, i: A.IfStmt):
         self._check_cond(i.cond, i.pos)
@@ -1342,7 +1377,16 @@ class TypeChecker:
 
         param_names = {p.name for p in expr.params}
         captured = self._analyze_captures(expr.body, param_names)
-        expr.captured_names = captured
+        # Store just the names for codegen compatibility
+        expr.captured_names = [name for name, _ in captured]
+
+        # Track which originating functions export mutable captures, so codegen
+        # can give those bindings durable backing instead of raw stack cells.
+        if captured and getattr(self, 'current_func', None) is not None:
+            for cap_name, is_mutable in captured:
+                if is_mutable:
+                    self.funcs_with_mutable_captures.setdefault(
+                        self.current_func, set()).add(cap_name)
 
         if not captured:
             # No captures: desugar to a plain top-level function (existing behavior).
@@ -1366,15 +1410,18 @@ class TypeChecker:
         expr.ctx_struct_name = closure_struct_name
         expr.invoke_name = "fn_closure__%d" % idx
 
-        # Resolve captured variable types.
+        # Resolve captured variable types. For mutable captures, use a pointer type.
         ctx_fields = {}  # name -> Type
-        for cap_name in captured:
+        for cap_name, is_mutable in captured:
             ent = self._lookup(cap_name)
             if ent is None:
                 raise CheckError(
                     f"cannot capture unknown variable '{cap_name}'",
                     self.filename, expr.pos)
             cap_type = ent[0]
+            if is_mutable:
+                # Mutable captures are stored as pointers to allow mutation
+                cap_type = PtrType(cap_type)
             ctx_fields[cap_name] = cap_type
 
         # Register closure struct placeholder (needed for PtrType in invoke signature).
@@ -1383,6 +1430,7 @@ class TypeChecker:
         self.structs[closure_struct_name] = closure_struct
 
         # Rewrite the body: replace captured Name refs with Member(self, name).
+        # For mutable captures, we need to dereference the pointer.
         new_body = self._rewrite_captures(expr.body, captured)
 
         # Build the closure struct type: { invoke: FuncType, captured fields... }
@@ -1393,7 +1441,7 @@ class TypeChecker:
         invoke_ft = self._func_type(invoke_params, invoke_ret)
 
         closure_fields = {"invoke": (invoke_ft, True)}
-        for cap_name in captured:
+        for cap_name, _ in captured:
             closure_fields[cap_name] = (ctx_fields[cap_name], True)
         closure_struct.fields = closure_fields
 
@@ -1456,10 +1504,10 @@ class TypeChecker:
     def _analyze_captures(self, body, param_names):
         """Find variables from enclosing scopes referenced by the lambda body.
 
-        Returns a list of captured variable names (in order of first use).
+        Returns a list of (name, is_mutable) tuples for captured variables.
         """
         declared = set(param_names)
-        captures = []
+        captures = []  # list of (name, is_mutable)
         capture_set = set()
 
         def collect_names(node, local_names):
@@ -1470,7 +1518,8 @@ class TypeChecker:
                     ent = self._lookup(node.name)
                     if ent is not None:
                         # Only capture variables, not functions/constants.
-                        captures.append(node.name)
+                        _, is_mutable = ent
+                        captures.append((node.name, is_mutable))
                         capture_set.add(node.name)
                 return
             if isinstance(node, A.VarDecl):
@@ -1546,15 +1595,24 @@ class TypeChecker:
             collect_names(stmt, set())
         return captures
 
-    def _rewrite_captures(self, body, captured_names):
-        """Rewrite captured Name refs to Member(self, name) in the body."""
-        capture_set = set(captured_names)
+    def _rewrite_captures(self, body, captured):
+        """Rewrite captured Name refs to Member(self, name) in the body.
+        
+        For mutable captures, the field is a pointer so we dereference it.
+        """
+        # captured is a list of (name, is_mutable) tuples
+        capture_set = {name for name, _ in captured}
+        mutable_captures = {name for name, is_mutable in captured if is_mutable}
 
         def rewrite(node):
             if isinstance(node, A.Name):
                 if node.name in capture_set:
-                    return A.Member(obj=A.Name("self", node.pos),
-                                    field=node.name, pos=node.pos)
+                    member = A.Member(obj=A.Name("self", node.pos),
+                                      field=node.name, pos=node.pos)
+                    if node.name in mutable_captures:
+                        # Mutable captures are stored as pointers; dereference them
+                        return A.UnaryOp('*', member, node.pos)
+                    return member
                 return node
             if isinstance(node, A.VarDecl):
                 return A.VarDecl(node.name, node.type_ann, node.mutable,
@@ -1717,6 +1775,14 @@ class TypeChecker:
                 if t is not BOOL:
                     raise CheckError("'not' requires bool", self.filename, expr.pos)
                 expr.type = BOOL; return BOOL
+            if expr.op == '*':
+                # Pointer dereference
+                if isinstance(t, PtrType):
+                    if t.inner is VOID:
+                        raise CheckError("cannot dereference ptr<void>", self.filename, expr.pos)
+                    expr.type = t.inner
+                    return t.inner
+                raise CheckError(f"cannot dereference non-pointer type {t}", self.filename, expr.pos)
             raise CheckError(f"unknown unary '{expr.op}'", self.filename, expr.pos)
         if isinstance(expr, A.Call):
             return self._check_call(expr, expected)
@@ -2100,6 +2166,34 @@ class TypeChecker:
             return F32
         return t
 
+    def _is_closure_compatible_with_func(self, actual: Type, expected: Type) -> bool:
+        """Check if a closure type (ptr<ClosureStruct>) is compatible with a function type.
+        
+        A closure is compatible if:
+        - actual is ptr<StructType> with an 'invoke' field
+        - The invoke field is a FuncType whose signature matches expected (ignoring the first 'self' param)
+        """
+        if not isinstance(expected, FuncType):
+            return False
+        if not isinstance(actual, PtrType):
+            return False
+        if not isinstance(actual.inner, StructType):
+            return False
+        st = actual.inner
+        if 'invoke' not in st.fields:
+            return False
+        invoke_ft = st.fields['invoke'][0]
+        if not isinstance(invoke_ft, FuncType):
+            return False
+        # Compare signatures: invoke has (self, params...) -> ret, expected has (params...) -> ret
+        if len(invoke_ft.params) != len(expected.params) + 1:
+            return False
+        # Skip first param (self) and compare the rest
+        for actual_param, expected_param in zip(invoke_ft.params[1:], expected.params):
+            if actual_param != expected_param:
+                return False
+        return invoke_ft.ret == expected.ret
+
     def _check_call(self, call: A.Call, expected=None) -> Type:
         f = call.func
         if (isinstance(f, A.Member) and isinstance(f.obj, A.Name)
@@ -2422,7 +2516,19 @@ class TypeChecker:
             at = self._check_expr(arg, ptype)
             if isinstance(at, StructType) and at.name == "Arena":
                 raise CheckError("cannot pass Arena to a function", self.filename, call.pos)
-            self._coerce_value(arg, at, ptype, call.pos, "argument")
+            # Allow closure-to-function argument if signatures match
+            if self._is_closure_compatible_with_func(at, ptype):
+                # Passing a closure where a func(i32)->... param is expected
+                # requires a trampoline ABI that Vanta does not provide; the
+                # straightforward successful ABI is only for direct closure
+                # invocation. For now, reject it explicitly.
+                raise CheckError(
+                    "capturing closures cannot be passed as function-pointer "
+                    "arguments", self.filename, call.pos)
+                # Keep the closure type for codegen
+                call.is_closure_call = True
+            else:
+                self._coerce_value(arg, at, ptype, call.pos, "argument")
         call.type = ft.ret
         return ft.ret
 
@@ -3165,7 +3271,22 @@ class TypeChecker:
             at = self._check_expr(arg, ptype)
             if isinstance(at, StructType) and at.name == "Arena":
                 raise CheckError("cannot pass Arena to a function", self.filename, call.pos)
-            self._coerce_value(arg, at, ptype, call.pos, "argument")
+            # Allow closure-to-function argument if signatures match
+            if self._is_closure_compatible_with_func(at, ptype):
+                raise CheckError(
+                    "capturing closures cannot be passed as function-pointer "
+                    "arguments", self.filename, call.pos)
+                # Keep the closure type for codegen
+                pass
+            else:
+                self._coerce_value(arg, at, ptype, call.pos, "argument")
+        # If this function returns a closure, use the closure type for the call
+        if name in self.funcs_returning_closures:
+            closure_type, _ = self.funcs_returning_closures[name]
+            call.type = closure_type
+            # Don't set is_closure_call here - the call to the function is a regular call.
+            # The result (closure) will be called separately with is_closure_call.
+            return closure_type
         call.type = sig.ret
         return sig.ret
 

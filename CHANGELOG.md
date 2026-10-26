@@ -2,6 +2,16 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## Unreleased
+
+- **Capturing closures** ... (commit `43bcb6f` on `feat/capturing-closures`):
+  - Immutable `let` captures by value; `mut` captures shared by durable arena cell.
+  - Escaping mutable captures remain valid through function return.
+  - Existing non-capturing function pointers remain supported.
+  - `ptr<Closure__N>` invocation via `v_invoke`.
+  - Higher-order `func(...)` parameters do not accept capturing closures (diagnostic).
+  - Integration tests: `test_closure_*`.
+
 ## v1.6.0 - 2026-10-26
 
 - **Instance-bound signals and `@export` metadata are now fully consumable.**

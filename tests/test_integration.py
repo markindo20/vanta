@@ -2511,5 +2511,159 @@ class IntegrationTests(unittest.TestCase):
                             ['30', '16', '9', '7'])
 
 
+    def test_closure_immutable_basic(self):
+        src = (
+            "func main() -> void:\n"
+            "    let offset = 10\n"
+            "    let f = func(x: i32) -> i32:\n"
+            "        return x + offset\n"
+            "    print_i32(f(5))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_imm_')
+        try:
+            path = os.path.join(tmp, 'imm.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['15'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_mutable_escape(self):
+        src = (
+            "func make_counter() -> func() -> i32:\n"
+            "    mut count: i32 = 0\n"
+            "    let f = func() -> i32:\n"
+            "        count = count + 1\n"
+            "        return count\n"
+            "    return f\n\n"
+            "func main() -> void:\n"
+            "    let c = make_counter()\n"
+            "    print_i32(c())\n"
+            "    print_i32(c())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_esc_')
+        try:
+            path = os.path.join(tmp, 'esc.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['1', '2'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_refcount_str(self):
+        src = (
+            "func make_msg() -> func() -> str:\n"
+            "    let msg = \"hello\"\n"
+            "    let f = func() -> str:\n"
+            "        return str_concat(msg, \"!\")\n"
+            "    return f\n\n"
+            "func main() -> void:\n"
+            "    let m = make_msg()\n"
+            "    print_str(m())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_rc_')
+        try:
+            path = os.path.join(tmp, 'rc.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['hello!'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_list_local(self):
+        src = (
+            "func main() -> void:\n"
+            "    let a = state_arena()\n"
+            "    let xs = a.list::<i32>()\n"
+            "    xs.push(7)\n"
+            "    xs.push(8)\n"
+            "    let f = func() -> i32:\n"
+            "        return len(xs)\n"
+            "    print_i32(f())\n"
+            "    print_i32(xs[0])\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_ll_')
+        try:
+            path = os.path.join(tmp, 'll.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['2', '7'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_higher_order(self):
+        src = (
+            "func main() -> void:\n"
+            "    let offset = 1\n"
+            "    let inc = func(x: i32) -> i32:\n"
+            "        return x + offset\n"
+            "    print_i32(inc(10))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_ho_')
+        try:
+            path = os.path.join(tmp, 'ho.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['11'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_non_capturing(self):
+        src = (
+            "func main() -> void:\n"
+            "    let f = func(x: i32) -> i32:\n"
+            "        return x + 1\n"
+            "    print_i32(f(5))\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_nc_')
+        try:
+            path = os.path.join(tmp, 'nc.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['6'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_shadowing(self):
+        src = (
+            "func main() -> void:\n"
+            "    let offset = 10\n"
+            "    let f = func(offset: i32) -> i32:\n"
+            "        return offset + 1\n"
+            "    print_i32(f(5))\n"
+            "    print_i32(offset)\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_sh_')
+        try:
+            path = os.path.join(tmp, 'sh.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['6', '10'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_closure_mutable_shared(self):
+        src = (
+            "func main() -> void:\n"
+            "    mut counter = 0\n"
+            "    let inc = func() -> i32:\n"
+            "        counter = counter + 1\n"
+            "        return counter\n"
+            "    let get = func() -> i32:\n"
+            "        return counter\n"
+            "    print_i32(get())\n"
+            "    print_i32(inc())\n"
+            "    print_i32(get())\n"
+        )
+        tmp = tempfile.mkdtemp(prefix='vnt_cls_ms_')
+        try:
+            path = os.path.join(tmp, 'ms.vnt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(src)
+            self._build_and_run(path, ['0', '1', '1'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()

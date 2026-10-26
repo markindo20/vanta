@@ -359,6 +359,9 @@ are real:
 - function values are plain pointers: no closures; they compare by address
   with `==`/`!=` (ordering is rejected), `ptr_is_null` tests them, and C
   callbacks work in both directions — `extern` parameters and return types
+  freed automatically and copies share storage; indexing is byte-based and
+  bounds-checked (`s[i]` yields a one-byte `str`), and there is no slicing
+- function values may carry captures: they remain plain function pointers (no mutation of surrounding state except through captured `mut` bindings), they compare by address with `==`/`!=` (`ptr_is_null` tests them), and C callbacks work in both directions — `extern` parameters and return types
 - array indexing is unchecked unless you opt in with `xs.at(i)`; pointer
   indexing is unchecked unless you pass the accessible element count with
   `p.at(i, size)` (the count is a runtime promise, and null is still
