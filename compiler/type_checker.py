@@ -1131,6 +1131,11 @@ class TypeChecker:
         # Check the target first: that marks checked at() accesses and
         # indirect calls, which _is_assignable relies on.
         tt = self._check_expr(a.target)
+        if (isinstance(a.target, A.Index)
+                and self._check_expr(a.target.obj) is STR):
+            raise CheckError(
+                "cannot assign to a string element; str is immutable",
+                self.filename, a.pos)
         if not self._is_assignable(a.target):
             raise CheckError("invalid assignment target", self.filename, a.pos)
         vt = self._check_expr(a.value, tt)
@@ -1942,6 +1947,9 @@ class TypeChecker:
             if isinstance(ot, (PtrType, ArrayType, ListType)):
                 expr.type = ot.inner
                 return ot.inner
+            if ot is STR:
+                expr.type = STR
+                return STR
             raise CheckError(f"cannot index a value of type {ot}", self.filename, expr.pos)
         raise CheckError(f"unsupported expression {type(expr).__name__}", self.filename,
                          getattr(expr, 'pos', A.Pos(0, 0)))
