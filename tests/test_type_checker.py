@@ -2730,6 +2730,39 @@ class TypeCheckerTests(unittest.TestCase):
                     "    print_i32(r)\n")
         # f(5) should typecheck as i32
 
+    def test_emit_in_class_method(self):
+        # emit should work inside a class method
+        src = ("class Button:\n"
+               "    signal clicked(value: i32):\n"
+               "    func press(self: Button, v: i32) -> void:\n"
+               "        emit clicked(v)\n")
+        run(src)
+
+    def test_emit_outside_class_rejected(self):
+        # emit outside a class method should be rejected
+        src = ("mut x: i32 = 0\n"
+               "func main() -> void:\n"
+               "    emit x\n")
+        with self.assertRaisesRegex(CheckError, "emit.*only be used inside a class method"):
+            run(src)
+
+    def test_emit_unknown_signal_rejected(self):
+        # emit with unknown signal should be rejected
+        src = ("class Button:\n"
+               "    func press(self: Button, v: i32) -> void:\n"
+               "        emit unknown(v)\n")
+        with self.assertRaisesRegex(CheckError, "has no signal 'unknown'"):
+            run(src)
+
+    def test_emit_wrong_args_rejected(self):
+        # emit with wrong number of args should be rejected
+        src = ("class Button:\n"
+               "    signal clicked(value: i32):\n"
+               "    func press(self: Button, v: i32) -> void:\n"
+               "        emit clicked()\n")
+        with self.assertRaisesRegex(CheckError, "expects 1 argument\\(s\\), got 0"):
+            run(src)
+
 
 if __name__ == '__main__':
     unittest.main()

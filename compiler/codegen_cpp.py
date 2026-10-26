@@ -701,6 +701,9 @@ class CodeGen:
                 self.emit('(void)prev;')
             self.indent -= 1
             self.emit('}')
+
+            # Export wrappers for @export functions and class methods.
+            self._gen_export_wrappers(funcs, classes)
             self.emit('')
         if main is not None and not self.shared:
             self._entry_line(main)
@@ -719,6 +722,64 @@ class CodeGen:
             self.indent -= 1
             self.emit('}')
         return '\n'.join(self.lines) + '\n'
+
+    def _gen_export_wrappers(self, funcs, classes):
+        """Generate C-ABI export wrappers for @export functions and class methods."""
+        # Export functions
+        for fd in funcs:
+            if getattr(fd, 'is_exported', False):
+                self._gen_export_wrapper(fd)
+        # Export class methods
+        for cd in classes:
+            for fd in getattr(cd, 'methods', []):
+                if getattr(fd, 'is_exported', False):
+                    self._gen_export_wrapper(fd, class_name=cd.name)
+
+    def _gen_export_wrapper(self, fd: A.FuncDecl, class_name=None):
+        """Generate a C-ABI wrapper for a single @export function/method."""
+        sig = self.tc.functions[fd.name] if class_name is None else self.tc.functions[f"{class_name}_{fd.name}"]
+        ret = sig.ret
+        if isinstance(ret, InferType):
+            return
+        ret_c = self._ctype(ret)
+        # Build parameter list
+        params = []
+        if class_name:
+            # Check if the method's first parameter (self) is a pointer or value.
+            self_param_type = sig.params[0][1] if sig.params else None
+            is_ptr_self = isinstance(self_param_type, PtrType)
+            if is_ptr_self:
+                params.append(f'{class_name}* self')
+            else:
+                params.append(f'{class_name} self')
+            start = 1
+        else:
+            start = 0
+        for i in range(start, len(sig.params)):
+            pname, ptype = sig.params[i]
+            params.append(f'{self._ctype(ptype)} {pname}')
+        params_str = ', '.join(params)
+        wrapper_name = fd.name if class_name is None else f"{class_name}_{fd.name}"
+        self.emit(f'extern "C" VANTA_EXPORT {ret_c} vanta_export_{wrapper_name}({params_str}) {{')
+        self.indent += 1
+        self._generated_line()
+        # Call the internal function
+        call_args = []
+        if class_name:
+            call_args.append('self')
+            start = 1
+        else:
+            start = 0
+        for i in range(start, len(sig.params)):
+            pname, _ = sig.params[i]
+            call_args.append(pname)
+        call_str = ', '.join(call_args)
+        if ret is not VOID:
+            self.emit(f'return vanta_user::fn_{fd.name if class_name is None else f"{class_name}_{fd.name}"}({call_str});')
+        else:
+            self.emit(f'vanta_user::fn_{fd.name if class_name is None else f"{class_name}_{fd.name}"}({call_str});')
+        self.indent -= 1
+        self.emit('}')
 
     def _func_sig(self, fn: A.FuncDecl, extern=False):
         sig = self.tc.functions[fn.name]
@@ -1143,8 +1204,18 @@ class CodeGen:
             self._gen_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
             self.emit(f'{self._expr(stmt.expr)};')
+        elif isinstance(stmt, A.EmitStmt):
+            self._gen_emit(stmt)
         else:
             raise RuntimeError(f"cannot codegen {type(stmt).__name__}")
+
+    def _gen_emit(self, stmt: A.EmitStmt):
+        # Inside a class method, `self` is the first parameter (v_self, a pointer).
+        # The signal handle is at self->_sig_handle.
+        args = ', '.join([f'v_self->v__sig_handle',
+                           f'vanta::Str::literal("{stmt.signal}", {len(stmt.signal)})'] +
+                          [self._expr(a) for a in stmt.args])
+        self.emit(f'vanta::signal_emit_instance({args});')
 
     def _gen_for(self, stmt):
         if stmt.step is None:
@@ -1543,8 +1614,8 @@ class CodeGen:
                     decl = self.tc.classes.get(decl.parent) if decl.parent else None
                 if decl is None:
                     decl = ot
-                # `base` is the receiver value; pass a pointer to its (possibly
-                # upcast) declaring class for `self`.
+                # Methods always take `self` as a pointer (set in type_checker).
+                # Pass address of the receiver.
                 args = ', '.join(self._expr(a) for a in c.args)
                 caster = f'reinterpret_cast<{decl.name}*>'
                 call_self = f'{caster}(&{base})'

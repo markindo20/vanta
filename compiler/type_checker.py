@@ -177,6 +177,7 @@ class TypeChecker:
         self.return_values: list = []
         self._current_type_env = None
         self._lambda_counter = 0
+        self._current_class: Optional[ClassType] = None
         self._register_builtins()
 
     def _register_builtins(self):
@@ -685,7 +686,10 @@ class TypeChecker:
                 raise CheckError(f"duplicate method '{fd.name}'",
                                  self.filename, fd.pos)
             params = []
-            for pp in fd.params:
+            # First parameter is always `self` as a pointer, regardless of
+            # user-facing annotation. This allows mutation through `self`.
+            params.append(("self", PtrType(self.classes[d.name])))
+            for pp in fd.params[1:]:
                 t = self._resolve_type(pp.type)
                 params.append((pp.name, t))
             ret = self._resolve_type(fd.ret) if fd.ret is not None else VOID
@@ -698,6 +702,8 @@ class TypeChecker:
         signals = {}
         for sd in d.signals:
             params = []
+            # First parameter is `self` as a pointer, like methods.
+            params.append(("self", PtrType(self.classes[d.name])))
             for pp in sd.params:
                 params.append((pp.name, self._resolve_type(pp.type)))
             ret = self._resolve_type(sd.ret) if sd.ret is not None else VOID
@@ -715,8 +721,10 @@ class TypeChecker:
             sig = self.functions[qual]
             prev_ret = self.current_ret
             prev_rv = self.return_values
+            prev_class = self._current_class
             self.current_ret = sig.ret
             self.return_values = []
+            self._current_class = ct
             self._push()
             try:
                 for (pname, ptype) in sig.params:
@@ -731,6 +739,7 @@ class TypeChecker:
                 self._pop()
                 self.current_ret = prev_ret
                 self.return_values = prev_rv
+                self._current_class = prev_class
 
     def _register_enum(self, d):
         if (d.name in self.structs or d.name in self.enums
@@ -1041,6 +1050,8 @@ class TypeChecker:
             self._check_match(stmt)
         elif isinstance(stmt, A.ExprStmt):
             self._check_expr(stmt.expr)
+        elif isinstance(stmt, A.EmitStmt):
+            self._check_emit(stmt)
         else:
             raise CheckError(f"unsupported statement {type(stmt).__name__}", self.filename, stmt.pos)
 
@@ -1106,6 +1117,10 @@ class TypeChecker:
                 # Through a pointer or list handle the memory is always writable,
                 # regardless of how the binding itself was declared.
                 if isinstance(ot, (PtrType, ListType)):
+                    return True
+                # In class methods, `self` is a mutable reference to the instance,
+                # so field writes through self are allowed.
+                if isinstance(ot, ClassType):
                     return True
                 # Enforce per-field visibility on writes.
                 if isinstance(ot, (StructType, ClassType)):
@@ -1564,6 +1579,28 @@ class TypeChecker:
             return node
 
         return [rewrite(s) for s in body]
+
+    def _check_emit(self, stmt: A.EmitStmt):
+        # Must be inside a class method to have access to self._sig_handle
+        if not self._current_class:
+            raise CheckError("'emit' can only be used inside a class method",
+                            self.filename, stmt.pos)
+        ct = self._current_class
+        if stmt.signal not in ct.signals:
+            raise CheckError(f"class '{ct.name}' has no signal '{stmt.signal}'",
+                            self.filename, stmt.pos)
+        sig_ft = ct.signals[stmt.signal]
+        # sig_ft.params[0] is self; the rest are the signal payload types.
+        expected_params = list(sig_ft.params)[1:]  # skip self
+        if len(stmt.args) != len(expected_params):
+            raise CheckError(
+                f"signal '{stmt.signal}' expects {len(expected_params)} argument(s), "
+                f"got {len(stmt.args)}", self.filename, stmt.pos)
+        for arg, (_, ptype) in zip(stmt.args, expected_params):
+            at = self._check_expr(arg, ptype)
+            self._coerce_value(arg, at, ptype, stmt.pos,
+                               f"argument of signal '{stmt.signal}'")
+        stmt.type = VOID
 
     def _check_expr(self, expr, expected=None) -> Type:
         if isinstance(expr, A.LambdaExpr):

@@ -13,6 +13,7 @@ class TT(Enum):
     TRUE = auto(); FALSE = auto()
     AND = auto(); OR = auto(); NOT = auto()
     EXTENDS = auto()
+    EMIT = auto()
     AT = auto()
     PLUS = auto(); MINUS = auto(); STAR = auto(); SLASH = auto(); PERCENT = auto()
     EQ = auto(); NEQ = auto(); LT = auto(); LTE = auto(); GT = auto(); GTE = auto()
@@ -38,6 +39,7 @@ KEYWORDS = {
     'true': TT.TRUE, 'false': TT.FALSE,
     'and': TT.AND, 'or': TT.OR, 'not': TT.NOT,
     'extends': TT.EXTENDS,
+    'emit': TT.EMIT,
 }
 
 

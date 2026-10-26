@@ -333,6 +333,36 @@ class ParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ParseError, "duplicate type parameter 'T'"):
             parse("enum E<T, T>:\n    A(T)\n")
 
+    def test_class_signal_declaration(self):
+        prog = parse("class Button:\n    signal clicked(value: i32):\n    count: i32\n")
+        cls = prog.decls[0]
+        self.assertEqual(len(cls.signals), 1)
+        self.assertEqual(cls.signals[0].name, "clicked")
+        self.assertEqual(len(cls.signals[0].params), 1)
+        self.assertEqual(cls.signals[0].params[0].name, "value")
+
+    def test_class_emit_statement(self):
+        prog = parse("class Button:\n    signal clicked(value: i32):\n    func press(self: Button, v: i32) -> void:\n        emit clicked(v)\n")
+        cls = prog.decls[0]
+        method = cls.methods[0]
+        emit_stmt = method.body[0]
+        self.assertIsInstance(emit_stmt, A.EmitStmt)
+        self.assertEqual(emit_stmt.signal, "clicked")
+        self.assertEqual(len(emit_stmt.args), 1)
+
+    def test_export_function_decorator(self):
+        prog = parse("@export\nfunc add(a: i32, b: i32) -> i32:\n    return a + b\n")
+        fn = prog.decls[0]
+        self.assertTrue(fn.is_exported)
+        self.assertIn("@export", fn.decorators)
+
+    def test_export_class_method_decorator(self):
+        prog = parse("class Button:\n    @export\n    func get_count(self: Button) -> i32:\n        return 0\n")
+        cls = prog.decls[0]
+        method = cls.methods[0]
+        self.assertTrue(method.is_exported)
+        self.assertIn("@export", method.decorators)
+
 
 if __name__ == '__main__':
     unittest.main()

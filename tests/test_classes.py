@@ -168,6 +168,63 @@ class ClassesTests(unittest.TestCase):
             "    print_i32(p.y)\n",
             "3\n7")
 
+    def test_signal_instance_isolation(self):
+        self.expect(
+            "mut seen: i32 = 0\n"
+            "func handler(value: i32) -> void:\n"
+            "    seen = value\n"
+            "class Button:\n"
+            "    signal clicked(value: i32):\n"
+            "    count: i32\n\n"
+            "    func press(self: Button, value: i32) -> void:\n"
+            "        self.count = value\n"
+            "        emit clicked(value)\n\n"
+            "func main() -> void:\n"
+            "    mut a = Button(count: 0)\n"
+            "    mut b = Button(count: 0)\n"
+            "    signal_on_instance(a._sig_handle, \"clicked\", handler)\n"
+            "    signal_on_instance(b._sig_handle, \"clicked\", handler)\n"
+            "    a.press(42)\n"
+            "    b.press(99)\n"
+            "    print_i32(seen)\n",
+            "99")
+
+    def test_class_signal_emit(self):
+        self.expect(
+            "class Button:\n"
+            "    signal clicked(value: i32):\n"
+            "    count: i32\n\n"
+            "    func press(self: Button, value: i32) -> void:\n"
+            "        self.count = value\n"
+            "        emit clicked(value)\n\n"
+            "func main() -> void:\n"
+            "    mut b = Button(count: 0)\n"
+            "    print_i32(b.count)\n"
+            "    b.press(5)\n"
+            "    print_i32(b.count)\n",
+            "0\n5")
+
+    def test_export_function(self):
+        self.expect(
+            "@export\n"
+            "func add(a: i32, b: i32) -> i32:\n"
+            "    return a + b\n\n"
+            "func main() -> void:\n"
+            "    print_i32(add(2, 3))\n",
+            "5")
+
+    def test_export_class_method(self):
+        self.expect(
+            "class Button:\n"
+            "    count: i32\n"
+            "    @export\n"
+            "    func get_count(self: Button) -> i32:\n"
+            "        return self.count\n\n"
+            "func main() -> void:\n"
+            "    mut b = Button(count: 42)\n"
+            "    print_i32(b.get_count())\n",
+            "42")
+
 
 if __name__ == '__main__':
     unittest.main()

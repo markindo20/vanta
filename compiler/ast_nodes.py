@@ -275,6 +275,13 @@ class ExprStmt:
 
 
 @dataclass
+class EmitStmt:
+    signal: str
+    args: List[Any]
+    pos: Pos
+
+
+@dataclass
 class IntLit:
     value: int
     pos: Pos

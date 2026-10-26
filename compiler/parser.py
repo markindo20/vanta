@@ -477,7 +477,24 @@ class Parser:
             return self.parse_for()
         if t.type == TT.MATCH:
             return self.parse_match()
+        if t.type == TT.EMIT:
+            return self.parse_emit()
         return self.parse_expr_or_assign()
+
+    def parse_emit(self):
+        tok = self.advance()  # emit
+        signal = self.expect(TT.IDENT).value
+        args = []
+        if self.match(TT.LPAREN):
+            if not self.check(TT.RPAREN):
+                while True:
+                    args.append(self.parse_expr())
+                    if not self.match(TT.COMMA):
+                        break
+            self.expect(TT.RPAREN)
+        if self.check(TT.NEWLINE):
+            self.advance()
+        return A.EmitStmt(signal, args, A.Pos(tok.line, tok.col))
 
     def parse_var_decl(self):
         tok = self.advance()
