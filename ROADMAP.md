@@ -45,7 +45,9 @@ single inheritance (`extends`), construction via named arguments, field
 read/write, `ptr<Self>` self parameter, and inheritance resolution of
 methods at call sites. 945 tests total.
 
-Remaining queue: (all v1.6.0 items shipped) — next up: deeper signal payload types and full LSP/formatter support for `@export`.
+Remaining queue: string indexing landed in v1.7.0 (unreleased): `s[i]` returns
+a checked one-byte `str` and is byte-based like `str_len`. Next up:
+struct/pointer/bool signal payloads and the remaining LSP `@export` affordances.
 
 ## Next: tooling (candidate)
 

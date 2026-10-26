@@ -353,9 +353,8 @@ WAV sound files included
 are real:
 
 - strings are immutable and reference-counted, so runtime-built values are
-  freed automatically and copies share storage; there is still no string
-  indexing or slicing, and string refcounts are not atomic (Vanta is
-  single-threaded)
+  freed automatically and copies share storage; indexing is byte-based and
+  bounds-checked (`s[i]` yields a one-byte `str`), and there is no slicing
 - function values are plain pointers: no closures; they compare by address
   with `==`/`!=` (ordering is rejected), `ptr_is_null` tests them, and C
   callbacks work in both directions — `extern` parameters and return types

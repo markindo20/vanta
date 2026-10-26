@@ -1916,6 +1916,31 @@ class TypeCheckerTests(unittest.TestCase):
                 "    let p = mk()\n"
                 "    print_i32(p[0])\n")
 
+    def test_str_index_yields_str(self):
+        run("func f() -> void:\n"
+            "    let s = \"Vanta\"\n"
+            "    let c: str = s[0]\n")
+
+    def test_str_index_must_be_i32(self):
+        with self.assertRaises(CheckError):
+            run("func f() -> void:\n"
+                "    let s = \"Vanta\"\n"
+                "    let c = s[\"a\"]\n")
+
+    def test_str_element_assignment_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError, "cannot assign to a string element"):
+            run("func f() -> void:\n"
+                "    mut s = \"Vanta\"\n"
+                "    s[0] = \"W\"\n")
+
+    def test_str_element_compound_assignment_rejected(self):
+        with self.assertRaisesRegex(
+                CheckError, "cannot assign to a string element"):
+            run("func f() -> void:\n"
+                "    mut s = \"Vanta\"\n"
+                "    s[0] += \"W\"\n")
+
     def test_alloc_void_rejected(self):
         with self.assertRaisesRegex(CheckError, "cannot allocate void"):
             run("func main() -> void:\n"
