@@ -13,6 +13,13 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
   - Higher-order `func(...)` parameters do not accept capturing closures (diagnostic).
   - Integration tests: `test_closure_*`.
 
+- **String indexing:** `s[i]` on a `str` yields a one-byte `str`. Reads are
+  always bounds-checked — a negative or past-the-end index stops the program
+  with `vanta: string index I out of bounds (length N) at line L` — and the
+  result owns its byte, so it outlives the source value. Indexing is
+  byte-based, consistent with `str_len`/`str_sub`; `s[i] = ...` is a compile
+  error because `str` is immutable.
+
 ## v1.6.0 - 2026-10-26
 
 - **Instance-bound signals and `@export` metadata are now fully consumable.**
