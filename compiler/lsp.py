@@ -201,6 +201,7 @@ _SEMANTIC_LEXICAL_TYPE = {
     TT.SLASH_EQ: ST_OPERATOR,
     TT.ARROW: ST_OPERATOR,
     TT.DOT: ST_OPERATOR,
+    TT.AT: ST_DECORATOR,
     TT.COLONCOLON: ST_OPERATOR,
 }
 
@@ -592,6 +593,7 @@ class DeclInfo:
     name_line: int = 0
     name_col: int = 0
     public: bool = True
+    exported: bool = False
     type_params: list[str] = field(default_factory=list)
     fields: list[FieldInfo] = field(default_factory=list)
     members: list[MemberInfo] = field(default_factory=list)
@@ -819,7 +821,8 @@ class _ProjectIndex:
                 decls.append(DeclInfo(
                     name=d.name, kind='func', detail=detail, path=path,
                     line=d.pos.line, col=d.pos.col, name_line=name_line,
-                    name_col=name_col, public=is_legacy or d.is_public))
+                    name_col=name_col, public=is_legacy or d.is_public,
+                    exported=getattr(d, 'is_exported', False)))
             elif isinstance(d, A.StructDecl):
                 name_line, name_col = _find_name_pos(
                     source_lines, d.pos, d.name)
@@ -884,7 +887,8 @@ class _ProjectIndex:
                         name=fd.name, kind='func', detail=detail,
                         path=path, line=fd.pos.line, col=fd.pos.col,
                         name_line=name_line, name_col=name_col,
-                        public=is_legacy or d.is_public))
+                        public=is_legacy or d.is_public,
+                        exported=getattr(fd, 'is_exported', False)))
         return ModuleInfo(path=path, source=text, module_name=module_name,
                           is_legacy=is_legacy, decls=decls)
 
@@ -925,7 +929,9 @@ class _ProjectIndex:
                     decls.append(DeclInfo(
                         name=name, kind='func', detail=detail, path=path,
                         line=line_no, col=1, name_line=line_no,
-                        name_col=name_col, public=public))
+                        name_col=name_col, public=public,
+                        exported=(i > 0 and source_lines[i-1].strip().lower()
+                                  .lstrip('@').strip() == 'export')))
                 i += 1
                 continue
             if kind in ('struct', 'component'):
@@ -2873,6 +2879,22 @@ class LanguageServer:
             return imported
         index = _completion_word_start(line_text, char)
         word_start = _py_to_lsp_char(line_text, index)
+        # Decorator completion after `@`
+        stripped = line_text[:char].rstrip()
+        if stripped.endswith('@'):
+            edit_range = {
+                'start': {'line': line, 'character': _py_to_lsp_char(line_text, index)},
+                'end': {'line': line, 'character': _py_to_lsp_char(line_text, char)},
+            }
+            items = [{
+                'label': 'export',
+                'kind': 14,
+                'insertText': 'export',
+                'textEdit': {'range': edit_range, 'newText': 'export'},
+                'detail': 'Expose this declaration to the C ABI in shared/hot builds',
+                'sortText': '0_export',
+            }]
+            return _dedupe_completion(items)
         object_path = _object_before_dot(line_text, index)
         project = self._project(doc)
         locals_ = project.local_symbols(line, lsp_char)
@@ -3236,7 +3258,10 @@ class LanguageServer:
             return locals_[word].detail
         decl = project.decl_by_name(word)
         if decl is not None:
-            return decl.detail
+            detail = decl.detail
+            if getattr(decl, 'exported', False):
+                detail += '  [exported]'
+            return detail
         if object_path is not None:
             base = _base_type_name(local_type) if local_type else ''
             for name, typ in _BUILTIN_FIELDS.get(base, []):
@@ -4226,10 +4251,20 @@ class LanguageServer:
             raw = Lexer(text, '<semantic>').tokenize()
         except LexError:
             return tokens
+        prev_type = None
         for token in raw:
             if token.type in (TT.NEWLINE, TT.INDENT, TT.DEDENT, TT.EOF):
                 continue
             if token.type == TT.IDENT:
+                if prev_type == TT.AT:
+                    token_type = ST_DECORATOR
+                    line_text = _line_at(lines, token.line - 1)
+                    start = _py_to_lsp_char(line_text, token.col - 1)
+                    length = _utf16_len(str(token.value))
+                    if length > 0:
+                        tokens.append((token.line - 1, start, length,
+                                       token_type, 0))
+                prev_type = token.type
                 continue
             token_type = _SEMANTIC_LEXICAL_TYPE.get(token.type)
             if token_type is None:
@@ -4240,6 +4275,8 @@ class LanguageServer:
             if length <= 0:
                 continue
             tokens.append((token.line - 1, start, length, token_type, 0))
+            prev_type = token.type
+        prev_type = token.type
         tokens.extend(_comment_tokens(text, lines))
         return tokens
 
