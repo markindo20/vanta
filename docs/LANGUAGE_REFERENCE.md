@@ -1212,11 +1212,22 @@ are zero-copy static views; strings built at runtime by `str_concat`,
 `==` and `!=` compare the full byte contents, not pointers or refcounts.
 Ordering comparisons (`<`) on `str` are rejected. `str` values may be `const`.
 
-There is no string indexing or slicing. Concatenation (`str_concat`), length
-(`str_len`), and conversions are covered under
-[Strings and ownership](#strings-and-ownership-v0260); for building many
-pieces into one string, see
-[String building](#string-building-strbuilder-v0100).
+Indexing a `str` by byte yields a one-byte `str`:
+
+```vanta
+let s = "Vanta"
+print_str(s[0])            # V
+print_bool(s[1] == "a")    # true
+```
+
+`s[i]` is bounds-checked: a negative index, or an index at or past `str_len(s)`,
+stops the program with `vanta: string index I out of bounds (length N) at line L`.
+The result owns its byte, so it stays valid after the source string goes out of
+scope. Indices count **bytes**, not UTF-8 characters; a multi-byte character
+occupies several positions. There is no slicing; use `str_sub`. Concatenation
+(`str_concat`), length (`str_len`), and conversions are covered under
+[Strings and ownership](#strings-and-ownership-v0260); for building many pieces
+into one string, see [String building](#string-building-strbuilder-v0100).
 
 ## Vector and matrix types
 
@@ -1406,7 +1417,7 @@ scale3
   [`StrBuilder`](#string-building-strbuilder-v0100) appends into one growing
   buffer and produces one owned result.
 
-There is no string indexing or slicing.
+Indexing is byte-based and checked; see [Strings](#strings). There is no slicing.
 
 ## Extern declarations (v0.3.0)
 
