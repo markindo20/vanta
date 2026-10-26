@@ -1480,10 +1480,17 @@ inline int32_t signal_instance_new() {
 struct InstanceSignalEntry {
     int32_t instance;
     Str name;
-    int kind;  // 0 = i32, 1 = str
+    int kind;  // 0 = i32 single, 1 = str single, 2 = multi i32 (n<=4)
+    int arity;
     bool once;
     signal_handler_i32_t i32h;
     signal_handler_str_t strh;
+    // Stored multi-handler function pointers for arity 1..4.
+    void (*mh1)(void*, int32_t);
+    void (*mh2)(void*, int32_t, int32_t);
+    void (*mh3)(void*, int32_t, int32_t, int32_t);
+    void (*mh4)(void*, int32_t, int32_t, int32_t, int32_t);
+    void* hptr;
 };
 
 inline std::vector<InstanceSignalEntry>& instance_signal_registry() {
@@ -1560,6 +1567,107 @@ inline void signal_off_str_instance(int32_t instance, Str name) {
         } else {
             i++;
         }
+    }
+}
+
+// ---------- Instance signals (extended payload kinds) ----------
+// Void payload (no arguments).
+inline void signal_on_void_instance(int32_t instance, Str name,
+                                    void (*handler)()) {
+    InstanceSignalEntry e{};
+    e.instance = instance; e.name = name; e.kind = 3; e.arity = 0; e.once = false;
+    e.i32h = nullptr; e.strh = nullptr;
+    e.hptr = reinterpret_cast<void*>(handler);
+    e.mh1 = [](void* h, int32_t) { reinterpret_cast<void(*)()>(h)(); };
+    /* slots zeroed by e{} */
+    instance_signal_registry().push_back(e);
+}
+
+inline void signal_on_instance_i32_2(int32_t instance, Str name,
+                                     void (*handler)(int32_t, int32_t)) {
+    InstanceSignalEntry e{};
+    e.instance = instance; e.name = name; e.kind = 4; e.arity = 2; e.once = false;
+    e.i32h = nullptr; e.strh = nullptr;
+    e.hptr = reinterpret_cast<void*>(handler);
+    e.mh2 = [](void* h, int32_t a, int32_t b) {
+        reinterpret_cast<void(*)(int32_t, int32_t)>(h)(a, b);
+    };
+    /* slots zeroed by e{} */
+    instance_signal_registry().push_back(e);
+}
+inline void signal_on_instance_i32_3(int32_t instance, Str name,
+                                     void (*handler)(int32_t, int32_t,
+                                                     int32_t)) {
+    InstanceSignalEntry e{};
+    e.instance = instance; e.name = name; e.kind = 4; e.arity = 3; e.once = false;
+    e.i32h = nullptr; e.strh = nullptr;
+    e.hptr = reinterpret_cast<void*>(handler);
+    e.mh3 = [](void* h, int32_t a, int32_t b, int32_t c) {
+        reinterpret_cast<void(*)(int32_t, int32_t, int32_t)>(h)(a, b, c);
+    };
+    /* slots zeroed by e{} */
+    instance_signal_registry().push_back(e);
+}
+inline void signal_on_instance_i32_4(int32_t instance, Str name,
+                                     void (*handler)(int32_t, int32_t,
+                                                     int32_t, int32_t)) {
+    InstanceSignalEntry e{};
+    e.instance = instance; e.name = name; e.kind = 4; e.arity = 4; e.once = false;
+    e.i32h = nullptr; e.strh = nullptr;
+    e.hptr = reinterpret_cast<void*>(handler);
+    e.mh4 = [](void* h, int32_t a, int32_t b, int32_t c, int32_t d) {
+        reinterpret_cast<void(*)(int32_t, int32_t, int32_t, int32_t)>(h)(a, b, c, d);
+    };
+    /* slots zeroed by e{} */
+    instance_signal_registry().push_back(e);
+}
+
+inline void signal_emit_void_instance(int32_t instance, Str name) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 3) {
+            if (reg[i].mh1) reg[i].mh1(reg[i].hptr, 0);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+inline void signal_emit_instance_i32_2(int32_t instance, Str name,
+                                       int32_t a, int32_t b) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 4 && reg[i].arity == 2) {
+            if (reg[i].mh2) reg[i].mh2(reg[i].hptr, a, b);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+inline void signal_emit_instance_i32_3(int32_t instance, Str name,
+                                       int32_t a, int32_t b, int32_t c) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 4 && reg[i].arity == 3) {
+            if (reg[i].mh3) reg[i].mh3(reg[i].hptr, a, b, c);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
+    }
+}
+inline void signal_emit_instance_i32_4(int32_t instance, Str name,
+                                       int32_t a, int32_t b, int32_t c,
+                                       int32_t d) {
+    auto& reg = instance_signal_registry();
+    for (size_t i = 0; i < reg.size();) {
+        if (reg[i].instance == instance &&
+            vanta::str_eq(reg[i].name, name) && reg[i].kind == 4 && reg[i].arity == 4) {
+            if (reg[i].mh4) reg[i].mh4(reg[i].hptr, a, b, c, d);
+            if (reg[i].once) { reg.erase(reg.begin() + i); continue; }
+        }
+        i++;
     }
 }
 

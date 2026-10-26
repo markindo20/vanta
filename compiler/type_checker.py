@@ -261,8 +261,23 @@ class TypeChecker:
         bf("signal_on_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
         bf("signal_on_str_instance", [("instance", I32), ("name", STR), ("handler", _handler_str_type)], VOID)
         bf("signal_on_once_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
-        bf("signal_off_instance", [("instance", I32), ("name", STR)], VOID)
-        bf("signal_off_str_instance", [("instance", I32), ("name", STR)], VOID)
+        _handler_void_type = FuncType((), VOID)
+        bf("signal_emit_void_instance", [("instance", I32), ("name", STR)], VOID)
+        bf("signal_on_void_instance", [("instance", I32), ("name", STR), ("handler", _handler_void_type)], VOID)
+        bf("signal_emit_instance_i32_2", [("instance", I32), ("name", STR),
+                                         ("a0", I32), ("a1", I32)], VOID)
+        bf("signal_emit_instance_i32_3", [("instance", I32), ("name", STR),
+                                         ("a0", I32), ("a1", I32), ("a2", I32)], VOID)
+        bf("signal_emit_instance_i32_4", [("instance", I32), ("name", STR),
+                                         ("a0", I32), ("a1", I32), ("a2", I32),
+                                         ("a3", I32)], VOID)
+        bf("signal_on_instance_i32_2", [("instance", I32), ("name", STR),
+                                       ("handler", FuncType((I32, I32), VOID))], VOID)
+        bf("signal_on_instance_i32_3", [("instance", I32), ("name", STR),
+                                       ("handler", FuncType((I32, I32, I32), VOID))], VOID)
+        bf("signal_on_instance_i32_4", [("instance", I32), ("name", STR),
+                                       ("handler",
+                                        FuncType((I32, I32, I32, I32), VOID))], VOID)
         bf("file_exists", [("path", STR)], BOOL)
         bf("file_write", [("path", STR), ("data", STR)], I32)
         bf("file_read", [("path", STR)], STR)
@@ -703,6 +718,25 @@ class TypeChecker:
         for sd in d.signals:
             params = []
             # First parameter is `self` as a pointer, like methods.
+            if len(sd.params) <= 0:
+                pass
+            # Only support void, single i32, single str, and i32 x 2..4 for now.
+            ptypes = [self._resolve_type(pp.type) for pp in sd.params]
+            allowed = False
+            if len(ptypes) == 0:
+                allowed = True
+            elif len(ptypes) == 1 and (ptypes[0] is I32 or ptypes[0] is STR):
+                allowed = True
+            elif len(ptypes) >= 2 and len(ptypes) <= 4 and all(
+                    p is I32 for p in ptypes):
+                allowed = True
+            else:
+                allowed = False
+            if not allowed:
+                raise CheckError(
+                    "signal payloads must be empty, a single i32/str/bool, "
+                    "or 2..4 i32 values",
+                    self.filename, sd.pos)
             params.append(("self", PtrType(self.classes[d.name])))
             for pp in sd.params:
                 params.append((pp.name, self._resolve_type(pp.type)))

@@ -59,6 +59,14 @@ BUILTIN_FN = {
     'signal_on_once_instance': 'vanta::signal_on_once_instance',
     'signal_off_instance': 'vanta::signal_off_instance',
     'signal_off_str_instance': 'vanta::signal_off_str_instance',
+    'signal_on_instance_i32_2': 'vanta::signal_on_instance_i32_2',
+    'signal_on_instance_i32_3': 'vanta::signal_on_instance_i32_3',
+    'signal_on_instance_i32_4': 'vanta::signal_on_instance_i32_4',
+    'signal_emit_void_instance': 'vanta::signal_emit_void_instance',
+    'signal_emit_instance_i32_2': 'vanta::signal_emit_instance_i32_2',
+    'signal_emit_instance_i32_3': 'vanta::signal_emit_instance_i32_3',
+    'signal_emit_instance_i32_4': 'vanta::signal_emit_instance_i32_4',
+    'signal_on_void_instance': 'vanta::signal_on_void_instance',
     'file_exists': 'vanta::file_exists', 'file_write': 'vanta::file_write',
     'file_read': 'vanta::file_read',
     'state_arena': 'vanta::state_arena',
@@ -201,7 +209,7 @@ class CodeGen:
         self.lines = []
         self.indent = 0
         self.temp_counter = 0
-        # ABI adapters are registered only when an expression actually uses
+        self._current_class = None
         # one, so programs that never cross the C/str boundary do not emit a
         # pile of unused wrapper functions.
         self.wrapper_specs = {}
@@ -621,7 +629,14 @@ class CodeGen:
         self.emit('')
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
+            cname = None
+            for cd in classes:
+                if fd.name.startswith(cd.name + '_'):
+                    cname = cd.name
+                    break
+            self._current_class = self.tc.classes.get(cname) if cname else None
             self._gen_func(fd)
+        self._current_class = None
         # Generate __make_closure__N helpers for all capturing lambdas.
         for closure in getattr(self.tc, 'closures', []):
             self._gen_closure_make_function(closure)
@@ -1211,11 +1226,38 @@ class CodeGen:
 
     def _gen_emit(self, stmt: A.EmitStmt):
         # Inside a class method, `self` is the first parameter (v_self, a pointer).
-        # The signal handle is at self->_sig_handle.
-        args = ', '.join([f'v_self->v__sig_handle',
-                           f'vanta::Str::literal("{stmt.signal}", {len(stmt.signal)})'] +
-                          [self._expr(a) for a in stmt.args])
-        self.emit(f'vanta::signal_emit_instance({args});')
+        # Dispatch to correct runtime helper depending on signal payload.
+        ct = getattr(self, '_current_class', None)
+        kind = 'i32'
+        if ct is not None and stmt.signal in getattr(ct, 'signals', {}):
+            ft = ct.signals[stmt.signal]
+            params = list(ft.params)[1:]
+            if len(params) == 0:
+                kind = 'void'
+            elif len(params) == 1 and params[0][1] is STR:
+                kind = 'str'
+            elif (len(params) >= 2 and all(
+                    p[1] is I32 for p in params)):
+                kind = 'multi'
+            else:
+                kind = 'i32'
+        safe_handle = 'v_self->v__sig_handle'
+        name_lit = f'vanta::Str::literal("{stmt.signal}", {len(stmt.signal)})'
+        if kind == 'void':
+            self.emit(f'vanta::signal_emit_void_instance({safe_handle}, {name_lit});')
+        elif kind == 'str':
+            args = ', '.join([safe_handle, name_lit, self._expr(stmt.args[0])])
+            self.emit(f'vanta::signal_emit_str_instance({args});')
+        elif kind == 'multi':
+            n = len(stmt.args)
+            helper = f'signal_emit_instance_i32_{n}'
+            args = ', '.join([safe_handle, name_lit] +
+                              [self._expr(a) for a in stmt.args])
+            self.emit(f'vanta::{helper}({args});')
+        else:
+            args = ', '.join([safe_handle, name_lit] +
+                              [self._expr(a) for a in stmt.args])
+            self.emit(f'vanta::signal_emit_instance({args});')
 
     def _gen_for(self, stmt):
         if stmt.step is None:
