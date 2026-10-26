@@ -1108,6 +1108,20 @@ inline Str str_sub(Str s, int32_t start, int32_t n) {
     return Str::copy(s.c_str() + start, n);
 }
 
+// One byte with a checked index, copied into its own NUL-terminated buffer.
+// A view into the middle of an existing string would leak its suffix into
+// printf, strtol, and extern C calls, which all read to the terminator.
+inline Str str_at_checked(Str s, int32_t index, int32_t line) {
+    if (index < 0 || index >= s.size()) {
+        std::fprintf(stderr,
+                     "vanta: string index %d out of bounds (length %d) "
+                     "at line %d\n",
+                     (int)index, (int)s.size(), (int)line);
+        std::exit(1);
+    }
+    return Str::copy(s.c_str() + index, 1);
+}
+
 inline Str str_to_lower(Str s) {
     char *buf = static_cast<char *>(std::malloc(s.size() + 1));
     if (!buf) return Str();

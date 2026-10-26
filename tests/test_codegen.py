@@ -565,6 +565,12 @@ class CodegenTests(unittest.TestCase):
         self.assertIn('vanta::print_i32(v_xs.h->data[0]);', cpp)
         self.assertIn('v_xs.h->data[1] = 9;', cpp)
 
+    def test_str_index_emit(self):
+        cpp = gen("func main() -> void:\n"
+                  "    let s = \"Vanta\"\n"
+                  "    print_str(s[0])\n")
+        self.assertIn('vanta::print_str(vanta::str_at_checked(v_s, 0, 3));', cpp)
+
     def test_list_of_struct_emit(self):
         cpp = gen("struct P:\n    x: i32\n"
                   "func main() -> void:\n"
