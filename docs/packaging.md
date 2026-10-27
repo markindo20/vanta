@@ -46,8 +46,16 @@ reproducible.
 
 - **Local path:** `vanta pm add ./libs/foo` — copies the directory into
   `vendor/foo` via `shutil.copytree`.
-- **Git:** `vanta pm add https://example.com/foo.git` — shallow-clones
-  (`git clone --depth 1`) and records the resolved commit.
+- **Git:** a regular clone source, optionally followed by a ref fragment:
+
+  ```sh
+  vanta pm add https://example.com/foo.git#tag=v1
+  vanta pm add https://example.com/foo.git#ref=main
+  ```
+
+  `git clone` is used without an implicit depth, the requested tag or branch
+  is checked out when provided, and the resulting `HEAD` commit is recorded in
+  `vanta.lock`. `git+https://...#tag=...` URLs are also accepted.
 - **Registry:** `vanta pm add foo@1.2.3` — resolves through `VANTA_REGISTRY`,
   which may be a directory base (`<base>/<name>/<ver>/`) or an HTTP base
   (`<base>/<name>/<ver>/source.tar.gz`). A bare name `foo` resolves to
@@ -57,7 +65,31 @@ reproducible.
 
 When a dependency is added or installed, `vanta pm` reads that dependency's
 own `vanta.toml` and merges its `[dependencies]` into the root manifest, so
-the full transitive closure is available.
+the full transitive closure is available. During install an already populated
+vendor directory is left in place (`already present`), so `pm install` is not
+enough to move a changed remote tag or branch by itself; remove that
+directory or rerun with the renamed dependency before checking its output.
+
+## Lockfile and reproducibility
+
+`vanta.lock` records `source`, `path`, and `commit` for each installed
+dependency. `pm add` fills the commit from the fetched repository head, but
+`pm lock` itself regenerates entries from the manifest without fetching, so
+new lock rows start with an empty commit. Install uses source, tag, or ref
+from the manifest; the recorded commit is metadata and is not currently used to
+replay an exact historical revision.
+
+## Unsupported and incomplete features
+
+- No signed registry; HTTP and local directory registry modes are simple
+  tar/archive and file copies under `VANTA_REGISTRY`.
+- No version conflict resolution beyond `setdefault`; the first dependency spec
+  for a name wins when manifests are merged.
+- Gem-style version ranges and a separate package index format are not
+  available; registry dependencies are `name@version`.
+- Git credentials are supplied by the invoking `git` command and environment.
+- Installing does not automatically uninstall removed dependencies' transitive
+  packages; `pm remove` clears only the named targets.
 
 ## Backward compatibility and deprecation
 

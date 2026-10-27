@@ -1670,6 +1670,12 @@ What the moving parts mean:
 - **`ptr_is_null` before trusting a handle**, and the `mut` on `renderer` is
   what lets the second creation attempt overwrite the first.
 
+- **SDL events are accessed through typed run-time guards.** The game
+  kit's `input.vnt` module checks the SDL event kind before returning
+  each field; a mismatch reports `vanta: assertion failed` and exits
+  with status 1. The constants target the SDL2 `SDL_Event` ABI used in
+  Vanta's examples and tests (56 bytes on the tested 64-bit build).
+
 The windowed programs take an optional frame-limit argument, so a smoke run
 needs no display at all — this is how the test suite exercises them (CI
 installs SDL2 on Linux, macOS, and Windows and runs the same smoke tests):
@@ -1703,7 +1709,7 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else.
 | Module | Provides |
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
-| `input.vnt` | `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
+| `input.vnt` | Event accessors over a `ptr<i32>` SDL event buffer: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key`, scancode, modifiers, mouse, button, wheel, window-event, and button-state/click accessors. Mismatched accessors fail at runtime with `vanta: assertion failed` rather than returning another event's field. Layout constants target the SDL2 `SDL_Event` ABI used by Vanta's tests and examples; other SDL header versions may need updated constants. |
 | `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open` / `pad_ok` / `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
@@ -2198,6 +2204,28 @@ methods with no extra call overhead.
 
 Use only one level of method signatures for overriding: an override
 with a different signature is rejected with `invalid override`.
+
+Additional rules that implementations rely on:
+
+- **Vanta has single inheritance only.** A class may extend one base;
+  there is no multiple-inheritance dispatch matrix.
+- **Virtual dispatch is signature based, not declaration based.** A
+  method is virtual when its parameter types and return type match a
+  base method; merely overriding the signature shape by return type,
+  arity, or parameter type is a compile-time `invalid override`.
+- **Each instance carries a fixed runtime type id.** Constructor
+  values include `v__vanta_runtime_type`, initialized to
+  `VANTA_TYPE_ID_<ClassName>`. Hand-built or serialised instances
+  must keep that identifier matched with the C++ class shape; otherwise
+  dispatch falls through to the base implementation. Generated
+  identifiers follow the sorted class-name assignment of the current
+  program.
+- **Dispatch is `switch` plus guarded `reinterpret_cast`.** The base
+  runtime type first tries the matching derived case and only
+  reinterprets the base pointer after a successful type-id match.
+- **`ptr<Base>` dispatch requires a heap/arena instance** created with
+  the generated constructor. Stack-shaped pointers or copies bypass
+  these runtime ids.
 
 All source-level errors carry `file:line:col`:
 
