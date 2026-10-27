@@ -18,6 +18,8 @@ func ev_is_keyup(ev: ptr<i32>) -> bool:
 
 func ev_key(ev: ptr<i32>) -> i32:
     # The SDLK_* symbol of a key down/up event.
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
     return ev[5]
 
 
@@ -68,58 +70,97 @@ func ev_is_window_event(ev: ptr<i32>) -> bool:
     return ev[0] == EV_WINDOWEVENT
 
 func ev_mouse_x(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEMOTION)
+    assert(ev[0] == EV_MOUSEMOTION)
     return ev[5]
 
 func ev_mouse_y(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEMOTION)
+    assert(ev[0] == EV_MOUSEMOTION)
     return ev[6]
+func ev_mouse_motion_buttons(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEMOTION)
+    return ev[4]
 
 func ev_mouse_rel_x(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEMOTION)
+    assert(ev[0] == EV_MOUSEMOTION)
     return ev[7]
 
 func ev_mouse_rel_y(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEMOTION)
+    assert(ev[0] == EV_MOUSEMOTION)
     return ev[8]
 
 func ev_mouse_button(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
     return ev[4] % 256
 
 func ev_mouse_button_state(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
     return (ev[4] / 256) % 256
 
 func ev_mouse_button_clicks(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
+    assert((ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP))
     return (ev[4] / 65536) % 256
 
 func ev_mouse_which(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_MOUSEMOTION or ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP or ev[0] == EV_MOUSEWHEEL))
+    assert((ev[0] == EV_MOUSEMOTION or ev[0] == EV_MOUSEBUTTONDOWN or ev[0] == EV_MOUSEBUTTONUP or ev[0] == EV_MOUSEWHEEL))
     return ev[3]
 
 func ev_wheel_x(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEWHEEL)
+    assert(ev[0] == EV_MOUSEWHEEL)
     return ev[4]
 
 func ev_wheel_y(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEWHEEL)
+    assert(ev[0] == EV_MOUSEWHEEL)
     return ev[5]
 
 func ev_wheel_direction(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_MOUSEWHEEL)
+    assert(ev[0] == EV_MOUSEWHEEL)
     return ev[6]
 
 func ev_window_event(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_WINDOWEVENT)
+    assert(ev[0] == EV_WINDOWEVENT)
     return ev[3]
 
 func ev_window_data1(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_WINDOWEVENT)
+    assert(ev[0] == EV_WINDOWEVENT)
     return ev[4]
 
 func ev_window_data2(ev: ptr<i32>) -> i32:
+    assert(ev[0] == EV_WINDOWEVENT)
+    assert(ev[0] == EV_WINDOWEVENT)
     return ev[5]
 
 func ev_window_is_close_requested(ev: ptr<i32>) -> bool:
     return ev[0] == EV_WINDOWEVENT and ev[3] == WINDOWEVENT_CLOSE
 
 func ev_key_repeat(ev: ptr<i32>) -> bool:
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
     return (ev[3] / 256) % 256 != 0
 
 func ev_key_state(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
     return ev[3] % 256
 
 func ev_key_scancode(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
     return ev[4]
 
 func ev_key_mod(ev: ptr<i32>) -> i32:
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
+    assert((ev[0] == EV_KEYDOWN or ev[0] == EV_KEYUP))
     return ev[6]

@@ -1,0 +1,52 @@
+import "gamekit/sdl.vnt"
+import "gamekit/input.vnt"
+
+func main() -> void:
+    if SDL_Init(SDL_INIT_VIDEO) != 0:
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta", 100, 100, 64, 64, SDL_WINDOW_SHOWN)
+    if ptr_is_null(window):
+        print_str("window failed")
+        SDL_Quit()
+        return
+    let renderer = SDL_CreateRenderer(window, -1, 0)
+    if ptr_is_null(renderer):
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
+
+    let arena = Arena(256)
+    let pushed = arena.alloc::<i32>(16)
+    pushed[0] = EV_MOUSEMOTION
+    pushed[1] = 0
+    pushed[2] = 0
+    pushed[3] = 7
+    pushed[4] = 1
+    pushed[5] = 10
+    pushed[6] = 20
+    pushed[7] = 2
+    pushed[8] = -4
+    SDL_PushEvent(pushed)
+
+    let pushed2 = arena.alloc::<i32>(16)
+    pushed2[0] = 32768
+    SDL_PushEvent(pushed2)
+
+    let ev = arena.alloc::<i32>(16)
+    while SDL_PollEvent(ev) == 1:
+        if ev_is_mousemotion(ev):
+            print_i32(ev[0])
+            print_i32(ev_mouse_x(ev))
+            print_i32(ev_mouse_y(ev))
+            print_i32(ev_mouse_rel_x(ev))
+            print_i32(ev_mouse_rel_y(ev))
+            print_i32(ev_mouse_which(ev))
+            print_i32(ev_mouse_motion_buttons(ev))
+        elif ev[0] == 32768:
+            print_i32(ev[0])
+
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
