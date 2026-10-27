@@ -1778,24 +1778,51 @@ def _build_cache_root(source):
     return root
 
 
+def _dependency_files_for_cache(source):
+    """Files that can affect the generated program.
+
+    The compiler's dependency graph is obtained from the loaded program. A
+    broad directory scan is retained only as a last resort when a module
+    cannot be loaded; in normal builds this does not include unrelated
+    source files.
+    """
+    source = os.path.normcase(os.path.abspath(source))
+    files = [source]
+    seen = {source}
+    try:
+        from .loader import load_program
+        program = load_program(source)
+        for dependency in getattr(program, 'loaded_paths', []) or []:
+            dependency = os.path.normcase(os.path.abspath(dependency))
+            if dependency not in seen and os.path.exists(dependency):
+                seen.add(dependency)
+                files.append(dependency)
+    except Exception:
+        base = os.path.dirname(source) or os.getcwd()
+        for dirpath, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if not name.endswith('.vnt'):
+                    continue
+                path = os.path.normcase(os.path.abspath(
+                    os.path.join(dirpath, name)))
+                if path not in seen:
+                    seen.add(path)
+                    files.append(path)
+    return sorted(files)
+
+
 def _build_cache_key(source, release, debug, checked,
                     include_dir, lib_dir, link):
     import hashlib
-    parts = [os.path.normcase(os.path.abspath(source))]
-    try:
-        with open(source, 'rb') as f:
-            parts.append(f.read().hex())
-    except OSError:
-        pass
-    for p in _watched_files(source):
-        if p == source:
-            continue
+    parts = []
+    for p in _dependency_files_for_cache(source):
         try:
             with open(p, 'rb') as f:
-                parts.append(os.path.relpath(p, os.path.dirname(source))
-                            + ':' + f.read().hex())
+                parts.append("file:" + os.path.normcase(
+                    os.path.relpath(p, os.path.dirname(source))) +
+                    ":" + f.read().hex())
         except OSError:
-            pass
+            parts.append("missing:" + p)
     parts.append(f"release={release} debug={debug} checked={checked}")
     parts.append("include=" + ",".join(include_dir or []))
     parts.append("libdir=" + ",".join(lib_dir or []))

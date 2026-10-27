@@ -780,5 +780,13 @@ def load_program(entry_path, sources=None, search_paths=None):
     if search_paths is None:
         env = os.environ.get('VANTA_PATH')
         search_paths = env.split(os.pathsep) if env else []
-    modules = _Loader(sources, search_paths).load(entry_path)
-    return _Resolver(modules).resolve()
+    loader = _Loader(sources, search_paths)
+    modules = loader.load(entry_path)
+    program = _Resolver(modules).resolve()
+    # Expose the absolute dependency paths actually consumed by the loader so
+    # callers such as the build cache can invalidate precisely those files.
+    program.loaded_paths = [
+        os.path.abspath(m.real) for m in loader._modules.values()
+        if getattr(m, 'real', None) and os.path.exists(m.real)
+    ]
+    return program
