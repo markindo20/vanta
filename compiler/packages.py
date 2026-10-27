@@ -1,9 +1,27 @@
 """Package manager (client-side) for Vanta."""
-import os, sys, shutil, subprocess, urllib.request, tarfile, io, re
+import os, sys, shutil, subprocess, urllib.request, tarfile, io, re, stat
 
 VENDOR = 'vendor'
 MANIFEST = 'vanta.toml'
 LOCK = 'vanta.lock'
+
+def _rmtree(path):
+    """Remove a directory tree deterministically, including read-only VCS files."""
+    if not os.path.exists(path):
+        return
+
+    def _on_error(func, filepath, exc_info):
+        try:
+            os.chmod(filepath, stat.S_IWRITE)
+        except OSError:
+            pass
+        try:
+            func(filepath)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onerror=_on_error)
+
 
 
 def read_toml(path):
@@ -223,7 +241,7 @@ def fetch_source(source, dest, name, ref=None):
     os.makedirs(dest, exist_ok=True)
     target = _safe_target(dest, name)
     if os.path.exists(target):
-        shutil.rmtree(target, ignore_errors=True)
+        _rmtree(target)
     if os.path.exists(source) and os.path.isdir(source):
         shutil.copytree(source, target)
         return ''
@@ -252,10 +270,10 @@ def fetch_source(source, dest, name, ref=None):
                 except Exception:
                     continue
             if not checked_out:
-                shutil.rmtree(target, ignore_errors=True)
+                _rmtree(target)
                 raise RuntimeError(
                     f'could not checkout {requested_ref!r}')
-                shutil.rmtree(target, ignore_errors=True)
+                _rmtree(target)
                 raise RuntimeError(f'could not checkout {requested_ref!r}: {exc}')
         try:
             out = subprocess.run(['git', '-C', target, 'rev-parse', 'HEAD'],
@@ -298,7 +316,7 @@ def fetch_from_registry(name, version_spec, dest, target_name=None):
             target = _safe_target(dest, target_name)
             data = urllib.request.urlopen(url).read()
             tf = tarfile.open(fileobj=__import__('io').BytesIO(data), mode='r:gz')
-            shutil.rmtree(target, ignore_errors=True)
+            _rmtree(target)
             os.makedirs(target)
             _safe_extract_tar(tf, target)
             return ''
@@ -315,9 +333,9 @@ def fetch_from_registry(name, version_spec, dest, target_name=None):
         cand2 = _safe_target(reg_tmp, os.path.join(name, version_spec or ''))
         if os.path.isdir(cand2):
             r = fetch_source(cand2, dest, target_name)
-            shutil.rmtree(reg_tmp, ignore_errors=True)
+            _rmtree(reg_tmp)
             return r
-        shutil.rmtree(reg_tmp, ignore_errors=True)
+        _rmtree(reg_tmp)
     except Exception:
         pass
     raise RuntimeError(f'registry base does not contain {name}/{version_spec}')
@@ -427,7 +445,7 @@ def cmd_pm_remove(args):
         if name in lock.get('packages', {}):
             del lock['packages'][name]
         if os.path.exists(target):
-            shutil.rmtree(target, ignore_errors=True)
+            _rmtree(target)
         print(f'removed {name}')
     manifest['dependencies'] = deps
     write_toml(MANIFEST, manifest)

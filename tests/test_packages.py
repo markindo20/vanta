@@ -11,7 +11,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from compiler.packages import (
-    MANIFEST, LOCK, VENDOR,
+    MANIFEST, LOCK, VENDOR, _rmtree,
     _read_manifest, read_toml, write_toml,
     read_lock, write_lock,
     fetch_source, fetch_from_registry, cmd_pm,
