@@ -2885,6 +2885,22 @@ class LanguageServer:
         diagnostics: list[dict] = []
         try:
             program = load_program(path, sources=sources)
+            parse_errors = list(getattr(program, 'parse_errors', []) or [])
+            if parse_errors:
+                for exc in parse_errors:
+                    filename, line, col = _error_location(exc, path)
+                    if not filename:
+                        filename = path
+                    filename = os.path.abspath(filename)
+                    range_ = _error_range(filename, line, col, sources)
+                    diags = result.setdefault(filename, [])
+                    diags.append({
+                        'range': range_,
+                        'severity': 1,
+                        'source': 'vanta',
+                        'message': getattr(exc, 'msg', str(exc)),
+                    })
+                return result
             tc = TypeChecker(program, path)
             tc.register(multi=True)
             tc.check(multi=True)

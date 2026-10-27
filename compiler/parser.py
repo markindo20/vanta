@@ -23,10 +23,11 @@ COMPOUND_OPS = {
 
 
 class Parser:
-    def __init__(self, tokens, filename="<input>"):
+    def __init__(self, tokens, filename="<input>", raise_errors=True):
         self.tokens = tokens
         self.i = 0
         self.filename = filename
+        self.raise_errors = raise_errors
         # Diagnostics collected by recoverable parser boundaries. parse_program
         # keeps checking later independent declarations where a safe boundary
         # can be found; callers should inspect this list.
@@ -59,26 +60,42 @@ class Parser:
         tok = tok or self.peek()
         raise ParseError(msg, self.filename, A.Pos(tok.line, tok.col))
 
-    def parse_program(self):
+    def parse_program(self, raise_errors=None):
         decls = []
         while not self.check(TT.EOF):
             if self.check(TT.NEWLINE):
                 self.advance(); continue
+            start = self.i
             try:
                 decl = self.parse_top_level()
                 decls.append(decl)
                 continue
             except ParseError as exc:
                 self.errors.append(exc)
-            # Synchronize to a later top-level boundary before resuming.
-            while (not self.check(TT.EOF) and
-                   not self.check(TT.NEWLINE)):
+            # Do not spin between two identical positions.
+            if self.i == start:
                 self.advance()
-            while self.check(TT.NEWLINE):
+            if self.check(TT.EOF):
+                break
+
+            # Synchronize to a later top-level declaration instead of blindly
+            # skipping newlines.  Indented statements and their matching extra
+            # tokens must not become a cascade of unrelated syntax errors.
+            top_level_keywords = {
+                TT.MODULE, TT.FUNC, TT.SYSTEM, TT.STRUCT,
+                TT.COMPONENT, TT.ENUM, TT.CLASS, TT.EXTERN,
+                TT.CONST, TT.LET, TT.MUT, TT.IMPORT,
+            }
+            while not self.check(TT.EOF):
+                tok = self.peek()
+                if tok.type in top_level_keywords and tok.col == 1:
+                    break
                 self.advance()
         program = A.Program(decls)
         program.parse_errors = list(self.errors)
-        if self.errors:
+        if raise_errors is None:
+            raise_errors = self.raise_errors
+        if self.errors and raise_errors:
             raise self.errors[0]
         return program
 

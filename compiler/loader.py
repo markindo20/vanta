@@ -125,6 +125,7 @@ class _Module:
 
 class _Loader:
     def __init__(self, sources=None, search_paths=None):
+        self._parse_errors = []  # ParseError objects from recoverable parses
         self._modules = {}      # real path -> _Module
         self._active = []       # [(real path, display path)] in progress
         self._order = []        # modules in dependency-first order
@@ -166,8 +167,11 @@ class _Loader:
                 raise LoadError(f"cannot open '{path}'")
             raise LoadError(f"cannot open import '{path}'", importer, pos)
 
-        program = Parser(Lexer(src, path).tokenize(), path).parse_program()
+        parser = Parser(Lexer(src, path).tokenize(), path, raise_errors=False)
+        program = parser.parse_program(raise_errors=False)
         _stamp(program, path)
+        if getattr(program, 'parse_errors', None):
+            self._parse_errors.extend(program.parse_errors)
 
         module_decl = None
         decls = []
@@ -789,4 +793,6 @@ def load_program(entry_path, sources=None, search_paths=None):
         os.path.abspath(m.real) for m in loader._modules.values()
         if getattr(m, 'real', None) and os.path.exists(m.real)
     ]
+    program.parse_errors = getattr(program, 'parse_errors', []) + list(
+        getattr(loader, '_parse_errors', []))
     return program

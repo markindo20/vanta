@@ -484,6 +484,8 @@ def _emit_source(program, tc, path, debug=False, checked=False, shared=False):
 
 def _frontend_only(source_path):
     program = load_program(source_path)
+    if getattr(program, 'parse_errors', None):
+        raise program.parse_errors[0]
     tc = TypeChecker(program, source_path)
     tc.register()
     tc.check()
@@ -654,7 +656,11 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
     """
     try:
         program = load_program(source)
+        parse_errors = list(getattr(program, 'parse_errors', []) or [])
         tc = TypeChecker(program, str(source))
+        if parse_errors:
+            raise DebugBuildError(
+                'program parse failed: ' + '; '.join(str(exc) for exc in parse_errors))
         tc.register(multi=True)
         tc.check(multi=True)
         if tc.errors:
@@ -836,9 +842,14 @@ def _check_one(path, timing):
     try:
         started = time.perf_counter()
         program = load_program(path)
+        parse_errors = list(getattr(program, 'parse_errors', []) or [])
         tc = TypeChecker(program, path)
         tc.register(multi=True)
         tc.check(multi=True)
+        if parse_errors:
+            for exc in parse_errors:
+                _report_error(exc)
+            return path, 1, None
         if tc.errors:
             for exc in tc.errors:
                 _report_error(exc)
@@ -1021,7 +1032,12 @@ def cmd_doctor(args):
 def cmd_build(args):
     try:
         program = load_program(args.source)
+        parse_errors = list(getattr(program, 'parse_errors', []) or [])
         tc = TypeChecker(program, args.source)
+        if parse_errors:
+            for exc in parse_errors:
+                _report_error(exc)
+            return 1
         tc.register(multi=True)
         tc.check(multi=True)
         if tc.errors:
