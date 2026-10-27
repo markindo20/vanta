@@ -183,6 +183,10 @@ class TypeChecker:
         # maps a function name to the set of local variable names that are
         # captured by pointer. Used by codegen to give them durable storage.
         self.funcs_with_mutable_captures: dict[str, set[str]] = {}
+        # Structured semantic diagnostics collected when multi-error checking
+        # is enabled. check() raises the first error by default so existing
+        # callers continue to see a single CheckError.
+        self.errors: list[CheckError] = []
         self.scopes = []
         self.current_ret: Type = VOID
         self.loop_depth = 0
@@ -583,7 +587,28 @@ class TypeChecker:
             f"'{self._display(bad)}' in its inferred type",
             self.filename, d.pos)
 
-    def register(self):
+    def register(self, multi=False):
+        if multi:
+            for d in self.program.decls:
+                try:
+                    if isinstance(d, A.StructDecl): self._register_struct(d)
+                    elif isinstance(d, A.ClassDecl): self._register_class(d)
+                    elif isinstance(d, A.EnumDecl): self._register_enum(d)
+                    elif isinstance(d, A.FuncDecl): self._register_func(d)
+                    elif isinstance(d, A.ConstDecl):
+                        self._register_const(d)
+                        if d.is_public and d.type_ann is None:
+                            self._check_inferred_public(d, self.constants.get(d.name))
+                    elif isinstance(d, A.VarDecl): self._register_global(d)
+                    elif isinstance(d, A.ExternDecl): self._register_extern(d)
+                except CheckError as exc:
+                    self.errors.append(CheckError(self._display(exc.msg), exc.filename, exc.pos))
+            for d in self.program.decls:
+                if isinstance(d, A.ClassDecl):
+                    try: self._check_class_methods(d)
+                    except CheckError as exc:
+                        self.errors.append(CheckError(self._display(exc.msg), exc.filename, exc.pos))
+            return
         try:
             for d in self.program.decls:
                 if isinstance(d, A.StructDecl):
@@ -1008,7 +1033,25 @@ class TypeChecker:
             return self.globals[name]
         return None
 
-    def check(self):
+    def check(self, multi=False):
+        self._multi = bool(multi)
+        self.errors = []
+        if multi:
+            for d in self.program.decls:
+                if isinstance(d, A.FuncDecl):
+                    if getattr(d, 'type_params', ()):
+                        continue
+                    try:
+                        self._check_func(d)
+                        if d.is_public and d.ret is None:
+                            self._check_inferred_public(
+                                d, self.functions[d.name].ret)
+                    except CheckError as exc:
+                        self.errors.append(CheckError(
+                            self._display(exc.msg), exc.filename, exc.pos))
+            if self.errors:
+                return self.errors
+            return []
         try:
             for d in self.program.decls:
                 if isinstance(d, A.FuncDecl):
@@ -1020,6 +1063,7 @@ class TypeChecker:
                             d, self.functions[d.name].ret)
         except CheckError as exc:
             self._reraise_pretty(exc)
+        return []
 
     def _check_func(self, fn: A.FuncDecl):
         sig = self.functions[fn.name]
@@ -1036,7 +1080,14 @@ class TypeChecker:
                     raise CheckError(f"parameter '{pname}' cannot be void", self.filename, fn.pos)
                 self._declare(pname, ptype, mutable=False)
             for stmt in fn.body:
-                self._check_stmt(stmt)
+                try:
+                    self._check_stmt(stmt)
+                except CheckError as exc:
+                    err = CheckError(self._display(exc.msg), exc.filename,
+                                     exc.pos)
+                    self.errors.append(err)
+                    if not getattr(self, '_multi', False):
+                        raise err
             if isinstance(sig.ret, InferType):
                 self._resolve_inferred_return(sig, fn)
         finally:

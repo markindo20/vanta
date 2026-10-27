@@ -2837,12 +2837,29 @@ class LanguageServer:
             except (OSError, UnicodeError):
                 pass
         result: dict[str, list[dict]] = {path: []}
+        diagnostics: list[dict] = []
         try:
             program = load_program(path, sources=sources)
             tc = TypeChecker(program, path)
-            tc.register()
-            tc.check()
-        except (LexError, ParseError, CheckError, LoadError) as exc:
+            tc.register(multi=True)
+            tc.check(multi=True)
+            if not tc.errors:
+                return result
+            for exc in tc.errors:
+                filename, line, col = _error_location(exc, path)
+                if not filename:
+                    filename = path
+                filename = os.path.abspath(filename)
+                range_ = _error_range(filename, line, col, sources)
+                diags = result.setdefault(filename, [])
+                diags.append({
+                    'range': range_,
+                    'severity': 1,
+                    'source': 'vanta',
+                    'message': getattr(exc, 'msg', str(exc)),
+                })
+            return result
+        except (LexError, ParseError, LoadError) as exc:
             filename, line, col = _error_location(exc, path)
             if not filename:
                 filename = path
@@ -2854,12 +2871,11 @@ class LanguageServer:
                 'source': 'vanta',
                 'message': getattr(exc, 'msg', str(exc)),
             }]
+            return result
         except Exception as exc:
-            # An editor must never die because of a frontend bug. The real
-            # `vanta check` command still reports the traceback.
             sys.stderr.write(f'vanta lsp diagnostics: {exc}\n')
             sys.stderr.flush()
-        return result
+            return result
 
     # -- completion --------------------------------------------------------
 

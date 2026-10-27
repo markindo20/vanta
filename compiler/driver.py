@@ -653,7 +653,14 @@ def build_debug(source, output=None, include_dirs=None, lib_dirs=None,
     directory and should remove it when the debug session ends.
     """
     try:
-        program, tc = _frontend_only(source)
+        program = load_program(source)
+        tc = TypeChecker(program, str(source))
+        tc.register(multi=True)
+        tc.check(multi=True)
+        if tc.errors:
+            raise DebugBuildError(
+                'program type-check failed: '
+                + '; '.join(str(exc) for exc in tc.errors))
     except (LexError, ParseError, CheckError, LoadError) as e:
         raise DebugBuildError(str(e)) from e
 
@@ -828,7 +835,14 @@ def _vnt_files_under(target):
 def _check_one(path, timing):
     try:
         started = time.perf_counter()
-        program, _ = _frontend_only(path)
+        program = load_program(path)
+        tc = TypeChecker(program, path)
+        tc.register(multi=True)
+        tc.check(multi=True)
+        if tc.errors:
+            for exc in tc.errors:
+                _report_error(exc)
+            return path, 1, None
         total = time.perf_counter() - started
     except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
@@ -1006,7 +1020,14 @@ def cmd_doctor(args):
 
 def cmd_build(args):
     try:
-        program, tc = _frontend_only(args.source)
+        program = load_program(args.source)
+        tc = TypeChecker(program, args.source)
+        tc.register(multi=True)
+        tc.check(multi=True)
+        if tc.errors:
+            for exc in tc.errors:
+                _report_error(exc)
+            return 1
     except (LexError, ParseError, CheckError, LoadError) as e:
         _report_error(e)
         return 1

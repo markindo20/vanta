@@ -2191,5 +2191,9 @@ examples/boids.vnt:3:5: argument: cannot assign i32 to u32
 
 Use `vanta check <file>` (or `python main.py check <file>` from a checkout) to
 type-check without invoking a C++ compiler.
+When independent errors are present, the type checker reports them together
+where their source spans are independent. Some invalid constructions still
+prevent meaningful analysis and stop at the first error. Independent
+diagnostics are stable in source order.
 When C++ compilation fails during `build`, the generated source is saved to
 `build/vanta_failed.cpp`.
