@@ -1723,9 +1723,6 @@ def _split_program_args(argv):
     return argv, []
 
 
-    return 1
-
-
 def _source_digest(paths):
     import hashlib
     h = hashlib.sha256()
