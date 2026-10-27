@@ -1883,7 +1883,7 @@ def _prune_build_cache_root(root_source: str) -> None:
                 path, 'prog.exe' if os.name == 'nt' else 'prog'))
         except OSError:
             pass
-    while entries and total > max_bytes:
+    while len(entries) > 1 and total > max_bytes:
         mtime, path = entries.pop(0)
         try:
             size = os.path.getsize(os.path.join(
