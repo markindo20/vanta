@@ -2763,5 +2763,214 @@ class IntegrationTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_event_accessors_empty_queue(self):
+        tmp = tempfile.mkdtemp(prefix='vanta_evempty_')
+        try:
+            source_dir = os.path.join(tmp, 'main')
+            os.makedirs(source_dir, exist_ok=True)
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(source_dir, 'gamekit'))
+            path = os.path.join(source_dir, 'evempty.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(
+                    'import "gamekit/sdl.vnt"\n'
+                    'import "gamekit/input.vnt"\n\n'
+                    'func main() -> void:\n'
+                    '    if SDL_Init(SDL_INIT_VIDEO) != 0:\n'
+                    '        return\n'
+                    '    let window = SDL_CreateWindow("Vanta", 100, 100, 64, 64, SDL_WINDOW_SHOWN)\n'
+                    '    if ptr_is_null(window):\n'
+                    '        SDL_Quit()\n'
+                    '        return\n'
+                    '    let renderer = SDL_CreateRenderer(window, -1, 0)\n'
+                    '    if ptr_is_null(renderer):\n'
+                    '        SDL_DestroyWindow(window)\n'
+                    '        SDL_Quit()\n'
+                    '        return\n'
+                    '    let arena = Arena(128)\n'
+                    '    let ev = arena.alloc::<i32>(16)\n'
+                    '    mut discarded = 0\n'
+                    '    while SDL_PollEvent(ev) == 1:\n'
+                    '        discarded = ev[0]\n'
+                    '    print_str("empty")\n'
+                    '    SDL_DestroyRenderer(renderer)\n'
+                    '    SDL_DestroyWindow(window)\n'
+                    '    SDL_Quit()\n'
+                )
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            self.assertEqual(r.stdout.strip().splitlines(), ['empty'])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_event_accessors_synthetic(self):
+        tmp = tempfile.mkdtemp(prefix='vanta_evsynth_')
+        try:
+            source_dir = os.path.join(tmp, 'main')
+            os.makedirs(source_dir, exist_ok=True)
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(source_dir, 'gamekit'))
+            path = os.path.join(source_dir, 'evsynth.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(
+                    'import "gamekit/sdl.vnt"\n'
+                    'import "gamekit/input.vnt"\n\n'
+                    'func main() -> void:\n'
+                    '    if SDL_Init(SDL_INIT_VIDEO) != 0:\n'
+                    '        return\n'
+                    '    let window = SDL_CreateWindow("Vanta", 100, 100, 64, 64, SDL_WINDOW_SHOWN)\n'
+                    '    if ptr_is_null(window):\n'
+                    '        SDL_Quit()\n'
+                    '        return\n'
+                    '    let renderer = SDL_CreateRenderer(window, -1, 0)\n'
+                    '    if ptr_is_null(renderer):\n'
+                    '        SDL_DestroyWindow(window)\n'
+                    '        SDL_Quit()\n'
+                    '        return\n'
+                    '    let arena = Arena(1024)\n'
+                    '    let ev = arena.alloc::<i32>(16)\n'
+                    '    mut cleared = 0\n'
+                    '    while SDL_PollEvent(ev) == 1:\n'
+                    '        cleared = ev[0]\n'
+                    '    let push1 = arena.alloc::<i32>(16)\n'
+                    '    push1[0] = EV_MOUSEMOTION\n'
+                    '    push1[1] = 0\n'
+                    '    push1[2] = 0\n'
+                    '    push1[3] = 7\n'
+                    '    push1[4] = 1\n'
+                    '    push1[5] = 10\n'
+                    '    push1[6] = 20\n'
+                    '    push1[7] = 2\n'
+                    '    push1[8] = -4\n'
+                    '    SDL_PushEvent(push1)\n'
+                    '    let push2 = arena.alloc::<i32>(16)\n'
+                    '    push2[0] = EV_MOUSEBUTTONDOWN\n'
+                    '    push2[1] = 0\n'
+                    '    push2[2] = 0\n'
+                    '    push2[3] = 5\n'
+                    '    push2[4] = 3 + 2*256 + 2*65536\n'
+                    '    push2[5] = 30\n'
+                    '    push2[6] = 40\n'
+                    '    SDL_PushEvent(push2)\n'
+                    '    let push3 = arena.alloc::<i32>(16)\n'
+                    '    push3[0] = EV_KEYDOWN\n'
+                    '    push3[1] = 0\n'
+                    '    push3[2] = 0\n'
+                    '    push3[3] = 1 + 1*256\n'
+                    '    push3[4] = 29\n'
+                    '    push3[5] = 119\n'
+                    '    push3[6] = 1\n'
+                    '    SDL_PushEvent(push3)\n'
+                    '    let push4 = arena.alloc::<i32>(16)\n'
+                    '    push4[0] = EV_MOUSEWHEEL\n'
+                    '    push4[1] = 0\n'
+                    '    push4[2] = 0\n'
+                    '    push4[3] = 0\n'
+                    '    push4[4] = 2\n'
+                    '    push4[5] = -3\n'
+                    '    push4[6] = 1\n'
+                    '    SDL_PushEvent(push4)\n'
+                    '    let push5 = arena.alloc::<i32>(16)\n'
+                    '    push5[0] = EV_WINDOWEVENT\n'
+                    '    push5[1] = 0\n'
+                    '    push5[2] = 1\n'
+                    '    push5[3] = 5\n'
+                    '    push5[4] = 400\n'
+                    '    push5[5] = 300\n'
+                    '    SDL_PushEvent(push5)\n'
+                    '    let push6 = arena.alloc::<i32>(16)\n'
+                    '    push6[0] = 32768\n'
+                    '    SDL_PushEvent(push6)\n'
+                    '    while SDL_PollEvent(ev) == 1:\n'
+                    '        if ev_is_mousemotion(ev):\n'
+                    '            print_i32(ev[0])\n'
+                    '            print_i32(ev_mouse_x(ev))\n'
+                    '            print_i32(ev_mouse_y(ev))\n'
+                    '            print_i32(ev_mouse_rel_x(ev))\n'
+                    '            print_i32(ev_mouse_rel_y(ev))\n'
+                    '            print_i32(ev_mouse_which(ev))\n'
+                    '            print_i32(ev_mouse_motion_buttons(ev))\n'
+                    '        elif ev_is_mousebuttondown(ev):\n'
+                    '            print_i32(ev[0])\n'
+                    '            print_i32(ev_mouse_button(ev))\n'
+                    '            print_i32(ev_mouse_button_state(ev))\n'
+                    '            print_i32(ev_mouse_button_clicks(ev))\n'
+                    '        elif ev[0] == EV_KEYDOWN:\n'
+                    '            print_i32(ev[0])\n'
+                    '            print_i32(ev_key(ev))\n'
+                    '            print_i32(ev_key_state(ev))\n'
+                    '            if ev_key_repeat(ev):\n'
+                    '                print_i32(1)\n'
+                    '            else:\n'
+                    '                print_i32(0)\n'
+                    '            print_i32(ev_key_scancode(ev))\n'
+                    '            print_i32(ev_key_mod(ev))\n'
+                    '        elif ev_is_mousewheel(ev):\n'
+                    '            print_i32(ev[0])\n'
+                    '            print_i32(ev_wheel_x(ev))\n'
+                    '            print_i32(ev_wheel_y(ev))\n'
+                    '            print_i32(ev_wheel_direction(ev))\n'
+                    '        elif ev_is_window_event(ev):\n'
+                    '            print_i32(ev[0])\n'
+                    '            print_i32(ev_window_event(ev))\n'
+                    '            print_i32(ev_window_data1(ev))\n'
+                    '            print_i32(ev_window_data2(ev))\n'
+                    '        else:\n'
+                    '            print_i32(ev[0])\n'
+                    '    SDL_DestroyRenderer(renderer)\n'
+                    '    SDL_DestroyWindow(window)\n'
+                    '    SDL_Quit()\n'
+                )
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, msg=r.stderr)
+            expected = [
+                1024, 10, 20, 2, -4, 7, 1,
+                1025, 3, 2, 2,
+                768, 119, 1, 1, 29, 1,
+                1027, 2, -3, 1,
+                512, 5, 400, 300,
+                32768,
+            ]
+            got = [int(line) for line in r.stdout.strip().splitlines()]
+            self.assertEqual(got, expected)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(SDL2, "SDL2 not found")
+    def test_sdl_event_invalid_accessor(self):
+        tmp = tempfile.mkdtemp(prefix='vanta_evinv_')
+        try:
+            source_dir = os.path.join(tmp, 'main')
+            os.makedirs(source_dir, exist_ok=True)
+            shutil.copytree(os.path.join(EXAMPLES, 'gamekit'),
+                            os.path.join(source_dir, 'gamekit'))
+            path = os.path.join(source_dir, 'evinv.vnt')
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(
+                    'import "gamekit/sdl.vnt"\n'
+                    'import "gamekit/input.vnt"\n\n'
+                    'func main() -> void:\n'
+                    '    let arena = Arena(64)\n'
+                    '    let ev = arena.alloc::<i32>(16)\n'
+                    '    ev[0] = 256\n'
+                    '    let ignored = ev_mouse_x(ev)\n'
+                    '    print_i32(ignored)\n'
+                )
+            exe = self._build_sdl(path, tmp)
+            env = dict(os.environ, SDL_VIDEODRIVER='dummy')
+            r = subprocess.run([exe], capture_output=True, text=True, env=env)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('assertion failed', r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()
