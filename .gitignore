@@ -6,3 +6,6 @@ __pycache__/
 breakout.score
 build/
 dist/
+
+# Local preservation artifacts
+backups/
