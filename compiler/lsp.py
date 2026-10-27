@@ -663,12 +663,33 @@ _FUNC_RE = re.compile(
     r'^\s+([A-Za-z_]\w*)\s*\((.*?)\)\s*(?:->\s*(.+?))?\s*:?\s*$')
 
 
-_PARSE_CACHE: dict = {}
+# LSP parse results are keyed by exact path/content. Keep the cache bounded
+# so navigating through a large project cannot retain every historical
+# document version forever.
+from collections import OrderedDict
+
+
+_PARSE_CACHE_LIMIT = 128
+_PARSE_CACHE: OrderedDict = OrderedDict()
 
 
 def _cache_key(path: str, text: str) -> tuple:
     return (os.path.normpath(path or ''),
             hashlib.sha256(text.encode('utf-8')).hexdigest())
+
+
+def _cache_put(key: tuple, value) -> None:
+    _PARSE_CACHE[key] = value
+    _PARSE_CACHE.move_to_end(key)
+    while len(_PARSE_CACHE) > _PARSE_CACHE_LIMIT:
+        _PARSE_CACHE.popitem(last=False)
+
+
+def _cache_get(key: tuple):
+    value = _PARSE_CACHE.get(key)
+    if value is not None:
+        _PARSE_CACHE.move_to_end(key)
+    return value
 
 
 class _ProjectIndex:
@@ -756,7 +777,7 @@ class _ProjectIndex:
 
     def _parse_module(self, path: str, text: str) -> ModuleInfo:
         key = _cache_key(path, text)
-        cached = _PARSE_CACHE.get(key)
+        cached = _cache_get(key)
         if cached is not None:
             return cached
         source_lines = text.splitlines()
@@ -800,7 +821,7 @@ class _ProjectIndex:
             mod.imports = ast_imports
         mod.program = program
         self._finish_ranges(mod.decls, source_lines)
-        _PARSE_CACHE[key] = mod
+        _cache_put(key, mod)
         return mod
 
     def _from_ast(self, path: str, text: str, source_lines: list[str],

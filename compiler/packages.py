@@ -206,7 +206,20 @@ def _safe_extract_tar(tf, target):
             shutil.copyfileobj(source, out)
 
 
-def fetch_source(source, dest, name):
+def _split_git_ref(source, ref=None):
+    """Split an optional git ref from a source and fragment."""
+    src = source[len('git+'):] if source.startswith('git+') else source
+    if ref is not None:
+        return src, ref.strip()
+    if '#' in src:
+        base, _, fragment = src.partition('#')
+        for part in fragment.split('&'):
+            if part.startswith('tag=') or part.startswith('ref='):
+                return base, part.split('=', 1)[1].strip()
+    return src, ''
+
+
+def fetch_source(source, dest, name, ref=None):
     os.makedirs(dest, exist_ok=True)
     target = _safe_target(dest, name)
     if os.path.exists(target):
@@ -214,13 +227,36 @@ def fetch_source(source, dest, name):
     if os.path.exists(source) and os.path.isdir(source):
         shutil.copytree(source, target)
         return ''
-    src = source[len('git+'):] if source.startswith('git+') else source
-    if src.startswith('https://') or src.startswith('http://') or src.startswith('git@') or src.startswith('git:'):
+    src, requested_ref = _split_git_ref(source, ref)
+    if (src.startswith('https://') or src.startswith('http://') or
+            src.startswith('git@') or src.startswith('git:') or
+            source.startswith('git+')):
         try:
-            subprocess.run(['git', 'clone', '--depth', '1', src, target], check=True,
+            subprocess.run(['git', 'clone', src, target], check=True,
                            capture_output=True, text=True)
         except Exception as exc:
             raise RuntimeError(f'could not clone {src}: {exc}')
+        if requested_ref:
+            # A normal clone exposes branch refs as remotes/origin/<ref>, so
+            # try several common spellings before declaring the ref invalid.
+            candidates = [requested_ref, 'origin/' + requested_ref,
+                          'refs/remotes/origin/' + requested_ref]
+            checked_out = False
+            for candidate in candidates:
+                try:
+                    subprocess.run(['git', '-C', target, 'checkout',
+                                    '--detach', candidate], check=True,
+                                   capture_output=True, text=True)
+                    checked_out = True
+                    break
+                except Exception:
+                    continue
+            if not checked_out:
+                shutil.rmtree(target, ignore_errors=True)
+                raise RuntimeError(
+                    f'could not checkout {requested_ref!r}')
+                shutil.rmtree(target, ignore_errors=True)
+                raise RuntimeError(f'could not checkout {requested_ref!r}: {exc}')
         try:
             out = subprocess.run(['git', '-C', target, 'rev-parse', 'HEAD'],
                                  capture_output=True, text=True).stdout.strip()
@@ -345,7 +381,7 @@ def cmd_pm_add(args):
                     if part.startswith('tag=') or part.startswith('ref='):
                         tag = part.split('=', 1)[1]
             try:
-                commit = fetch_source(src, dest, dep_name)
+                commit = fetch_source(base_src, dest, dep_name, tag)
             except RuntimeError as exc:
                 sys.stderr.write(f'error: {exc}\n')
                 rc_total = 1
@@ -438,12 +474,15 @@ def cmd_pm_install(args):
             print(f'already present: {name}')
         else:
             src = _manifest_dep_source(spec)
+            ref = ''
+            if isinstance(spec, dict):
+                ref = str(spec.get('tag') or spec.get('ref') or '')
             try:
                 if src.startswith('registry:'):
                     r = fetch_from_registry(name, src[len('registry:'):], dest, name)
                     commit = r if not isinstance(r, tuple) else (r[0] if r else '')
                 else:
-                    commit = fetch_source(src, dest, name)
+                    commit = fetch_source(src, dest, name, ref)
             except RuntimeError as exc:
                 sys.stderr.write(f'error: {exc}\n')
                 failures += 1
