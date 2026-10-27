@@ -1,5 +1,5 @@
 """Package manager (client-side) for Vanta."""
-import os, sys, shutil, subprocess, urllib.request, tarfile, io, re, stat
+import os, sys, shutil, subprocess, urllib.request, tarfile, io, re, stat, hashlib
 
 VENDOR = 'vendor'
 MANIFEST = 'vanta.toml'
@@ -228,7 +228,7 @@ def _split_git_ref(source, ref=None):
     """Split an optional git ref from a source and fragment."""
     src = source[len('git+'):] if source.startswith('git+') else source
     if ref is not None:
-        return src, ref.strip()
+        return src.split('#', 1)[0], ref.strip()
     if '#' in src:
         base, _, fragment = src.partition('#')
         for part in fragment.split('&'):
@@ -293,7 +293,12 @@ def _manifest_dep_source(spec):
             version = spec.get('registry')
             return 'registry:' + str(version or 'latest')
         if 'git' in spec:
-            return spec['git']
+            source = str(spec.get('git') or '')
+            ref = str(spec.get('tag') or spec.get('ref') or '').strip()
+            if ref:
+                kind = 'tag' if spec.get('tag') else 'ref'
+                return source + '#' + kind + '=' + ref
+            return source
         if 'path' in spec:
             return spec['path']
         if 'src' in spec:
@@ -362,6 +367,91 @@ def _installed_git_commit(path):
     return result.stdout.strip()
 
 
+def _tree_digest(root):
+    """Return a deterministic SHA-256 of a dependency directory tree.
+
+    The digest covers sorted file paths and their byte contents. A digest can
+    therefore detect partial installations, manual edits, and mismatched
+    vendored trees without assuming anything about the dependency's source
+    backend.
+    """
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        return ''
+    root_real = os.path.realpath(root)
+    hasher = hashlib.sha256()
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = sorted(dirs)
+        for name in sorted(files):
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                raise RuntimeError(f'unsafe archive member {name!r}: symlink')
+            if os.path.realpath(full) != os.path.realpath(full):
+                pass
+            real = os.path.realpath(full)
+            if os.path.commonpath([root_real, real]) != root_real:
+                raise RuntimeError(f'unsafe dependency path {name!r}')
+            rel = os.path.relpath(full, root).replace(os.sep, '/')
+            digest_file(full, hasher, rel)
+    return hasher.hexdigest()
+
+
+def digest_file(full, hasher, rel):
+    hasher.update(f'file:{rel}\n'.encode('utf-8'))
+    with open(full, 'rb') as f:
+        data = f.read()
+    hasher.update(str(len(data)).encode('ascii'))
+    hasher.update(b':')
+    hasher.update(data)
+
+
+def _installed_git_commit(path):
+    """Return HEAD for a downloaded git checkout, or an empty string."""
+    git_dir = os.path.join(path, '.git')
+    if not os.path.lexists(git_dir):
+        return ''
+    try:
+        result = subprocess.run(
+            ['git', '-C', path, 'rev-parse', 'HEAD'],
+            check=True, capture_output=True, text=True)
+    except Exception:
+        return ''
+    return result.stdout.strip()
+
+def _sources_compatible(dep_name, spec, locked_source):
+    source = str(locked_source or '').strip()
+    if not source:
+        return True
+    if isinstance(spec, str):
+        return source == spec.strip()
+    if not isinstance(spec, dict):
+        return source == str(spec).strip()
+
+    if 'git' in spec:
+        expected_base = str(spec.get('git') or '').strip()
+        locked_base = source.partition('#')[0].strip()
+        if locked_base != expected_base:
+            return False
+        expected_ref = str(spec.get('tag') or spec.get('ref') or '').strip()
+        fragment = source.partition('#')[2].strip() if '#' in source else ''
+        if fragment.startswith('tag=') or fragment.startswith('ref='):
+            fragment = fragment.split('=', 1)[1].strip()
+        if expected_ref and fragment and expected_ref != fragment:
+            return False
+        return True
+
+    if 'registry' in spec:
+        expected_version = str(spec.get('registry') or '').strip()
+        locked_portion = source[len('registry:'):].strip() if source.startswith('registry:') else source
+        locked_version = locked_portion.split('@', 1)[-1].strip()
+        return (not expected_version or locked_version == expected_version or
+                (expected_version == 'latest' and locked_version in ('', 'latest')))
+
+    expected = str(spec.get('path') if 'path' in spec else spec.get('src')
+                   if 'src' in spec else '')
+    return source == expected.strip()
+
+
 # ---------- Commands ----------
 
 def cmd_pm_init(args):
@@ -422,7 +512,10 @@ def cmd_pm_add(args):
                 manifest['dependencies'][dep_name] = {'git': base_src, 'tag': tag}
             else:
                 manifest['dependencies'][dep_name] = src
-        lock['packages'][dep_name] = {'source': src, 'path': os.path.join(dest, dep_name), 'commit': commit}
+        lock['packages'][dep_name] = {
+            'source': src, 'path': os.path.join(dest, dep_name),
+            'commit': commit,
+            'sha256': _tree_digest(os.path.join(dest, dep_name))}
         write_lock(lock)
         dep_manifest = os.path.join(dest, dep_name, MANIFEST)
         if os.path.exists(dep_manifest):
@@ -507,18 +600,33 @@ def cmd_pm_install(args):
         if isinstance(spec, dict):
             ref = str(spec.get('tag') or spec.get('ref') or '')
         locked_entry = lock.get('packages', {}).get(name, {}) or {}
+        locked_source = str(locked_entry.get('source') or '').strip()
         locked_commit = str(locked_entry.get('commit') or '').strip()
+        locked_digest = str(locked_entry.get('sha256') or '').strip()
+
+        if locked_entry and not _sources_compatible(name, spec, locked_source):
+            sys.stderr.write(
+                f'source mismatch for {name}: manifest has {src!r}, '
+                f'lockfile has {locked_source!r}\n')
+            failures += 1
+            continue
 
         # Leave a checked-out tree untouched unless lockfile says a different
         # revision is needed. This makes a clean install reproducible from
         # .vanta.lock instead of only from the mutable manifest source.
         if os.path.exists(target):
             current_commit = _installed_git_commit(target)
+            current_digest = _tree_digest(target)
             if (not src.startswith('registry:')
                     and locked_commit
                     and current_commit
                     and current_commit != locked_commit):
                 _rmtree(target)
+            elif locked_digest and current_digest != locked_digest:
+                sys.stderr.write(
+                    ('checksum mismatch for %s: installed tree %r != %r\n' % (name, current_digest, locked_digest)))
+                failures += 1
+                continue
             else:
                 print(f'already present: {name}')
                 dep_manifest = os.path.join(target, MANIFEST)
@@ -529,7 +637,6 @@ def cmd_pm_install(args):
                         if dname not in seen:
                             pending.append((dname, dspec))
                 continue
-
         try:
             if src.startswith('registry:'):
                 r = fetch_from_registry(name, src[len('registry:'):], dest, name)
@@ -543,7 +650,8 @@ def cmd_pm_install(args):
             continue
         lock['packages'][name] = {
             'source': src, 'path': target,
-            'commit': commit or locked_commit}
+            'commit': commit or locked_commit,
+            'sha256': _tree_digest(target) or locked_digest}
         dep_manifest = os.path.join(target, MANIFEST)
         if os.path.exists(dep_manifest):
             dep_m = read_toml(dep_manifest)
@@ -562,7 +670,30 @@ def cmd_pm_lock(args):
     lock = read_lock()
     lock.setdefault('packages', {})
     for name, spec in (manifest.get('dependencies') or {}).items():
-        lock['packages'].setdefault(name, {'source': _manifest_dep_source(spec), 'path': os.path.join(VENDOR, name), 'commit': ''})
+        installed_target = os.path.join(VENDOR, name)
+        source = _manifest_dep_source(spec)
+        entry = lock['packages'].get(name, {}) or {}
+        # Existing pins belong to the same manifest source. If the manifest
+        # changes, reset all exact-install identity instead of retaining stale
+        # commit information.
+        if str(entry.get('source') or '').strip() != source:
+            entry = {}
+        if os.path.isdir(installed_target):
+            git_dir = os.path.join(installed_target, '.git')
+            if os.path.lexists(git_dir):
+                try:
+                    entry['commit'] = subprocess.run(
+                        ['git', '-C', installed_target, 'rev-parse', 'HEAD'],
+                        check=True, capture_output=True, text=True).stdout.strip()
+                except Exception:
+                    entry['commit'] = entry.get('commit', '')
+            entry['sha256'] = _tree_digest(installed_target)
+        else:
+            entry.setdefault('commit', '')
+            entry.setdefault('sha256', '')
+        entry['source'] = source
+        entry['path'] = installed_target
+        lock['packages'][name] = entry
     write_lock(lock)
     print('locked')
     return 0
@@ -570,11 +701,52 @@ def cmd_pm_lock(args):
 
 def cmd_pm_check(args):
     manifest = _read_manifest()
+    deps = manifest.get('dependencies', {}) or {}
+    lock = read_lock()
+    lock.setdefault('packages', {})
     ok = True
-    for name, spec in (manifest.get('dependencies') or {}).items():
-        if not os.path.isdir(os.path.join(VENDOR, name)):
+    for name, spec in deps.items():
+        expected_source = _manifest_dep_source(spec)
+        target = os.path.join(VENDOR, name)
+        if not os.path.isdir(target):
             sys.stderr.write(f'missing: {name}\n')
             ok = False
+            continue
+        entry = lock['packages'].get(name, {}) or {}
+        if entry:
+            locked_source = str(entry.get('source') or '').strip()
+            if locked_source and not _sources_compatible(name, spec, locked_source):
+                sys.stderr.write(
+                    f'source mismatch for {name}: manifest {expected_source!r}, '
+                    f'lockfile {locked_source!r}\n')
+                ok = False
+                continue
+            locked_commit = str(entry.get('commit') or '').strip()
+            locked_digest = str(entry.get('sha256') or '').strip()
+            current_commit = ''
+            git_dir = os.path.join(target, '.git')
+            if os.path.lexists(git_dir):
+                try:
+                    current_commit = subprocess.run(
+                        ['git', '-C', target, 'rev-parse', 'HEAD'],
+                        check=True, capture_output=True, text=True
+                    ).stdout.strip()
+                except Exception:
+                    current_commit = ''
+            if locked_commit and current_commit and current_commit != locked_commit:
+                sys.stderr.write(
+                    f'commit mismatch for {name}: installed {current_commit!r}, '
+                    f'lockfile {locked_commit!r}\n')
+                ok = False
+                continue
+            if locked_digest:
+                current_digest = _tree_digest(target)
+                if current_digest != locked_digest:
+                    sys.stderr.write(
+                        f'checksum mismatch for {name}: installed tree '
+                        f'{current_digest!r} != {locked_digest!r}\n')
+                    ok = False
+                    continue
     if ok:
         print('all dependencies present')
     return 0 if ok else 1
