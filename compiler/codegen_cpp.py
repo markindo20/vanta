@@ -1008,19 +1008,56 @@ class CodeGen:
         # Struct def: fields (own only? For correct compilation and relative
         # simplicity, store own fields; inherited field lookup in type-checker
         # still reads parent CT for type inference).
-        self.emit(f'struct {ct.name} {{')
+        parent = getattr(ct, 'parent', None)
+        if parent and parent in self.tc.classes:
+            self.emit(f'struct {ct.name} : {parent} {{')
+        else:
+            self.emit(f'struct {ct.name} {{')
         self.indent += 1
+        # Inherit base fields instead of duplicating them. Inheritance keeps
+        # pointer conversions well defined instead of mere matching offsets.
+        inherited = set()
+        if parent and parent in self.tc.classes:
+            inherited = set(self.tc.classes[parent].fields)
         for fname, (ftype, _pub) in ct.fields.items():
+            if fname in inherited:
+                continue
             if fname == '_vanta_runtime_type':
-                self.emit(f'const int32_t v__vanta_runtime_type = '
+                self.emit(f'int32_t v__vanta_runtime_type = '
                           f'VANTA_TYPE_ID_{ct.name};')
             else:
                 self.emit(f'{self._ctype(ftype)} v_{fname};')
-        if '_vanta_runtime_type' not in ct.fields:
-            self.emit(f'const int32_t v__vanta_runtime_type = '
-                      f'VANTA_TYPE_ID_{ct.name};')
-        # ``vtable`` is intentionally not emitted: virtual dispatch is carried
-        # by runtime type IDs rather than manually populated function tables.
+
+        # User-defined constructors ensure allocation-time runtime type
+        # initialisation cannot be lost when aggregate braces are not used.
+        self.emit(f'{ct.name}() {{')
+        self.indent += 1
+        for _, (fname, (ftype, _pub)) in enumerate(ct.fields.items()):
+            if fname == '_sig_handle':
+                self.emit(f'v__sig_handle = vanta::signal_instance_new();')
+            elif fname == '_vanta_runtime_type':
+                self.emit(f'v__vanta_runtime_type = '
+                          f'VANTA_TYPE_ID_{ct.name};')
+            else:
+                self.emit('v_' + fname + ' = {};')
+        self.indent -= 1
+        self.emit('}')
+        if ct.fields:
+            params = ', '.join(
+                f'{self._ctype(ftype)} p{i}'
+                for i, (_, (ftype, _pub)) in enumerate(ct.fields.items()))
+            self.emit(f'{ct.name}({params}) {{')
+            self.indent += 1
+            for i, (fname, (ftype, _pub)) in enumerate(ct.fields.items()):
+                if fname == '_sig_handle':
+                    self.emit(f'v__sig_handle = vanta::signal_instance_new();')
+                elif fname == '_vanta_runtime_type':
+                    self.emit(f'v__vanta_runtime_type = '
+                              f'VANTA_TYPE_ID_{ct.name};')
+                else:
+                    self.emit(f'v_{fname} = p{i};')
+            self.indent -= 1
+            self.emit('}')
         self.indent -= 1
         self.emit('};')
         self.emit('')
