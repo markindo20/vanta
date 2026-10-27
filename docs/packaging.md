@@ -76,8 +76,8 @@ directory or rerun with the renamed dependency before checking its output.
 dependency. `pm add` fills the commit from the fetched repository head, but
 `pm lock` itself regenerates entries from the manifest without fetching, so
 new lock rows start with an empty commit. Install uses source, tag, or ref
-from the manifest; the recorded commit is metadata and is not currently used to
-replay an exact historical revision.
+from the manifest; if the corresponding lock entry has a commit, that commit
+is checked out exactly instead of letting a mutable tag or branch move.
 
 ## Unsupported and incomplete features
 

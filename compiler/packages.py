@@ -348,6 +348,20 @@ def _read_transitive_deps(dest_path):
     return read_toml(p).get('dependencies', {}) or {}
 
 
+def _installed_git_commit(path):
+    """Return HEAD for a downloaded git checkout, or an empty string."""
+    git_dir = os.path.join(path, '.git')
+    if not os.path.lexists(git_dir):
+        return ''
+    try:
+        result = subprocess.run(
+            ['git', '-C', path, 'rev-parse', 'HEAD'],
+            check=True, capture_output=True, text=True)
+    except Exception:
+        return ''
+    return result.stdout.strip()
+
+
 # ---------- Commands ----------
 
 def cmd_pm_init(args):
@@ -488,24 +502,48 @@ def cmd_pm_install(args):
             sys.stderr.write(f'error: {exc}\n')
             failures += 1
             continue
+        src = _manifest_dep_source(spec)
+        ref = ''
+        if isinstance(spec, dict):
+            ref = str(spec.get('tag') or spec.get('ref') or '')
+        locked_entry = lock.get('packages', {}).get(name, {}) or {}
+        locked_commit = str(locked_entry.get('commit') or '').strip()
+
+        # Leave a checked-out tree untouched unless lockfile says a different
+        # revision is needed. This makes a clean install reproducible from
+        # .vanta.lock instead of only from the mutable manifest source.
         if os.path.exists(target):
-            print(f'already present: {name}')
-        else:
-            src = _manifest_dep_source(spec)
-            ref = ''
-            if isinstance(spec, dict):
-                ref = str(spec.get('tag') or spec.get('ref') or '')
-            try:
-                if src.startswith('registry:'):
-                    r = fetch_from_registry(name, src[len('registry:'):], dest, name)
-                    commit = r if not isinstance(r, tuple) else (r[0] if r else '')
-                else:
-                    commit = fetch_source(src, dest, name, ref)
-            except RuntimeError as exc:
-                sys.stderr.write(f'error: {exc}\n')
-                failures += 1
+            current_commit = _installed_git_commit(target)
+            if (not src.startswith('registry:')
+                    and locked_commit
+                    and current_commit
+                    and current_commit != locked_commit):
+                _rmtree(target)
+            else:
+                print(f'already present: {name}')
+                dep_manifest = os.path.join(target, MANIFEST)
+                if os.path.exists(dep_manifest):
+                    dep_m = read_toml(dep_manifest)
+                    for dname, dspec in (dep_m.get('dependencies') or {}).items():
+                        manifest.setdefault('dependencies', {}).setdefault(dname, dspec)
+                        if dname not in seen:
+                            pending.append((dname, dspec))
                 continue
-            lock['packages'][name] = {'source': src, 'path': target, 'commit': commit}
+
+        try:
+            if src.startswith('registry:'):
+                r = fetch_from_registry(name, src[len('registry:'):], dest, name)
+                commit = r if not isinstance(r, tuple) else (r[0] if r else '')
+            else:
+                fetch_ref = locked_commit or ref
+                commit = fetch_source(src, dest, name, fetch_ref)
+        except RuntimeError as exc:
+            sys.stderr.write(f'error: {exc}\n')
+            failures += 1
+            continue
+        lock['packages'][name] = {
+            'source': src, 'path': target,
+            'commit': commit or locked_commit}
         dep_manifest = os.path.join(target, MANIFEST)
         if os.path.exists(dep_manifest):
             dep_m = read_toml(dep_manifest)

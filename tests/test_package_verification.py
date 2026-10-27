@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from compiler.packages import (
     MANIFEST, LOCK, VENDOR, _rmtree,
     _read_manifest, read_toml, write_toml,
-    read_lock,
+    read_lock, write_lock,
     cmd_pm, fetch_source,
 )
 
@@ -121,15 +121,33 @@ class PackageVerificationTests(unittest.TestCase):
         _git(repo, 'tag', '-f', 'v1', 'v2')
         new_commit = self._rev_parse(repo, 'v1')
 
-        # Force a fresh resolution so the moved remote tag is actually consulted.
-        # (`pm install` intentionally leaves already-present departments alone.)
+        # With the recorded commit left intact, install must replay that exact
+        # revision even after the mutable tag moves.
         if os.path.isdir(VENDOR):
             _rmtree(VENDOR)
-        # Reinstall should resolve to the new (changed) ref.
+
         rc = cmd_pm(make_args(pm_command='install', dest=None))
         self.assertEqual(rc, 0)
-        self.assertEqual(read_lock()['packages']['tagrepo']['commit'], new_commit)
-        self.assertNotEqual(new_commit, old_commit)
+        self.assertEqual(read_lock()['packages']['tagrepo']['commit'],
+                         old_commit)
+        self.assertEqual(
+            open(os.path.join(VENDOR, 'tagrepo', 'lib.vnt'), encoding='utf-8').read(),
+            'func main() -> void: print_i32(1)\n')
+
+        # Clearing the lock's commit lets the manifest tag resolve anew.
+        locked = read_lock()['packages']['tagrepo']
+        locked['commit'] = ''
+        lock = read_lock()
+        lock['packages']['tagrepo'] = locked
+        write_lock(lock)
+
+        if os.path.isdir(VENDOR):
+            _rmtree(VENDOR)
+
+        rc = cmd_pm(make_args(pm_command='install', dest=None))
+        self.assertEqual(rc, 0)
+        self.assertEqual(read_lock()['packages']['tagrepo']['commit'],
+                         new_commit)
         self.assertEqual(
             open(os.path.join(VENDOR, 'tagrepo', 'lib.vnt'), encoding='utf-8').read(),
             'func main() -> void: print_i32(2)\n')
@@ -244,6 +262,58 @@ class PackageVerificationTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(os.path.exists(os.path.join(VENDOR, 'baddep')))
 
+
+
+    def test_pm_install_uses_recorded_lock_commit(self):
+        repo = os.path.join(self._tmp.name, 'lockedrepo')
+        self._make_git_repo(repo, [
+            ({'vanta.toml': '[package]\nname = "lockdep"\n',
+              'lib.vnt': 'func main() -> void: print_i32(1)\n'}, 'commit 1', 'v1'),
+            ({'vanta.toml': '[package]\nname = "lockdep"\n',
+              'lib.vnt': 'func main() -> void: print_i32(2)\n'}, 'commit 2', 'v2'),
+        ])
+
+        commit_one = self._rev_parse(repo, 'v1')
+
+        cmd_pm(make_args(pm_command='init', name='project'))
+        rc = cmd_pm(make_args(
+            pm_command='add', sources=[self._git_source(repo, 'tag=v1')],
+            name='lockdep'))
+        self.assertEqual(rc, 0)
+        self.assertEqual(read_lock()['packages']['lockdep']['commit'],
+                         commit_one)
+
+        # Republish the movable tag while leaving the recorded commit in place.
+        _git(repo, 'tag', '-f', 'v1', 'v2')
+
+        if os.path.isdir(VENDOR):
+            _rmtree(VENDOR)
+
+        rc = cmd_pm(make_args(pm_command='install', dest=None))
+        self.assertEqual(rc, 0)
+        self.assertEqual(read_lock()['packages']['lockdep']['commit'],
+                         commit_one)
+        self.assertEqual(
+            open(os.path.join(VENDOR, 'lockdep', 'lib.vnt'),
+                 encoding='utf-8').read(),
+            'func main() -> void: print_i32(1)\n')
+
+        locked_entry = read_lock()['packages']['lockdep']
+        locked_entry['commit'] = ''
+
+        lock = read_lock()
+        lock['packages']['lockdep'] = locked_entry
+        write_lock(lock)
+
+        if os.path.isdir(VENDOR):
+            _rmtree(VENDOR)
+
+        rc = cmd_pm(make_args(pm_command='install', dest=None))
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            open(os.path.join(VENDOR, 'lockdep', 'lib.vnt'),
+                 encoding='utf-8').read(),
+            'func main() -> void: print_i32(2)\n')
 
 if __name__ == '__main__':
     unittest.main()
