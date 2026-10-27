@@ -1,0 +1,33 @@
+module math
+
+# Small integer helpers for the common 32-bit case. Wider widths can get
+# dedicated functions if benchmarks show that the conversion overhead matters.
+
+pub func abs_i32(v: i32) -> i32:
+    if v < 0:
+        return -v
+    return v
+
+pub func sign_i32(v: i32) -> i32:
+    if v < 0:
+        return -1
+    if v > 0:
+        return 1
+    return 0
+
+pub func min_i32(a: i32, b: i32) -> i32:
+    if a < b:
+        return a
+    return b
+
+pub func max_i32(a: i32, b: i32) -> i32:
+    if a > b:
+        return a
+    return b
+
+pub func clamp_i32(v: i32, lo: i32, hi: i32) -> i32:
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v

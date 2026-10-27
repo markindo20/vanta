@@ -473,6 +473,9 @@ func main() -> void:
   `std/option.vnt` next to the importing file wins over the installed copy.
   The library is library-shaped: Option and Result are generic enum
   declarations, not compiler-special-cased types.
+- `import "std/math.vnt" as math` provides small integer helpers
+  (`math.abs_i32`, `min_i32`, `max_i32`, `clamp_i32`, and `sign_i32`).
+  They use explicit numeric suffixes rather than implicit overloading.
 
 ### Generic structs (v0.80.0)
 

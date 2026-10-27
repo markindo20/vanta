@@ -2,6 +2,10 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.7.2 - 2026-10-27
+
+- **Standard library:** added `std/math.vnt` with `abs_i32`, `sign_i32`, `min_i32`, `max_i32`, and `clamp_i32`, plus run-tested coverage.
+
 ## v1.7.1 - 2026-10-27
 
 - **CI and cross-drive cache keys:** `_build_cache_key` no longer calls `os.path.relpath` across Windows drive letters; dependency paths are canonicalized through `os.path.realpath` before hashing and in the cache-key normalization.
