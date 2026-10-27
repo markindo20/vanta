@@ -4,7 +4,8 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
 
 ## Unreleased
 
-- **Capturing closures** ... (commit `43bcb6f` on `feat/capturing-closures`):
+- **Deep signal payload types**: class signals now support up to four parameters and mixed types (`i32`, `u32`, `f32`, `f64`, `bool`, `str`, `ptr<T>`); emits use generated, typed dispatch over the instance signal registry.
+
   - Immutable `let` captures by value; `mut` captures shared by durable arena cell.
   - Escaping mutable captures remain valid through function return.
   - Existing non-capturing function pointers remain supported.

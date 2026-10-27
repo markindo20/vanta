@@ -1218,6 +1218,24 @@ There is no string indexing or slicing. Concatenation (`str_concat`), length
 pieces into one string, see
 [String building](#string-building-strbuilder-v0100).
 
+## Signals
+
+A class may declare signals:
+
+```vanta
+class Button:
+    signal clicked(value: i32):
+    count: i32
+
+    func press(self: Button, value: i32) -> void:
+        self.count = value
+        emit clicked(value)
+```
+
+`emit` triggers registered handlers for that instance (`signal_on_instance`), and `signal_off`/`signal_off_str_instance` remove listeners. Payloads can be void, a single `i32`, `str`, `bool`, `ptr<T>`, or multiple types (2–4 items). Pointer payloads are borrowed; the  `signal_on_instance` binding must match the handler signature at compile time.
+
+See README/docs for richer examples.
+
 ## Vector and matrix types
 
 | Expression | Result |
