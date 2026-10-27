@@ -41,10 +41,11 @@ class StdlibMathTests(unittest.TestCase):
             '    print_i32(math.min_i32(3, 7))\n'
             '    print_i32(math.max_i32(3, 7))\n'
             '    print_i32(math.clamp_i32(9, 2, 5))\n'
-            '    print_i32(math.sign_i32(0))\n')
+            '    print_i32(math.sign_i32(0))\n'
+            '    print_f32(math.lerp_f32(3.0, 5.0, 0.25))\n')
         with tempfile.TemporaryDirectory() as root:
             got = self._compile_and_run(root, text)
-            self.assertEqual(got, '4\n3\n7\n5\n0')
+            self.assertEqual(got, '4\n3\n7\n5\n0\n3.500000')
 
     def test_math_helpers_branch_boundaries(self):
         import subprocess

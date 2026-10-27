@@ -473,9 +473,10 @@ func main() -> void:
   `std/option.vnt` next to the importing file wins over the installed copy.
   The library is library-shaped: Option and Result are generic enum
   declarations, not compiler-special-cased types.
-- `import "std/math.vnt" as math` provides small integer helpers
-  (`math.abs_i32`, `min_i32`, `max_i32`, `clamp_i32`, and `sign_i32`).
-  They use explicit numeric suffixes rather than implicit overloading.
+- `import "std/math.vnt" as math` provides small integer and floating-point
+  helpers (`math.abs_i32`, `min_i32`, `max_i32`, `clamp_i32`, `sign_i32`,
+  `abs_f32`, `abs_f64`, `min_f32`, `max_f32`, `clamp_f32`, and
+  `lerp_f32`); float branches use explicit `f32` and `f64` names.
 - `import "std/strings.vnt" as strings` provides helpers over byte-oriented
   strings: `starts_with`, `ends_with`, `contains`, `find`, `substring`,
   `suffix_after`, `prefixed`, and `is_empty`.

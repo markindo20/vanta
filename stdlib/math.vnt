@@ -1,8 +1,5 @@
 module math
 
-# Small integer helpers for the common 32-bit case. Wider widths can get
-# dedicated functions if benchmarks show that the conversion overhead matters.
-
 pub func abs_i32(v: i32) -> i32:
     if v < 0:
         return -v
@@ -31,3 +28,33 @@ pub func clamp_i32(v: i32, lo: i32, hi: i32) -> i32:
     if v > hi:
         return hi
     return v
+
+pub func abs_f32(v: f32) -> f32:
+    if v < 0.0:
+        return -v
+    return v
+
+pub func abs_f64(v: f64) -> f64:
+    if v < 0.0:
+        return -v
+    return v
+
+pub func min_f32(a: f32, b: f32) -> f32:
+    if a < b:
+        return a
+    return b
+
+pub func max_f32(a: f32, b: f32) -> f32:
+    if a > b:
+        return a
+    return b
+
+pub func clamp_f32(v: f32, lo: f32, hi: f32) -> f32:
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+pub func lerp_f32(a: f32, b: f32, t: f32) -> f32:
+    return a + (b - a) * t
