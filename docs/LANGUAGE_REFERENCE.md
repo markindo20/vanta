@@ -2252,3 +2252,10 @@ When C++ compilation fails during `build`, the generated source is saved to
 ## Build cache
 
 `vanta run` caches compiled programs beside the source. The cache key uses `vanta_run` source files, imported dependencies, compiler and runtime files, build options, and `VANTA_PATH`. Cache entries are promoted atomically. Their size and age can be limited with `VANTA_CACHE_MAX_MB` (default 512) and `VANTA_CACHE_MAX_AGE_DAYS` (default 30; use 0 to disable age pruning); at least one valid active entry is retained even if the size limit is exceeded. Use `--no-cache` to disable caching and `--fresh` to rebuild.
+
+## Language server profiling
+
+Set `VANTA_LSP_PROFILE=1` to write compact diagnostic latency records to stderr.
+The existing server remains single-threaded and deterministic. Measured small-file
+diagnostic validation is typically in the sub-millisecond to low-millisecond
+range; re-open batched execution only if documented latency targets are missed.

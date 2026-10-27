@@ -61,35 +61,45 @@ reproducible.
   (`<base>/<name>/<ver>/source.tar.gz`). A bare name `foo` resolves to
   `latest`. Requires `VANTA_REGISTRY` to be set.
 
-## Transitive dependencies
-
-When a dependency is added or installed, `vanta pm` reads that dependency's
-own `vanta.toml` and merges its `[dependencies]` into the root manifest, so
-the full transitive closure is available. During install an already populated
-vendor directory is left in place (`already present`), so `pm install` is not
-enough to move a changed remote tag or branch by itself; remove that
-directory or rerun with the renamed dependency before checking its output.
-
 ## Lockfile and reproducibility
 
-`vanta.lock` records `source`, `path`, and `commit` for each installed
-dependency. `pm add` fills the commit from the fetched repository head, but
-`pm lock` itself regenerates entries from the manifest without fetching, so
-new lock rows start with an empty commit. Install uses source, tag, or ref
-from the manifest; if the corresponding lock entry has a commit, that commit
-is checked out exactly instead of letting a mutable tag or branch move.
+`vanta.lock` records `source`, `path`, `commit`, and `sha256` for each
+installed dependency. `source` is the manifest-level identity, including a
+Git ref as `...#tag=...` or `...#ref=...`; `commit` is the locked revision for
+Git checkout; `sha256` is a deterministic digest of the whole vendored package
+tree.
+
+Install behavior:
+- If an installed package has a recorded commit and its Git `HEAD` differs,
+  install removes and re-fetches that package at the locked commit.
+- If `sha256` is present and the vendored tree differs, `pm check` fails and
+  install reports a checksum mismatch.
+- If the manifest endpoint, Git tag, or ref changes while the lockfile still
+  points at the old source, install rejects it as source drift rather than
+  silently producing a different package.
+- An already-present vendor directory is left untouched when no commit or
+  checksum migration is required.
+- `pm check` validates presence, source identity where possible, Git commit,
+  and tree digest.
+- `pm lock` regenerates lock rows. It records an installed HEAD or
+  already-known commit, plus the current vendored-tree digest.
+- A lock row with no `commit` or `sha256` is tolerated for compatibility with
+  older `vanta.lock` files; `pm check` passes and `pm install` records values
+  on the next fetch.
 
 ## Unsupported and incomplete features
 
 - No signed registry; HTTP and local directory registry modes are simple
   tar/archive and file copies under `VANTA_REGISTRY`.
-- No version conflict resolution beyond `setdefault`; the first dependency spec
-  for a name wins when manifests are merged.
+- No automatic conflict resolution beyond `setdefault`; the first dependency
+  spec for a name wins when manifests are merged.
 - Gem-style version ranges and a separate package index format are not
   available; registry dependencies are `name@version`.
 - Git credentials are supplied by the invoking `git` command and environment.
-- Installing does not automatically uninstall removed dependencies' transitive
-  packages; `pm remove` clears only the named targets.
+- `pm remove` clears only the named targets. It does not automatically remove
+  formerly required transitive packages from the root manifest.
+- Converting a manual vendored-tree change back to a clean package requires
+  deleting the directory and rerunning `pm install`.
 
 ## Backward compatibility and deprecation
 
