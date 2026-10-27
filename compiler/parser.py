@@ -27,6 +27,10 @@ class Parser:
         self.tokens = tokens
         self.i = 0
         self.filename = filename
+        # Diagnostics collected by recoverable parser boundaries. parse_program
+        # keeps checking later independent declarations where a safe boundary
+        # can be found; callers should inspect this list.
+        self.errors = []
 
     def peek(self, off=0):
         p = self.i + off
@@ -60,8 +64,23 @@ class Parser:
         while not self.check(TT.EOF):
             if self.check(TT.NEWLINE):
                 self.advance(); continue
-            decls.append(self.parse_top_level())
-        return A.Program(decls)
+            try:
+                decl = self.parse_top_level()
+                decls.append(decl)
+                continue
+            except ParseError as exc:
+                self.errors.append(exc)
+            # Synchronize to a later top-level boundary before resuming.
+            while (not self.check(TT.EOF) and
+                   not self.check(TT.NEWLINE)):
+                self.advance()
+            while self.check(TT.NEWLINE):
+                self.advance()
+        program = A.Program(decls)
+        program.parse_errors = list(self.errors)
+        if self.errors:
+            raise self.errors[0]
+        return program
 
     def parse_top_level(self):
         decorators = []
