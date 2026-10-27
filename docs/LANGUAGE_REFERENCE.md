@@ -476,6 +476,9 @@ func main() -> void:
 - `import "std/math.vnt" as math` provides small integer helpers
   (`math.abs_i32`, `min_i32`, `max_i32`, `clamp_i32`, and `sign_i32`).
   They use explicit numeric suffixes rather than implicit overloading.
+- `import "std/strings.vnt" as strings` provides helpers over byte-oriented
+  strings: `starts_with`, `ends_with`, `contains`, `find`, `substring`,
+  `suffix_after`, `prefixed`, and `is_empty`.
 
 ### Generic structs (v0.80.0)
 

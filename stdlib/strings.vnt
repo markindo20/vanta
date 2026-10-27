@@ -1,0 +1,39 @@
+module strings
+
+# Small text helpers built on Vanta's byte-oriented string primitives.
+# Positions and lengths are byte counts, not Unicode character counts.
+
+pub func is_empty(s: str) -> bool:
+    return str_len(s) == 0
+
+pub func starts_with(s: str, prefix: str) -> bool:
+    return str_starts_with(s, prefix)
+
+pub func ends_with(s: str, suffix: str) -> bool:
+    return str_ends_with(s, suffix)
+
+pub func contains(s: str, needle: str) -> bool:
+    return str_contains(s, needle)
+
+pub func find(s: str, needle: str) -> i32:
+    return str_index_of(s, needle)
+
+pub func substring(s: str, start: i32, length: i32) -> str:
+    if start < 0 or length < 0 or start >= str_len(s):
+        return ""
+    return str_sub(s, start, length)
+
+pub func suffix_after(s: str, separator: str) -> str:
+    let pos = str_index_of(s, separator)
+    if pos < 0:
+        return ""
+    let start = pos + str_len(separator)
+    let total = str_len(s)
+    if start > total:
+        return ""
+    return str_sub(s, start, total - start)
+
+pub func prefixed(s: str, prefix: str) -> str:
+    if str_starts_with(s, prefix):
+        return s
+    return str_concat(prefix, s)
