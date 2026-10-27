@@ -2100,8 +2100,9 @@ Run `main.vnt` and it prints:
 - A `module` declaration must be the first declaration in its file. Module
   names are identifiers and must be unique across the program.
 - A module's declarations are private by default. `pub` exports functions
-  (including `system`/`component`), structs, enums, constants, and `extern`
-  blocks. A private name cannot be imported or reached through an alias.
+  (including `system`/`component`), structs, enums, constants, and
+  `extern` blocks. Inside a struct, a field is private by default and `pub`
+  exports it. A private name cannot be imported or reached through an alias.
 - A public declaration cannot expose a private type in an explicit parameter,
   return, field, payload, or constant type, or through an inferred function or
   constant type. Give the type `pub` as well, or keep the public surface in
@@ -2115,9 +2116,10 @@ Run `main.vnt` and it prints:
   `geo.length_squared(...)`, `geo.Shape.Square(5)`, and `geo.ORIGIN_X` all
   work. An alias must not collide with a top-level declaration in the
   importing file.
-- The path is a string literal resolved **relative to the file containing the
-  import**. There is no search path, no implicit extension, and no package
-  manager — write `import "lib/math.vnt"` in full. Imports are loaded
+- Import paths are resolved relative to the importing file first. For declared
+  modules, dotted names (`math.vector`) also resolve from `VANTA_PATH`
+  directories; missing imports remain a compile error. Additional search
+  directories can be supplied with `VANTA_PATH`.
   transitively, and each file is loaded once no matter how many times it is
   imported. A declared module does not re-export its imports: importing `a.vnt`
   gives `a.vnt`'s public declarations, not the public names `a.vnt` imported.
@@ -2146,8 +2148,11 @@ Run `main.vnt` and it prints:
 original flat-import example. `examples/modules_demo/` is the complete
 module example above, including the legacy flat compatibility path.
 
-There are no nested modules and no package manager: a module is one file on
-disk, imported by path.
+Nested modules are written with dots (`module math.vector`); dots become `__` in the
+generated C++ prefix (`vanta_m_math__vector__`). Duplicate dotted names are rejected.
+The compile-time search path (`VANTA_PATH`) may resolve imports through multiple
+directories, and module-less files still keep the flat, transitive behavior
+for compatibility.
 
 ## Operators
 
