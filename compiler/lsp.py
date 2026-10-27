@@ -2537,6 +2537,9 @@ class Document:
     text: str
     version: Optional[int] = None
     path: Optional[str] = None
+    # Monotonic revision used to decide which diagnostics are still safe to
+    # publish. A newer document update always outranks an older analysis.
+    analysis_revision: int = 0
 
 
 class LanguageServer:
@@ -2545,6 +2548,8 @@ class LanguageServer:
         self.writer = writer
         self.documents: dict[str, Document] = {}
         self.diagnostics_by_doc: dict[str, set[str]] = {}
+        self._validated_revisions: dict[str, int] = {}
+        self._analysis_generation: int = 0
         self.outbox: list[dict] = []
         self.running = True
         self.shutdown_requested = False
@@ -2740,9 +2745,10 @@ class LanguageServer:
             return
         path = uri_to_path(uri)
         if method == 'textDocument/didOpen':
-            self.documents[uri] = Document(
+            self.documents[uri] = doc = Document(
                 uri=uri, text=_strip_bom(td.get('text', '')),
                 version=td.get('version'), path=path)
+            doc.analysis_revision = self._next_revision()
             self._validate(uri)
         elif method == 'textDocument/didChange':
             doc = self.documents.get(uri)
@@ -2778,6 +2784,7 @@ class LanguageServer:
                         + doc.text[end_off:]
                 doc.text = _strip_bom(doc.text)
             doc.version = td.get('version', doc.version)
+            doc.analysis_revision = self._next_revision()
             self._validate(uri)
         elif method == 'textDocument/didSave':
             self._validate(uri)
@@ -2823,20 +2830,37 @@ class LanguageServer:
         if doc is None or doc.path is None:
             return
         path = doc.path
+        analysis_revision = doc.analysis_revision
+        if analysis_revision <= 0:
+            analysis_revision = self._next_revision()
+            doc.analysis_revision = analysis_revision
+        if self._validated_revisions.get(uri) == analysis_revision:
+            return
+
         files = self._diagnostics(path)
+        current = self.documents.get(uri)
+        if current is None or current.analysis_revision != analysis_revision:
+            # A newer edit invalidated this analysis before it completed.
+            return
+
         previous = self.diagnostics_by_doc.get(uri, set())
-        current: set[str] = set()
+        current_keys: set[str] = set()
         for old in previous:
             if old not in files:
                 self._publish(old, [])
         for error_path, diags in files.items():
             self._publish(error_path, diags)
-            current.add(error_path)
-        self.diagnostics_by_doc[uri] = current
+            current_keys.add(error_path)
+        self.diagnostics_by_doc[uri] = current_keys
+        self._validated_revisions[uri] = analysis_revision
 
     def _clear_diagnostics(self, uri: str) -> None:
         for path in self.diagnostics_by_doc.pop(uri, set()):
             self._publish(path, [])
+
+    def _next_revision(self) -> int:
+        self._analysis_generation += 1
+        return self._analysis_generation
 
     def _publish(self, path: str, diagnostics: list[dict]) -> None:
         try:
