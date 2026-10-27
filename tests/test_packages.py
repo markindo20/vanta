@@ -14,12 +14,17 @@ from compiler.packages import (
     MANIFEST, LOCK, VENDOR,
     _read_manifest, read_toml, write_toml,
     read_lock, write_lock,
-    fetch_source, cmd_pm,
+    fetch_source, fetch_from_registry, cmd_pm,
 )
 
 
 def make_args(**kwargs):
     return SimpleNamespace(**kwargs)
+
+
+class _QuietHttpHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
 
 
 class PackagesTests(unittest.TestCase):
@@ -302,6 +307,167 @@ class PackagesTests(unittest.TestCase):
         self.assertEqual(lock['packages']['httpdep']['source'],
                          'registry:httpdep@2.0.0')
         self.assertTrue(os.path.exists(os.path.join(VENDOR, 'httpdep', 'lib.vnt')))
+
+
+    def _make_http_registry_members(self, root, name, ver, members):
+        pkg_dir = os.path.join(root, name, ver)
+        os.makedirs(pkg_dir, exist_ok=True)
+        tar_path = os.path.join(pkg_dir, 'source.tar.gz')
+        with tarfile.open(tar_path, 'w:gz') as tf:
+            for info, data in members:
+                if data is not None:
+                    info.size = len(data)
+                    tf.addfile(info, __import__('io').BytesIO(data))
+                else:
+                    tf.addfile(info)
+        return tar_path
+
+    def _with_http_registry(self, root, fn):
+        handler = functools.partial(_QuietHttpHandler, directory=root)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        old = os.environ.get('VANTA_REGISTRY')
+        os.environ['VANTA_REGISTRY'] = 'http://127.0.0.1:%d' % port
+        try:
+            return fn()
+        finally:
+            if old is None:
+                os.environ.pop('VANTA_REGISTRY', None)
+            else:
+                os.environ['VANTA_REGISTRY'] = old
+            server.shutdown()
+            server.server_close()
+
+    def _assert_archive_rejected(self, members):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        root = os.path.join(self._tmp.name, 'unsafe-registry')
+        self._make_http_registry_members(root, 'evil', '1.0.0', members)
+
+        def fetch():
+            with self.assertRaisesRegex(RuntimeError, 'unsafe'):
+                fetch_from_registry('evil', '1.0.0', VENDOR)
+
+        self._with_http_registry(root, fetch)
+
+    def test_registry_tar_rejects_parent_traversal(self):
+        self._assert_archive_rejected([
+            (tarfile.TarInfo('../escaped.txt'), b'owned'),
+        ])
+        self.assertFalse(os.path.exists(os.path.join(VENDOR, 'escaped.txt')))
+
+    def test_registry_tar_rejects_nested_parent_traversal(self):
+        self._assert_archive_rejected([
+            (tarfile.TarInfo('pkg/../../escaped.txt'), b'owned'),
+        ])
+        self.assertFalse(os.path.exists(os.path.join(VENDOR, 'escaped.txt')))
+        self.assertFalse(os.path.exists(
+            os.path.join(self._tmp.name, 'escaped.txt')))
+
+    def test_registry_tar_rejects_absolute_path(self):
+        escaped = os.path.join(self._tmp.name, 'absolute-escaped.txt')
+        self._assert_archive_rejected([
+            (tarfile.TarInfo(escaped.replace('\\', '/')), b'owned'),
+        ])
+        self.assertFalse(os.path.exists(escaped))
+
+    def test_registry_tar_rejects_symlink(self):
+        info = tarfile.TarInfo('link')
+        info.type = tarfile.SYMTYPE
+        info.linkname = '../escaped.txt'
+        self._assert_archive_rejected([(info, None)])
+        self.assertFalse(os.path.exists(os.path.join(VENDOR, 'evil', 'link')))
+        self.assertFalse(os.path.exists(os.path.join(VENDOR, 'escaped.txt')))
+
+    def test_registry_tar_rejects_hardlink(self):
+        info = tarfile.TarInfo('link')
+        info.type = tarfile.LNKTYPE
+        info.linkname = '../escaped.txt'
+        self._assert_archive_rejected([(info, None)])
+        self.assertFalse(os.path.exists(os.path.join(VENDOR, 'evil', 'link')))
+
+    def test_registry_tar_extracts_nested_files(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        root = os.path.join(self._tmp.name, 'safe-registry')
+        self._make_http_registry_members(root, 'good', '1.0.0', [
+            (tarfile.TarInfo('pkg/lib.vnt'), b'func main() -> void: pass\n'),
+        ])
+
+        def fetch():
+            return fetch_from_registry('good', '1.0.0', VENDOR)
+
+        self._with_http_registry(root, fetch)
+        self.assertTrue(os.path.exists(
+            os.path.join(VENDOR, 'good', 'pkg', 'lib.vnt')))
+
+    def test_registry_target_cannot_escape_vendor(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        root = os.path.join(self._tmp.name, 'target-registry')
+        self._make_http_registry_members(root, 'dep', '1.0.0', [
+            (tarfile.TarInfo('lib.vnt'), b'func main() -> void: pass\n'),
+        ])
+
+        def fetch():
+            with self.assertRaisesRegex(RuntimeError, 'unsafe'):
+                fetch_from_registry('dep', '1.0.0', VENDOR,
+                                    target_name=os.path.join('..', 'escape'))
+
+        self._with_http_registry(root, fetch)
+        self.assertFalse(os.path.exists(
+            os.path.join(self._tmp.name, 'escape')))
+
+    def test_install_reinstalls_a_registry_dependency(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        base = os.path.join(self._tmp.name, 'registry')
+        self._make_registry(base, 'regdep', '1.0.0', {
+            'vanta.toml': '[package]\nname = "regdep"\nversion = "1.0.0"\n',
+            'lib.vnt': 'func main() -> void: print_i32(7)\n',
+        })
+        old = os.environ.get('VANTA_REGISTRY')
+        os.environ['VANTA_REGISTRY'] = base
+        try:
+            rc = cmd_pm(make_args(pm_command='add',
+                                  sources=['regdep@1.0.0'], names=[]))
+            self.assertEqual(rc, 0)
+            shutil_rmtree_vendor()
+            rc = cmd_pm(make_args(pm_command='install'))
+        finally:
+            if old is None:
+                os.environ.pop('VANTA_REGISTRY', None)
+            else:
+                os.environ['VANTA_REGISTRY'] = old
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(os.path.join(VENDOR, 'regdep', 'lib.vnt')))
+
+    def test_install_fetches_transitive_registry_dependency(self):
+        cmd_pm(make_args(pm_command='init', name='p'))
+        base = os.path.join(self._tmp.name, 'registry')
+        self._make_registry(base, 'child', '1.0.0', {
+            'vanta.toml': '[package]\nname = "child"\nversion = "1.0.0"\n',
+            'lib.vnt': 'func main() -> void: print_i32(2)\n',
+        })
+        self._make_registry(base, 'parent', '1.0.0', {
+            'vanta.toml': '[package]\nname = "parent"\nversion = "1.0.0"\n'
+                          '[dependencies]\nchild = { registry = "1.0.0" }\n',
+            'lib.vnt': 'func main() -> void: print_i32(1)\n',
+        })
+        manifest = _read_manifest()
+        manifest['dependencies'] = {'parent': {'registry': '1.0.0'}}
+        write_toml(MANIFEST, manifest)
+        old = os.environ.get('VANTA_REGISTRY')
+        os.environ['VANTA_REGISTRY'] = base
+        try:
+            rc = cmd_pm(make_args(pm_command='install'))
+        finally:
+            if old is None:
+                os.environ.pop('VANTA_REGISTRY', None)
+            else:
+                os.environ['VANTA_REGISTRY'] = old
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(os.path.join(VENDOR, 'parent', 'lib.vnt')))
+        self.assertTrue(os.path.exists(os.path.join(VENDOR, 'child', 'lib.vnt')))
+        self.assertIn('child', _read_manifest()['dependencies'])
 
 
 def io_capture(fn):

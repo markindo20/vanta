@@ -140,9 +140,75 @@ def _is_url(s):
     return s.startswith('http://') or s.startswith('https://') or s.startswith('git@') or s.startswith('git:')
 
 
+def _safe_target(dest, name):
+    """Resolve *name* under *dest*, refusing anything that escapes it.
+
+    Package names and archive members are untrusted input: a name such as
+    ``../evil`` or an absolute path must never be able to write outside the
+    vendor directory or the extraction root.
+    """
+    base = os.path.realpath(os.path.abspath(dest))
+    target = os.path.realpath(os.path.abspath(os.path.join(dest, name)))
+    try:
+        inside = os.path.commonpath([base, target]) == base
+    except ValueError:
+        inside = False
+    if not inside or target == base:
+        raise RuntimeError(f'unsafe package path {name!r}')
+    return target
+
+
+def _safe_extract_tar(tf, target):
+    """Extract *tf* into *target* without following hostile entries.
+
+    ``tarfile.extractall`` trusts member names and link targets.  Python 3.12
+    added ``filter='data'``, but Vanta supports Python 3.10+, so validate each
+    member ourselves.  Only regular files and directories are accepted;
+    absolute paths, drive-qualified paths, ``..`` components, symlinks, and
+    hardlinks are rejected before anything is written.
+    """
+    base = os.path.realpath(os.path.abspath(target))
+    os.makedirs(base, exist_ok=True)
+    for member in tf.getmembers():
+        raw = member.name.replace('\\', '/')
+        if (raw.startswith('/') or raw.startswith('//')
+                or re.match(r'^[A-Za-z]:', raw)):
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: absolute path')
+        parts = [part for part in raw.split('/') if part not in ('', '.')]
+        if '..' in parts:
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: parent traversal')
+        if member.issym() or member.islnk():
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: links are not allowed')
+        if not (member.isfile() or member.isdir()):
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: unsupported entry type')
+        if not parts:
+            if member.isdir():
+                continue
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: empty path')
+        destination = os.path.join(base, *parts)
+        if not _safe_target(base, os.path.join(*parts)):
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: escapes extraction root')
+        if member.isdir():
+            os.makedirs(destination, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        source = tf.extractfile(member)
+        if source is None:
+            raise RuntimeError(
+                f'unsafe archive member {member.name!r}: missing contents')
+        with source, open(destination, 'wb') as out:
+            shutil.copyfileobj(source, out)
+
+
 def fetch_source(source, dest, name):
     os.makedirs(dest, exist_ok=True)
-    target = os.path.join(dest, name)
+    target = _safe_target(dest, name)
     if os.path.exists(target):
         shutil.rmtree(target, ignore_errors=True)
     if os.path.exists(source) and os.path.isdir(source):
@@ -164,10 +230,14 @@ def fetch_source(source, dest, name):
     raise RuntimeError(f'source not found or not a URL/path: {source}')
 
 
+
 def _manifest_dep_source(spec):
     if isinstance(spec, str):
         return spec
     if isinstance(spec, dict):
+        if 'registry' in spec:
+            version = spec.get('registry')
+            return 'registry:' + str(version or 'latest')
         if 'git' in spec:
             return spec['git']
         if 'path' in spec:
@@ -189,23 +259,24 @@ def fetch_from_registry(name, version_spec, dest, target_name=None):
     if base.startswith('http://') or base.startswith('https://'):
         try:
             url = base.rstrip('/') + '/' + name + '/' + (version_spec or 'latest') + '/source.tar.gz'
-            target = os.path.join(dest, target_name)
-            os.makedirs(target, exist_ok=True)
+            target = _safe_target(dest, target_name)
             data = urllib.request.urlopen(url).read()
             tf = tarfile.open(fileobj=__import__('io').BytesIO(data), mode='r:gz')
             shutil.rmtree(target, ignore_errors=True)
             os.makedirs(target)
-            tf.extractall(target)
+            _safe_extract_tar(tf, target)
             return ''
         except Exception as exc:
+            if isinstance(exc, RuntimeError) and 'unsafe ' in str(exc):
+                raise
             raise RuntimeError(f'registry fetch failed for {name}: {exc}')
-    cand = os.path.join(base, name, version_spec or '')
+    cand = _safe_target(base, os.path.join(name, version_spec or ''))
     if os.path.isdir(cand):
         return fetch_source(cand, dest, target_name)
     reg_tmp = os.path.join(dest, '.regbase_tmp')
     try:
         fetch_source(base, dest, '.regbase_tmp')
-        cand2 = os.path.join(reg_tmp, name, version_spec or '')
+        cand2 = _safe_target(reg_tmp, os.path.join(name, version_spec or ''))
         if os.path.isdir(cand2):
             r = fetch_source(cand2, dest, target_name)
             shutil.rmtree(reg_tmp, ignore_errors=True)
@@ -307,19 +378,25 @@ def cmd_pm_remove(args):
     deps = manifest.get('dependencies', {}) or {}
     lock = read_lock()
     lock.setdefault('packages', {})
+    rc = 0
     for name in names:
+        try:
+            target = _safe_target(VENDOR, name)
+        except RuntimeError as exc:
+            sys.stderr.write(f'error: {exc}\n')
+            rc = 1
+            continue
         if name in deps:
             del deps[name]
         if name in lock.get('packages', {}):
             del lock['packages'][name]
-        target = os.path.join(VENDOR, name)
         if os.path.exists(target):
             shutil.rmtree(target, ignore_errors=True)
         print(f'removed {name}')
     manifest['dependencies'] = deps
     write_toml(MANIFEST, manifest)
     write_lock(lock)
-    return 0
+    return rc
 
 
 def cmd_pm_list(args):
@@ -344,29 +421,41 @@ def cmd_pm_install(args):
     lock = read_lock()
     lock.setdefault('packages', {})
     failures = 0
-    for name, spec in list(deps.items()):
-        target = os.path.join(dest, name)
-        if os.path.exists(target):
-            print(f'already present: {name}')
+    pending = list(deps.items())
+    seen = set()
+    while pending:
+        name, spec = pending.pop(0)
+        if name in seen:
             continue
-        src = _manifest_dep_source(spec)
+        seen.add(name)
         try:
-            if src.startswith('registry:'):
-                r = fetch_from_registry(name, src[len('registry:'):], dest, name)
-                commit = r if not isinstance(r, tuple) else (r[0] if r else '')
-            else:
-                commit = fetch_source(src, dest, name)
+            target = _safe_target(dest, name)
         except RuntimeError as exc:
             sys.stderr.write(f'error: {exc}\n')
             failures += 1
             continue
-        lock['packages'][name] = {'source': src, 'path': target, 'commit': commit}
+        if os.path.exists(target):
+            print(f'already present: {name}')
+        else:
+            src = _manifest_dep_source(spec)
+            try:
+                if src.startswith('registry:'):
+                    r = fetch_from_registry(name, src[len('registry:'):], dest, name)
+                    commit = r if not isinstance(r, tuple) else (r[0] if r else '')
+                else:
+                    commit = fetch_source(src, dest, name)
+            except RuntimeError as exc:
+                sys.stderr.write(f'error: {exc}\n')
+                failures += 1
+                continue
+            lock['packages'][name] = {'source': src, 'path': target, 'commit': commit}
         dep_manifest = os.path.join(target, MANIFEST)
         if os.path.exists(dep_manifest):
             dep_m = read_toml(dep_manifest)
             for dname, dspec in (dep_m.get('dependencies') or {}).items():
                 manifest.setdefault('dependencies', {}).setdefault(dname, dspec)
-                deps[dname] = dspec
+                if dname not in seen:
+                    pending.append((dname, dspec))
     write_toml(MANIFEST, manifest)
     write_lock(lock)
     print('installed; lockfile ' + LOCK)
