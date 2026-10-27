@@ -8,7 +8,7 @@ with no SDL dependency at all.
 | Module | Provides |
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, and the `Screen` lifecycle: `screen_open`, `screen_ok`, `screen_close` |
-| `input.vnt` | Event accessors: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key` |
+| `input.vnt` | Event accessors: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key`, `ev_key_scancode`, `ev_key_mod`, plus mouse, mouse button, wheel, window, and modifier accessors for the typed SDL-event stream. |
 | `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open`, `pad_ok`, `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | Rectangle drawing: `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image textures: `tex_load`, `tex_ok`, `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw`, `tex_draw_src`, `tex_draw_ex` |

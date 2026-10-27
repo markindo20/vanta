@@ -1,0 +1,39 @@
+import "gamekit/sdl.vnt"
+import "gamekit/input.vnt"
+import "gamekit/gfx.vnt"
+
+func main() -> void:
+    if SDL_Init(SDL_INIT_VIDEO) != 0:
+        print_str("SDL_Init failed")
+        return
+    let screen = screen_open("Vanta event demo", 320, 200)
+    if not screen_ok(screen):
+        print_str("SDL screen failed")
+        SDL_Quit()
+        return
+
+    let arena = Arena(256)
+    let ev = arena.alloc::<i32>(16)
+    mut running = true
+    mut frames = 0
+    mut max_frames = 0
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            if ev_is_quit(ev):
+                running = false
+            elif ev_is_keydown(ev) and ev_key(ev) == KEY_ESCAPE:
+                running = false
+            elif ev_is_window_event(ev) and ev_window_is_close_requested(ev):
+                running = false
+        SDL_SetRenderDrawColor(screen.renderer, 30, 90, 160, 255)
+        SDL_RenderClear(screen.renderer)
+        SDL_RenderPresent(screen.renderer)
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+
+    screen_close(screen)
+    print_fmt("frames {}", frames)

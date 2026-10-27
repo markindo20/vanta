@@ -19,3 +19,107 @@ func ev_is_keyup(ev: ptr<i32>) -> bool:
 func ev_key(ev: ptr<i32>) -> i32:
     # The SDLK_* symbol of a key down/up event.
     return ev[5]
+
+
+# ---------------------------------------------------------------------
+# Low-cost typed accessors for common SDL events (sdl2 2.x)
+#
+# An SDL_Event is still read as raw i32s, but the accessors below expose
+# the meaningful fields without scattering offsets through game code.
+# Unknown or unsupported event types simply report no particular category:
+# polling returns SDL's raw event stream and only the query functions
+# relevant to that event type are meaningful.
+# ---------------------------------------------------------------------
+
+const EV_MOUSEMOTION: i32 = 1024
+const EV_MOUSEBUTTONDOWN: i32 = 1025
+const EV_MOUSEBUTTONUP: i32 = 1026
+const EV_MOUSEWHEEL: i32 = 1027
+
+const EV_WINDOWEVENT: i32 = 512
+const WINDOWEVENT_SHOWN: i32 = 1
+const WINDOWEVENT_HIDDEN: i32 = 2
+const WINDOWEVENT_EXPOSED: i32 = 3
+const WINDOWEVENT_MOVED: i32 = 4
+const WINDOWEVENT_RESIZED: i32 = 5
+const WINDOWEVENT_SIZE_CHANGED: i32 = 6
+const WINDOWEVENT_MINIMIZED: i32 = 7
+const WINDOWEVENT_MAXIMIZED: i32 = 8
+const WINDOWEVENT_RESTORED: i32 = 9
+const WINDOWEVENT_ENTER: i32 = 10
+const WINDOWEVENT_LEAVE: i32 = 11
+const WINDOWEVENT_FOCUS_GAINED: i32 = 12
+const WINDOWEVENT_FOCUS_LOST: i32 = 13
+const WINDOWEVENT_CLOSE: i32 = 14
+
+func ev_is_mousemotion(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_MOUSEMOTION
+
+func ev_is_mousebuttondown(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_MOUSEBUTTONDOWN
+
+func ev_is_mousebuttonup(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_MOUSEBUTTONUP
+
+func ev_is_mousewheel(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_MOUSEWHEEL
+
+func ev_is_window_event(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_WINDOWEVENT
+
+func ev_mouse_x(ev: ptr<i32>) -> i32:
+    return ev[5]
+
+func ev_mouse_y(ev: ptr<i32>) -> i32:
+    return ev[6]
+
+func ev_mouse_rel_x(ev: ptr<i32>) -> i32:
+    return ev[7]
+
+func ev_mouse_rel_y(ev: ptr<i32>) -> i32:
+    return ev[8]
+
+func ev_mouse_button(ev: ptr<i32>) -> i32:
+    return ev[4] % 256
+
+func ev_mouse_button_state(ev: ptr<i32>) -> i32:
+    return (ev[4] / 256) % 256
+
+func ev_mouse_button_clicks(ev: ptr<i32>) -> i32:
+    return (ev[4] / 65536) % 256
+
+func ev_mouse_which(ev: ptr<i32>) -> i32:
+    return ev[3]
+
+func ev_wheel_x(ev: ptr<i32>) -> i32:
+    return ev[4]
+
+func ev_wheel_y(ev: ptr<i32>) -> i32:
+    return ev[5]
+
+func ev_wheel_direction(ev: ptr<i32>) -> i32:
+    return ev[6]
+
+func ev_window_event(ev: ptr<i32>) -> i32:
+    return ev[3]
+
+func ev_window_data1(ev: ptr<i32>) -> i32:
+    return ev[4]
+
+func ev_window_data2(ev: ptr<i32>) -> i32:
+    return ev[5]
+
+func ev_window_is_close_requested(ev: ptr<i32>) -> bool:
+    return ev[0] == EV_WINDOWEVENT and ev[3] == WINDOWEVENT_CLOSE
+
+func ev_key_repeat(ev: ptr<i32>) -> bool:
+    return (ev[3] / 256) % 256 != 0
+
+func ev_key_state(ev: ptr<i32>) -> i32:
+    return ev[3] % 256
+
+func ev_key_scancode(ev: ptr<i32>) -> i32:
+    return ev[4]
+
+func ev_key_mod(ev: ptr<i32>) -> i32:
+    return ev[6]
