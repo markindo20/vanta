@@ -1798,17 +1798,11 @@ def _dependency_files_for_cache(source):
                 seen.add(dependency)
                 files.append(dependency)
     except Exception:
-        base = os.path.dirname(source) or os.getcwd()
-        for dirpath, _dirs, names in os.walk(base):
-            for name in sorted(names):
-                if not name.endswith('.vnt'):
-                    continue
-                path = os.path.normcase(os.path.abspath(
-                    os.path.join(dirpath, name)))
-                if path not in seen:
-                    seen.add(path)
-                    files.append(path)
-    return sorted(files)
+        # Failed imports, cycles, and syntax errors intentionally produce
+        # cache misses without pretending every neighbouring source file
+        # contributed to compilation.
+        return sorted(set(files))
+    return sorted(set(files))
 
 
 def _build_cache_key(source, release, debug, checked,
