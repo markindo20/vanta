@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 
 class Type:
@@ -95,6 +95,7 @@ class ClassType(Type):
     signals: Dict[str, 'FuncType'] = field(default_factory=dict)
     display: Optional[str] = None
     vtable: Optional[str] = None
+    virtual_methods: set = field(default_factory=set)
     # Source file where the class was declared, for per-field visibility.
     decl_file: Optional[str] = None
     @property

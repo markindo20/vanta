@@ -562,6 +562,12 @@ class CodeGen:
                 self.emit(f'using {self.tc.func_types[ft]} = {self._ctype(ft.ret)}(*)({params});')
             self.emit('')
 
+        # Runtime type identifiers for polymorphic class instances.
+        for _ct_i, _ct_name in enumerate(sorted(self.tc.classes)):
+            self.emit(f'inline constexpr int32_t VANTA_TYPE_ID_{_ct_name} = '
+                      f'{_ct_i};')
+        self.emit('')
+
         # Type definitions in dependency order. Source order is enough for
         # non-generic declarations, but a generic instance can be created
         # while resolving a field or signature and may depend on a type
@@ -641,6 +647,23 @@ class CodeGen:
                 self.emit(f'{self._ctype(closure_type)} fn_{func_name}({params});')
             else:
                 self.emit(self._func_sig(fd) + ';')
+        # Forward declarations for virtual dispatch functions.
+        for _owner_name, _ct in self.tc.classes.items():
+            for _m in getattr(_ct, "virtual_methods", ()):
+                _ft = _ct.methods.get(_m)
+                if _ft is None:
+                    continue
+                _args = ", ".join(
+                    f"{self._ctype(ptype)} arg{i}"
+                    for i, (_, ptype) in enumerate(_ft.params[1:]))
+                _param_list = f"{_ct.name}* v_self"
+                if _args:
+                    _param_list += ", " + _args
+                self.emit(
+                    f"{self._ctype(_ft.ret)} "
+                    f"fn_dispatch__{_owner_name}__{_m}({_param_list});")
+        self.emit('')
+
 # Forward declarations for closure make functions (needed by fn_main etc.)
         for closure in getattr(self.tc, 'closures', []):
             st_fwd = self.tc.structs.get(closure.ctx_struct_name)
@@ -671,6 +694,80 @@ class CodeGen:
             self._current_class = self.tc.classes.get(cname) if cname else None
             self._gen_func(fd)
         self._current_class = None
+
+        # Generate typed runtime dispatch functions for virtual methods. Each
+        # function receives the statically known base pointer and selected
+        # class implementation using the object's concrete type identifier.
+        for owner_name, ct in self.tc.classes.items():
+            all_methods = []
+            visited = set()
+            cur = ct
+            while cur is not None and cur.name not in visited:
+                visited.add(cur.name)
+                all_methods.extend(list(cur.methods.keys()))
+                cur = self.tc.classes.get(cur.parent) if cur.parent else None
+            for m in dict.fromkeys(all_methods):
+                if m not in getattr(ct, 'virtual_methods', set()):
+                    continue
+                ft = self.tc.functions.get(f'{ct.name}_{m}')
+                if ft is None:
+                    continue
+                params = ft.params[1:]
+                rest = ', '.join(
+                    f'{self._ctype(ptype)} arg{i}'
+                    for i, (_, ptype) in enumerate(params))
+                sig_rest = ', ' + rest if rest else ''
+                self.emit(
+                    f'{self._ctype(ft.ret)} '
+                    f'fn_dispatch__{ct.name}__{m}({ct.name}* v_self'
+                    + sig_rest.replace('arg{i}', 'arg{i}') + ') {')
+                self.indent += 1
+                if params:
+                    call_args = ', '.join(
+                        [f'$v_self'] + [f'arg{i}' for i in range(len(params))])
+                else:
+                    call_args = 'v_self'
+                # Build a mapping of concrete subclasses that implement m.
+                dispatch_classes = [ct.name]
+                cur = ct
+                to_visit = [ct]
+                visited2 = set(_ for _ in [])
+                while to_visit:
+                    candidate = to_visit.pop()
+                    if candidate.name in visited2:
+                        continue
+                    visited2.add(candidate.name)
+                    for child_candidate in self.tc.classes.values():
+                        if child_candidate.parent == candidate.name and m in child_candidate.methods:
+                            try:
+                                declared, child_ft = (child_candidate,
+                                     child_candidate.methods[m])
+                                # Ensure a true override, not a mismatch.
+                                if ft.ret == child_ft.ret and len(ft.params) == len(child_ft.params):
+                                    dispatch_classes.append(child_candidate.name)
+                                    to_visit.append(child_candidate)
+                            except Exception:
+                                pass
+                self.emit(f'    switch (v_self->v__vanta_runtime_type) {{')
+                for child_name in dispatch_classes[1:]:
+                    dispatch_args = ', '.join(
+                        [f'reinterpret_cast<{child_name}*>(v_self)'] +
+                        [f'arg{i}' for i in range(len(params))])
+                    self.emit(f'        case VANTA_TYPE_ID_{child_name}:')
+                    self.indent += 1
+                    self.emit(f'return fn_{child_name}_{m}({dispatch_args});')
+                    self.indent -= 1
+                self.emit('        default:')
+                self.indent += 1
+                default_args = ', '.join(
+                    ['v_self'] + [f'arg{i}' for i in range(len(params))])
+                self.emit(f'return fn_{ct.name}_{m}({default_args});')
+                self.indent -= 1
+                self.emit('    }')
+                self.indent -= 1
+                self.emit('}')
+                self.emit('')
+
         # Generate __make_closure__N helpers for all capturing lambdas.
         for closure in getattr(self.tc, 'closures', []):
             self._gen_closure_make_function(closure)
@@ -914,8 +1011,15 @@ class CodeGen:
         self.emit(f'struct {ct.name} {{')
         self.indent += 1
         for fname, (ftype, _pub) in ct.fields.items():
-            self.emit(f'{self._ctype(ftype)} v_{fname};')
-        self.emit(f'{ct.name}_vtable* vtable;')
+            if fname == '_vanta_runtime_type':
+                self.emit(f'const int32_t v__vanta_runtime_type = '
+                          f'VANTA_TYPE_ID_{ct.name};')
+            else:
+                self.emit(f'{self._ctype(ftype)} v_{fname};')
+        if '_vanta_runtime_type' not in ct.fields:
+            self.emit(f'const int32_t v__vanta_runtime_type = '
+                      f'VANTA_TYPE_ID_{ct.name};')
+        self.emit(f'{ct.name}_vtable* vtable = nullptr;')
         self.indent -= 1
         self.emit('};')
         self.emit('')
@@ -1707,12 +1811,14 @@ class CodeGen:
                 ct = self.tc.classes[name]
                 _args = []
                 _raw = 0
-                for _fname, (ft, _pub) in ct.fields.items():
+                for _idx, (_fname, (ft, _pub)) in enumerate(ct.fields.items()):
                     if _fname == '_sig_handle':
                         _args.append('vanta::signal_instance_new()')
+                    elif _fname == '_vanta_runtime_type':
+                        _args.append(
+                            'static_cast<int32_t>(VANTA_TYPE_ID_' + ct.name + ')')
                     else:
-                        _args.append(self._init_expr(c.args[_raw], ft))
-                    _raw += 1
+                        _args.append(self._init_expr(c.args[_idx], ft))
                 args = ', '.join(_args)
                 return f'{name}{{{args}}}'
             if name in BUILTIN_FN:
@@ -1759,6 +1865,10 @@ class CodeGen:
                         f'{self._expr(c.args[0])}, {line})')
             ot = getattr(f.obj, 'type', None)
             base = self._expr(f.obj)
+            pointer_receiver = False
+            if isinstance(ot, PtrType) and isinstance(ot.inner, ClassType):
+                pointer_receiver = True
+                ot = ot.inner
             m = f.field
             if isinstance(ot, ClassType):
                 # Resolve the declaring class walking the inheritance chain
@@ -1774,10 +1884,18 @@ class CodeGen:
                 # Methods always take `self` as a pointer (set in type_checker).
                 # Pass address of the receiver.
                 args = ', '.join(self._expr(a) for a in c.args)
-                caster = f'reinterpret_cast<{decl.name}*>'
-                call_self = f'{caster}(&{base})'
-                return (f'fn_{decl.name}_{m}({call_self}, {args})' if args else
-                       f'fn_{decl.name}_{m}({call_self})')
+                if pointer_receiver:
+                    call_self = f'{base}'
+                else:
+                    caster = f'reinterpret_cast<{decl.name}*>'
+                    call_self = f'{caster}(&{base})'
+                is_virtual = (m in getattr(decl, 'virtual_methods', set()))
+                if is_virtual:
+                    target = f'fn_dispatch__{decl.name}__{m}'
+                else:
+                    target = f'fn_{decl.name}_{m}'
+                call_args = ', '.join([call_self] + [self._expr(a) for a in c.args])
+                return (f'{target}({call_args})')
             if isinstance(ot, StructType) and ot.name == 'Arena':
                 if m == 'reset':
                     return f'{base}.reset()'

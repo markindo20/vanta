@@ -2181,7 +2181,23 @@ Precedence, loosest to tightest (verified against the parser):
 Assignment: `=`, and compound `+=`, `-=`, `*=`, `/=`. Integer `/` truncates
 toward zero; `%` is the remainder.
 
-## Diagnostics
+## Virtual dispatch
+
+When a subclass redeclares a method with the same parameter and return
+types, that method becomes virtual. A Base-typed object or a `ptr<Base>`
+pointing to a derived instance will call the method from the actual
+runtime type:
+
+```vanta
+func tick(e: ptr<Entity>) -> i32:
+    return e.update()
+```
+
+Methods that are not redeclared in a subclass remain ordinary static
+methods with no extra call overhead.
+
+Use only one level of method signatures for overriding: an override
+with a different signature is rejected with `invalid override`.
 
 All source-level errors carry `file:line:col`:
 

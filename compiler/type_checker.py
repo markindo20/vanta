@@ -608,6 +608,7 @@ class TypeChecker:
                     try: self._check_class_methods(d)
                     except CheckError as exc:
                         self.errors.append(CheckError(self._display(exc.msg), exc.filename, exc.pos))
+            self._resolve_virtual_methods()
             return
         try:
             for d in self.program.decls:
@@ -630,6 +631,7 @@ class TypeChecker:
             for d in self.program.decls:
                 if isinstance(d, A.ClassDecl):
                     self._check_class_methods(d)
+            self._resolve_virtual_methods()
         except CheckError as exc:
             self._reraise_pretty(exc)
 
@@ -733,6 +735,11 @@ class TypeChecker:
             fields['_sig_handle'] = (I32, False)
             all_fields['_sig_handle'] = fields['_sig_handle']
 
+        # Hidden runtime type identifier for safe virtual dispatch.
+        if '_vanta_runtime_type' not in all_fields:
+            fields['_vanta_runtime_type'] = (I32, False)
+            all_fields['_vanta_runtime_type'] = fields['_vanta_runtime_type']
+
         # register method signatures
         methods = {}
         for fd in d.methods:
@@ -787,6 +794,33 @@ class TypeChecker:
 
     def _check_class_methods(self, d):
         ct = self.classes[d.name]
+        # Parent override validation.
+        if getattr(ct, 'parent', None):
+            parent_ct = self.classes.get(ct.parent)
+            if parent_ct is not None:
+                for fd in d.methods:
+                    _pdecl, pft = self._resolve_class_method(
+                        parent_ct, fd.name)
+                    if pft is not None:
+                        # Same-name methods with a different signature are
+                        # ordinary new methods, not an override of this one.
+                        ft = ct.methods.get(fd.name)
+                        if ft is None:
+                            continue
+                        # Override validation: parameter types and return type must
+                        # match the inherited method, except that self follows its
+                        # class naturally.
+                        if len(ft.params) != len(pft.params) or                            ft.ret != pft.ret:
+                            raise CheckError(
+                                f"invalid override of '{fd.name}': "
+                                "incompatible function type",
+                                self.filename, fd.pos)
+                        for (_, a), (_, b) in zip(ft.params[1:], pft.params[1:]):
+                            if a != b:
+                                raise CheckError(
+                                    f"invalid override of '{fd.name}': "
+                                    "parameter type mismatch",
+                                    self.filename, fd.pos)
         for fd in d.methods:
             qual = f"{ct.name}_{fd.name}"
             sig = self.functions[qual]
@@ -2463,7 +2497,10 @@ class TypeChecker:
                 return self._check_method(ot, f.field, call)
             if isinstance(ot, ClassType):
                 return self._check_class_method(ot, f.field, call)
+            if isinstance(ot, PtrType) and isinstance(ot.inner, ClassType):
+                return self._check_class_method(ot.inner, f.field, call)
             if f.field == 'at':
+
                 if isinstance(ot, PtrType):
                     return self._check_ptr_at(call, ot)
                 if isinstance(ot, (ArrayType, ListType)):
@@ -3360,12 +3397,42 @@ class TypeChecker:
             if '_sig_handle' in missing:
                 missing.discard('_sig_handle')
                 by_name['_sig_handle'] = A.IntLit(0, call.pos)
+            if '_vanta_runtime_type' in missing:
+                missing.discard('_vanta_runtime_type')
+                by_name['_vanta_runtime_type'] = A.IntLit(0, call.pos)
             if missing:
                 raise CheckError("missing fields: " + ", ".join(sorted(missing)), self.filename, call.pos)
         call.args = [by_name[f] for f in ct.fields]
         call.arg_names = None
         call.type = ct
         return ct
+
+    def _resolve_virtual_methods(self):
+        for ct in self.classes.values():
+            ct.virtual_methods = set()
+        for child in self.classes.values():
+            cur = self.classes.get(child.parent) if child.parent else None
+            while cur is not None:
+                for method in child.methods:
+                    decl, _ = self._resolve_class_method(cur, method)
+                    if decl is None:
+                        continue
+                    # Only methods with an identical inherited signature establish
+                    # a virtual override chain. Unmatched signatures remain
+                    # as ordinary methods.
+                    if method in cur.methods:
+                        parent_ft = cur.methods[method]
+                    else:
+                        continue
+                    child_ft = child.methods.get(method)
+                    if child_ft is not None and (
+                            len(child_ft.params) == len(parent_ft.params)
+                            and child_ft.ret == parent_ft.ret
+                            and all(a == b for (_, a), (_, b) in
+                                    zip(child_ft.params[1:], parent_ft.params[1:]))):
+                        cur.virtual_methods.add(method)
+                        child.virtual_methods.add(method)
+                cur = self.classes.get(cur.parent) if cur.parent else None
 
     def _resolve_class_method(self, ct: ClassType, method: str):
         """Resolve a method on ct, walking the parent chain for inheritance.

@@ -338,5 +338,68 @@ class ClassesTests(unittest.TestCase):
             "42")
 
 
+
+    def test_virtual_dispatch_through_base_pointer(self):
+        self.expect(
+            "class Base:\n"
+            "    x: i32\n"
+            "    func get(self: ptr<Base>) -> i32:\n"
+            "        return self.x\n\n"
+            "class Child extends Base:\n"
+            "    y: i32\n"
+            "    func get(self: ptr<Child>) -> i32:\n"
+            "        return self.x + 100\n\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(1024)\n"
+            "    let child = arena.alloc::<Child>(1)\n"
+            "    child.x = 5\n"
+            "    child.y = 9\n"
+            "    let base = ptr_cast::<Base>(child)\n"
+            "    print_i32(base.get())\n",
+            "105")
+
+    def test_virtual_dispatch_multiple_subclasses(self):
+        self.expect(
+            "class Base:\n"
+            "    x: i32\n"
+            "    func score(self: ptr<Base>) -> i32:\n"
+            "        return self.x\n\n"
+            "class Fast extends Base:\n"
+            "    factor: i32\n"
+            "    func score(self: ptr<Fast>) -> i32:\n"
+            "        return self.x * self.factor\n\n"
+            "class Slow extends Base:\n"
+            "    extra: i32\n"
+            "    func score(self: ptr<Slow>) -> i32:\n"
+            "        return self.x + self.extra\n\n"
+            "func report(p: ptr<Base>) -> i32:\n"
+            "    return p.score()\n\n"
+            "func main() -> void:\n"
+            "    let arena = Arena(1024)\n"
+            "    let f = arena.alloc::<Fast>(1)\n"
+            "    f.x = 3\n"
+            "    f.factor = 4\n"
+            "    let s = arena.alloc::<Slow>(1)\n"
+            "    s.x = 3\n"
+            "    s.extra = 10\n"
+            "    print_i32(report(ptr_cast::<Base>(f)))\n"
+            "    print_i32(report(ptr_cast::<Base>(s)))\n",
+            "12\n13")
+
+    def test_invalid_override_rejected(self):
+        self.compile_fail(
+            "class Base:\n"
+            "    x: i32\n"
+            "    func get(self: ptr<Base>) -> i32:\n"
+            "        return self.x\n\n"
+            "class Child extends Base:\n"
+            "    func get(self: ptr<Child>) -> f32:\n"
+            "        return 1.0\n\n"
+            "func main() -> void:\n"
+            "    return\n",
+            "invalid override")
+
+
+
 if __name__ == '__main__':
     unittest.main()

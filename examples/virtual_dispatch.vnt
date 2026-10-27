@@ -1,0 +1,29 @@
+class Entity:
+    id: i32
+    func update(self: ptr<Entity>) -> i32:
+        return self.id
+
+class Player extends Entity:
+    hp: i32
+    func update(self: ptr<Player>) -> i32:
+        return self.id * 10 + self.hp
+
+class Enemy extends Entity:
+    damage: i32
+    func update(self: ptr<Enemy>) -> i32:
+        return self.id * 100 + self.damage
+
+func tick(e: ptr<Entity>) -> i32:
+    return e.update()
+
+func main() -> void:
+    let arena = Arena(2048)
+    let player = arena.alloc::<Player>(1)
+    player.id = 1
+    player.hp = 8
+    let enemy = arena.alloc::<Enemy>(1)
+    enemy.id = 2
+    enemy.damage = 9
+    print_i32(tick(ptr_cast::<Entity>(player)))
+    print_i32(tick(ptr_cast::<Entity>(enemy)))
+    print_i32(tick(ptr_cast::<Entity>(arena.alloc::<Entity>(1))))
