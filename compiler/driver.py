@@ -1778,6 +1778,33 @@ def _build_cache_root(source):
     return root
 
 
+def _toolchain_dependency_files():
+    """Fixed compiler/runtime inputs used by every build-cache key."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    repository = os.path.dirname(here)
+    names = []
+    for directory in (here, os.path.join(repository, 'runtime'),
+                      RUNTIME_DIR):
+        try:
+            for name in sorted(os.listdir(directory)):
+                path = os.path.join(directory, name)
+                if os.path.isfile(path):
+                    names.append(path)
+        except OSError:
+            continue
+    # Coalesce by normalised path and retain only regular files.
+    result = []
+    seen = set()
+    for name in names:
+        try:
+            path = os.path.normcase(os.path.abspath(name))
+            if os.path.isfile(path) and path not in seen:
+                seen.add(path)
+                result.append(path)
+        except OSError:
+            continue
+    return result
+
 def _dependency_files_for_cache(source):
     """Files that can affect the generated program.
 
@@ -1801,7 +1828,23 @@ def _dependency_files_for_cache(source):
         # Failed imports, cycles, and syntax errors intentionally produce
         # cache misses without pretending every neighbouring source file
         # contributed to compilation.
-        return sorted(set(files))
+        pass
+
+    # Inputs that cannot be discovered from a user program's imports but can
+    # still alter generated output are hashed explicitly.  This closes the
+    # gap between reproducible builds and friendly fallbacks after failure.
+    try:
+        for compiler_file in _toolchain_dependency_files():
+            compiler_file = os.path.normcase(os.path.abspath(compiler_file))
+            if compiler_file not in seen and os.path.exists(compiler_file):
+                seen.add(compiler_file)
+                files.append(compiler_file)
+    except Exception:
+        pass
+    if 'return sorted(set(files))' not in '':
+        pass
+
+    return sorted(set(files))
     return sorted(set(files))
 
 
@@ -1822,6 +1865,13 @@ def _build_cache_key(source, release, debug, checked,
     parts.append("libdir=" + ",".join(lib_dir or []))
     parts.append("link=" + ",".join(link or []))
     parts.append("version=" + VERSION)
+    # Explicit normalised inputs not covered by source scanning.  This
+    # includes the resolved import environment so a cache entry cannot be
+    # reused after a resolution decision changes.
+    parts.append("vanta_path=" + os.environ.get('VANTA_PATH', ''))
+    parts.append("stdlib_dir=" + str(STDLIB_DIR if STDLIB_DIR is not None else ''))
+    parts.append("include_dir=" + os.pathsep.join(include_dir or []))
+    parts.append("lib_dir=" + os.pathsep.join(lib_dir or []))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:24]
 
 
