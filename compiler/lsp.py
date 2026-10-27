@@ -2557,6 +2557,18 @@ class LanguageServer:
         self.root_path: Optional[str] = None
         self._workspace_cache: dict[str, tuple] = {}
         self._file_list_cache: dict[str, tuple[float, list[str]]] = {}
+        self._profile_enabled: bool = os.environ.get(
+            'VANTA_LSP_PROFILE', '',) .strip().lower() in {'1', 'true', 'yes'}
+        self._profile_started_at: float = time.perf_counter()
+
+    def _lsp_profile(self, phase: str, uri: str, elapsed: float,
+                      revision: int, detail: str = '') -> None:
+        if not self._profile_enabled:
+            return
+        sys.stderr.write(
+            f'vanta lsp profile: phase={phase} uri={uri!r} rev={revision} '
+            f'elapsed_ms={elapsed * 1000:.2f}{(" " + detail) if detail else ""}\n')
+        sys.stderr.flush()
 
     # -- protocol ----------------------------------------------------------
 
@@ -2831,16 +2843,23 @@ class LanguageServer:
             return
         path = doc.path
         analysis_revision = doc.analysis_revision
+        started_at = time.perf_counter()
         if analysis_revision <= 0:
             analysis_revision = self._next_revision()
             doc.analysis_revision = analysis_revision
         if self._validated_revisions.get(uri) == analysis_revision:
+            self._lsp_profile('validation cache hit', uri,
+                             time.perf_counter() - started_at, analysis_revision)
             return
 
+        diagnostic_started_at = time.perf_counter()
         files = self._diagnostics(path)
+        diagnostic_elapsed = time.perf_counter() - diagnostic_started_at
         current = self.documents.get(uri)
         if current is None or current.analysis_revision != analysis_revision:
             # A newer edit invalidated this analysis before it completed.
+            self._lsp_profile('stale diagnostic', uri, diagnostic_elapsed,
+                             analysis_revision, 'discard=true')
             return
 
         previous = self.diagnostics_by_doc.get(uri, set())
@@ -2853,6 +2872,9 @@ class LanguageServer:
             current_keys.add(error_path)
         self.diagnostics_by_doc[uri] = current_keys
         self._validated_revisions[uri] = analysis_revision
+        self._lsp_profile('diagnostics', uri, diagnostic_elapsed,
+                          analysis_revision,
+                          f'files={len(files)} published={len(current_keys)}')
 
     def _clear_diagnostics(self, uri: str) -> None:
         for path in self.diagnostics_by_doc.pop(uri, set()):
