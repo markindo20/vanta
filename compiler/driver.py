@@ -1474,8 +1474,11 @@ def cmd_run(args):
             os.makedirs(_cdir, exist_ok=True)
             _cache_exe = os.path.join(_cdir,
                                       'prog.exe' if os.name == 'nt' else 'prog')
-            shutil.copyfile(exe, _cache_exe)
-        except OSError:
+            # Promote the executable atomically so interrupted writes cannot
+            # leave a partial (and pickable) cache entry behind.
+            if _promote_cached_executable(_cache_exe, exe):
+                _prune_build_cache_root(source)
+        except (OSError, IOError):
             pass
     shutil.rmtree(tmpdir, ignore_errors=True)
     return run.returncode
@@ -1765,6 +1768,114 @@ def _source_digest(paths):
         h.update(b'\x00')
         h.update(data)
     return h.hexdigest()
+
+
+def _promote_cached_executable(target: str, source: str) -> bool:
+    """Copy *source* into *target* atomically.
+
+    The scratch file receives the executable first, and only once it has
+    been fully flushed is it exposed through ``os.replace``. This allows the
+    cache to survive interrupted builds and concurrent promotion attempts.
+    """
+    directory = os.path.dirname(target) or '.'
+    os.makedirs(directory, exist_ok=True)
+    fd, scratch = tempfile.mkstemp(prefix='.__vanta_cache_', dir=directory)
+    try:
+        with os.fdopen(fd, 'wb') as out:
+            with open(source, 'rb') as inp:
+                shutil.copyfileobj(inp, out)
+            out.flush()
+            if os.name == 'nt':
+                pass
+            os.fsync(out.fileno())
+        try:
+            os.replace(scratch, target)
+        except PermissionError:
+            # On some Windows configurations replacing an in-use executable
+            # is not possible. Fall back to a best-effort direct copy rather
+            # than treating build success as a cache failure.
+            shutil.copyfile(scratch, target)
+    except Exception:
+        try:
+            os.unlink(scratch)
+        except OSError:
+            pass
+        return False
+    try:
+        os.unlink(scratch)
+    except OSError:
+        pass
+    return True
+
+
+def _prune_build_cache_root(root_source: str) -> None:
+    """Apply a conservative, best-effort cache retention policy.
+
+    Two environment variables govern policy:
+
+    * ``VANTA_CACHE_MAX_MB`` (default 512)
+    * ``VANTA_CACHE_MAX_AGE_DAYS`` (default 30, zero means disabled)
+
+    Pruning failures never affect a successful build.
+    """
+    try:
+        root = _build_cache_root(root_source)
+    except Exception:
+        return
+    try:
+        max_mb = os.environ.get('VANTA_CACHE_MAX_MB', '512')
+        max_bytes = int(max_mb) * 1024 * 1024
+    except (ValueError, TypeError):
+        max_bytes = 0
+    try:
+        max_age = int(os.environ.get('VANTA_CACHE_MAX_AGE_DAYS', '30'))
+    except (ValueError, TypeError):
+        max_age = 0
+
+    now = time.time()
+    entries = []
+    try:
+        for child in os.scandir(root):
+            if not child.is_dir(follow_symlinks=False):
+                continue
+            exe_path = os.path.join(child.path,
+                                    'prog.exe' if os.name == 'nt' else 'prog')
+            try:
+                if not os.path.isfile(exe_path):
+                    continue
+                stat_info = child.stat(follow_symlinks=False)
+                entries.append((stat_info.st_mtime, child.path))
+            except OSError:
+                continue
+    except FileNotFoundError:
+        return
+
+    if max_age > 0:
+        oldest_allowed = now - max_age * 24 * 60 * 60
+        for mtime, path in entries[:]:
+            if mtime < oldest_allowed:
+                entries.remove((mtime, path))
+                shutil.rmtree(path, ignore_errors=True)
+
+    if max_bytes <= 0:
+        return
+    entries.sort(key=lambda item: item[0])
+    total = 0
+    for mtime, path in entries:
+        try:
+            total += os.path.getsize(os.path.join(
+                path, 'prog.exe' if os.name == 'nt' else 'prog'))
+        except OSError:
+            pass
+    while entries and total > max_bytes:
+        mtime, path = entries.pop(0)
+        try:
+            size = os.path.getsize(os.path.join(
+                path, 'prog.exe' if os.name == 'nt' else 'prog'))
+            total -= size
+        except OSError:
+            size = 0
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _build_cache_root(source):

@@ -2213,3 +2213,7 @@ prevent meaningful analysis and stop at the first error. Independent
 diagnostics are stable in source order.
 When C++ compilation fails during `build`, the generated source is saved to
 `build/vanta_failed.cpp`.
+
+## Build cache
+
+`vanta run` caches compiled programs beside the source. The cache key uses `vanta_run` source files, imported dependencies, compiler and runtime files, build options, and `VANTA_PATH`. Cache entries are promoted atomically. Their size and age can be limited with `VANTA_CACHE_MAX_MB` (default 512) and `VANTA_CACHE_MAX_AGE_DAYS` (default 30; use 0 to disable age pruning). Use `--no-cache` to disable caching and `--fresh` to rebuild.
