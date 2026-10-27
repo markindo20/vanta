@@ -2,6 +2,20 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.7.3 - 2026-10-27
+
+- **Package reproducibility:** `vanta.lock` now records dependency `sha256`
+  digests. `pm install` replays commits, rejects source drift, and reports
+  checksum mismatches. `pm check` validates vendor trees and exact-source
+  changes.
+- **Standard library:** added `std/strings.vnt`, with `starts_with`,
+  `ends_with`, `contains`, `find`, `substring`, `suffix_after`,
+  `prefixed`, and `is_empty`.
+- **LSP diagnostics:** added opt-in `VANTA_LSP_PROFILE=1` latency profiling
+  for validation and completion.
+- **Documentation:** documented package lock fields, SDL event ABI
+  assumptions, LSP profiling, and stdlib helpers.
+
 ## v1.7.2 - 2026-10-27
 
 - **Standard library:** added `std/math.vnt` with `abs_i32`, `sign_i32`, `min_i32`, `max_i32`, and `clamp_i32`, plus run-tested coverage.
