@@ -128,6 +128,19 @@ class TypeCheckerTests(unittest.TestCase):
         with self.assertRaises(CheckError):
             run("func g() -> i32:\n    return 1\nconst X = g()\n")
 
+    def test_const_cannot_use_a_mutable_global(self):
+        with self.assertRaises(CheckError):
+            run("mut counter: i32 = 0\nconst X = counter\n")
+
+    def test_const_cannot_use_an_immutable_global(self):
+        with self.assertRaises(CheckError):
+            run("let base: i32 = 0\nconst X = base\n")
+
+    def test_const_can_use_an_earlier_constant(self):
+        from compiler.typesys import I32
+        prog, tc = run("const BASE = 2\nconst DOUBLE = BASE * 2\n")
+        self.assertEqual(tc.constants['DOUBLE'], I32)
+
     def test_return_inference_i32(self):
         from compiler.typesys import I32
         prog, tc = run("func add(a: i32, b: i32):\n    return a + b\n")

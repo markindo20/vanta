@@ -268,6 +268,8 @@ class TypeChecker:
         bf("signal_on_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
         bf("signal_on_str_instance", [("instance", I32), ("name", STR), ("handler", _handler_str_type)], VOID)
         bf("signal_on_once_instance", [("instance", I32), ("name", STR), ("handler", _handler_type)], VOID)
+        bf("signal_off_instance", [("instance", I32), ("name", STR)], VOID)
+        bf("signal_off_str_instance", [("instance", I32), ("name", STR)], VOID)
         _handler_void_type = FuncType((), VOID)
         bf("signal_emit_void_instance", [("instance", I32), ("name", STR)], VOID)
         bf("signal_on_void_instance", [("instance", I32), ("name", STR), ("handler", _handler_void_type)], VOID)
@@ -889,6 +891,10 @@ class TypeChecker:
             raise CheckError(f"constant '{c.name}' collides with function", self.filename, c.pos)
         declared = self._resolve_type(c.type_ann) if c.type_ann is not None else None
         vt = self._check_expr(c.value, declared)
+        # A function value is never a compile-time constant. Report that
+        # specifically instead of the generic constexpr diagnostic.
+        if _contains_func_type(vt):
+            raise CheckError("constant cannot hold a function value", self.filename, c.pos)
         if not self._is_constexpr(c.value):
             raise CheckError(
                 f"constant initializer must be a compile-time expression",
@@ -900,8 +906,6 @@ class TypeChecker:
             vt = self._default_type(vt, c.value)
         if vt is VOID:
             raise CheckError("constant cannot be void", self.filename, c.pos)
-        if _contains_func_type(vt):
-            raise CheckError("constant cannot hold a function value", self.filename, c.pos)
         self.constants[c.name] = vt
 
     def _register_global(self, g):
@@ -967,7 +971,10 @@ class TypeChecker:
         if isinstance(expr, (A.IntLit, A.FloatLit, A.BoolLit, A.StringLit)):
             return True
         if isinstance(expr, A.Name):
-            return True
+            # Globals live in the state segment and are initialized at run
+            # time, so neither `let` nor `mut` globals are compile-time
+            # values. Only previously declared constants are.
+            return expr.name in self.constants
         if isinstance(expr, A.BinOp):
             return self._is_constexpr(expr.left) and self._is_constexpr(expr.right)
         if isinstance(expr, A.UnaryOp):
@@ -1677,6 +1684,40 @@ class TypeChecker:
             return True
         return False
 
+    def _expected_signal_handler(self, builtin_name, call):
+        """The handler signature a registration must supply, if knowable.
+
+        Instance registrations name a signal by string, so when the first
+        argument is a class's ``_sig_handle`` the declaration is available and
+        its payload is authoritative.  Otherwise fall back to the builtin's
+        own signature for the fixed-arity registration helpers.
+        """
+        if len(call.args) >= 3 and isinstance(call.args[1], A.StringLit):
+            handle = call.args[0]
+            if isinstance(handle, A.Member) and handle.field == '_sig_handle':
+                receiver = self._check_expr(handle.obj)
+                if isinstance(receiver, ClassType):
+                    declared = getattr(receiver, 'signals', {}).get(
+                        call.args[1].value)
+                    if declared is not None:
+                        return (f"signal '{call.args[1].value}'",
+                                FuncType(tuple(pt for _, pt in
+                                               list(declared.params)[1:]), VOID))
+        if builtin_name in ('signal_on', 'signal_on_str', 'signal_on_once'):
+            sig = self.functions[builtin_name]
+            return (repr(builtin_name), sig.params[-1][1])
+        fixed = {
+            'signal_on_str_instance': FuncType((STR,), VOID),
+            'signal_on_void_instance': FuncType((), VOID),
+            'signal_on_instance_i32_2': FuncType((I32, I32), VOID),
+            'signal_on_instance_i32_3': FuncType((I32, I32, I32), VOID),
+            'signal_on_instance_i32_4': FuncType((I32, I32, I32, I32), VOID),
+        }
+        expected = fixed.get(builtin_name)
+        if expected is None:
+            return None
+        return (repr(builtin_name), expected)
+
     def _check_emit(self, stmt: A.EmitStmt):
         # Must be inside a class method to have access to self._sig_handle
         if not self._current_class:
@@ -2279,6 +2320,14 @@ class TypeChecker:
                             raise CheckError(
                                 "signal handlers must be functions returning void",
                                 self.filename, call.pos)
+                        expected = self._expected_signal_handler(name, call)
+                        if expected is not None:
+                            label, expected_ft = expected
+                            if at != expected_ft:
+                                raise CheckError(
+                                    f"handler for {label} must be "
+                                    f"{expected_ft!r}, got {at!r}",
+                                    self.filename, call.pos)
                     else:
                         self._coerce_value(arg, at, ptype, call.pos, "argument")
                 call.type = sig.ret

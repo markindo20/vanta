@@ -189,6 +189,24 @@ class ClassesTests(unittest.TestCase):
             "    print_i32(seen)\n",
             "99")
 
+    def test_instance_signal_can_be_unregistered(self):
+        self.expect(
+            "mut seen: i32 = 0\n"
+            "func handler(value: i32) -> void:\n"
+            "    seen = value\n"
+            "class Button:\n"
+            "    signal clicked(value: i32):\n"
+            "    count: i32\n\n"
+            "    func press(self: Button, value: i32) -> void:\n"
+            "        emit clicked(value)\n\n"
+            "func main() -> void:\n"
+            "    mut b = Button(count: 0)\n"
+            "    signal_on_instance(b._sig_handle, \"clicked\", handler)\n"
+            "    signal_off_instance(b._sig_handle, \"clicked\")\n"
+            "    b.press(42)\n"
+            "    print_i32(seen)\n",
+            "0")
+
     def test_signal_bool_payload(self):
         self.expect(
             "mut seen: i32 = 0\n"
@@ -245,6 +263,58 @@ class ClassesTests(unittest.TestCase):
             "    m.fire(cell, 1, true)\n"
             "    print_i32(seen)\n",
             "99")
+
+    def test_signal_handler_payload_type_mismatch_is_rejected(self):
+        self.compile_fail(
+            "func handler(ok: f32) -> void:\n"
+            "    return\n"
+            "class T:\n"
+            "    signal toggled(ok: bool):\n"
+            "    count: i32\n\n"
+            "func main() -> void:\n"
+            "    mut t = T(count: 0)\n"
+            "    signal_on_instance(t._sig_handle, \"toggled\", handler)\n",
+            "handler for signal 'toggled' must be func(bool)")
+
+    def test_signal_handler_arity_mismatch_is_rejected(self):
+        self.compile_fail(
+            "func handler(value: i32) -> void:\n"
+            "    return\n"
+            "class T:\n"
+            "    signal changed(a: i32, b: i32):\n"
+            "    count: i32\n\n"
+            "func main() -> void:\n"
+            "    mut t = T(count: 0)\n"
+            "    signal_on_instance(t._sig_handle, \"changed\", handler)\n",
+            "handler for signal 'changed' must be func(i32, i32)")
+
+    def test_signal_handler_return_type_is_rejected(self):
+        self.compile_fail(
+            "func handler(value: i32) -> i32:\n"
+            "    return value\n"
+            "class T:\n"
+            "    signal changed(value: i32):\n"
+            "    count: i32\n\n"
+            "func main() -> void:\n"
+            "    mut t = T(count: 0)\n"
+            "    signal_on_instance(t._sig_handle, \"changed\", handler)\n",
+            "signal handlers must be functions returning void")
+
+    def test_global_signal_handler_signature_is_rejected(self):
+        self.compile_fail(
+            "func handler(ok: bool) -> void:\n"
+            "    return\n"
+            "func main() -> void:\n"
+            "    signal_on(\"tick\", handler)\n",
+            "handler for 'signal_on' must be func(i32)")
+
+    def test_str_signal_handler_signature_is_rejected(self):
+        self.compile_fail(
+            "func handler(value: i32) -> void:\n"
+            "    return\n"
+            "func main() -> void:\n"
+            "    signal_on_str(\"name\", handler)\n",
+            "handler for 'signal_on_str' must be func(str)")
 
     def test_export_function(self):
         self.expect(

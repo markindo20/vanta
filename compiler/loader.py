@@ -282,6 +282,7 @@ class _Resolver:
         self.modules = modules
         self.display_names = {}
         self.legacy_global = {}
+        self._prefixes = {}     # mangled prefix -> (declared name, display name)
 
     def resolve(self):
         self._collect_symbols()
@@ -306,6 +307,19 @@ class _Resolver:
         for mod in self.modules:
             mod.prefix = ('' if mod.is_legacy
                           else f'vanta_m_{mod.declared_name.replace(".", "__")}__')
+            if not mod.is_legacy:
+                # Dots become double underscores, so `math.vector` and
+                # `math__vector` mangle to the same prefix. Rejecting the
+                # collision here keeps their symbols from silently merging.
+                previous = self._prefixes.get(mod.prefix)
+                if previous is not None and previous[0] != mod.declared_name:
+                    raise LoadError(
+                        f"module '{mod.declared_name}' and module "
+                        f"'{previous[0]}' share internal name "
+                        f"'{mod.prefix}'",
+                        self._where(mod, mod.module_pos), mod.module_pos)
+                self._prefixes[mod.prefix] = (mod.declared_name,
+                                              mod.display_name)
             for d in mod.decls:
                 if isinstance(d, A.FuncDecl):
                     source = d.name

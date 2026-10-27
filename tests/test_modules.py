@@ -691,6 +691,33 @@ class ModuleTests(unittest.TestCase):
             self.check()
         self.assertIn("module 'math.vector' is already defined", str(cm.exception))
 
+    def test_module_names_that_mangle_the_same_are_rejected(self):
+        self.write('dotted.vnt', '''
+            module math.vector
+
+            pub func add(a: i32, b: i32) -> i32:
+                return a + b
+        ''')
+        self.write('flat.vnt', '''
+            module math__vector
+
+            pub func sub(a: i32, b: i32) -> i32:
+                return a - b
+        ''')
+        self.write('main.vnt', '''
+            import "dotted.vnt" as v
+            import "flat.vnt" as o
+
+            func main() -> i32:
+                return v.add(1, 2)
+        ''')
+        with self.assertRaises(LoadError) as cm:
+            self.check()
+        message = str(cm.exception)
+        self.assertIn("module 'math__vector'", message)
+        self.assertIn("module 'math.vector'", message)
+        self.assertIn('internal name', message)
+
     # ---------- search path imports (VANTA_PATH) ----------
 
     def test_search_path_resolves_import(self):
