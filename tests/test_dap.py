@@ -61,6 +61,21 @@ def _debug_toolchain_available():
     return os.path.basename(name).lower() not in ('cl', 'clang-cl')
 
 
+def _run_bounded(command, timeout, cwd):
+    """Run a debugger command with a hard deadline and readable diagnostics."""
+    try:
+        return subprocess.run(command, capture_output=True, text=True,
+                              cwd=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        def _text(value):
+            if isinstance(value, bytes):
+                return value.decode('utf-8', 'replace')
+            return value or ''
+        raise AssertionError(
+            f'command did not finish within {timeout:g}s: {command!r}; '
+            f'stdout={_text(exc.stdout)!r}; stderr={_text(exc.stderr)!r}')
+
+
 class DapFramingTests(unittest.TestCase):
     def test_round_trip(self):
         buffer = io.BytesIO()
@@ -354,6 +369,12 @@ class _DapSessionTestCase(unittest.TestCase):
                         stream.close()
                 except Exception:
                     pass
+        handle = getattr(self, 'stderr_file', None)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
         shutil.rmtree(self.tempdir, ignore_errors=True)
 
     def _read_loop(self):
@@ -368,12 +389,14 @@ class _DapSessionTestCase(unittest.TestCase):
 
     def start(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.stderr_path = os.path.join(self.tempdir, 'adapter-stderr.txt')
+        self.stderr_file = open(self.stderr_path, 'wb')
         self.process = subprocess.Popen(
             [sys.executable, '-m', 'compiler', 'dap', *self.EXTRA_ARGS],
             cwd=root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=self.stderr_file,
             bufsize=0,
         )
         threading.Thread(target=self._read_loop, daemon=True).start()
@@ -388,13 +411,18 @@ class _DapSessionTestCase(unittest.TestCase):
 
     def _adapter_stderr(self) -> str:
         """Whatever the adapter process wrote to stderr, for diagnostics."""
-        if self.process is None or self.process.stderr is None:
-            return ''
+        path = getattr(self, 'stderr_path', None)
+        if not path or not os.path.isfile(path):
+            return '(no adapter stderr)'
         try:
-            self.process.stderr.flush()
+            self.stderr_file.flush()
         except Exception:
             pass
-        return '(unavailable)'
+        try:
+            with open(path, 'rb') as f:
+                return f.read().decode('utf-8', 'replace')[-4000:]
+        except OSError:
+            return '(adapter stderr unavailable)'
 
     def expect(self, predicate, timeout=30):
         seen = []
@@ -411,7 +439,8 @@ class _DapSessionTestCase(unittest.TestCase):
             self.received.append(message)
             if predicate(message):
                 return message
-        self.fail(f'timed out; messages={seen!r}')
+        self.fail(f'timed out after {timeout:g}s; last messages={seen[-5:]!r}; '
+                  f'adapter stderr={self._adapter_stderr()!r}')
 
     def initialize(self, capabilities=None):
         arguments = {'clientID': 'test'}
@@ -1263,9 +1292,9 @@ class DoctorDebuggerTests(unittest.TestCase):
     """`vanta doctor` says whether a debug session will work."""
 
     def test_doctor_reports_the_debug_toolchain_and_the_debugger(self):
-        result = subprocess.run(
+        result = _run_bounded(
             [sys.executable, '-m', 'compiler', 'doctor'],
-            capture_output=True, text=True,
+            timeout=120,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('debug build:', result.stdout)
@@ -1327,10 +1356,10 @@ class CommandLineArgumentTests(unittest.TestCase):
             self.assertFalse(_probe_gdb('/usr/bin/python3'))
 
     def test_a_dashed_argument_reaches_the_program(self):
-        result = subprocess.run(
+        result = _run_bounded(
             [sys.executable, '-m', 'compiler', 'run', self.source,
              '--', '--level', '2'],
-            capture_output=True, text=True,
+            timeout=120,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('7', result.stdout)
@@ -1342,14 +1371,41 @@ class CommandLineArgumentTests(unittest.TestCase):
             raise unittest.SkipTest('no working GDB')
         if not _debug_toolchain_available():
             raise unittest.SkipTest('no GCC/Clang compiler')
-        result = subprocess.run(
+        timeout = float(os.environ.get('VANTA_DEBUG_TEST_TIMEOUT', '180'))
+        # Keep stdin open: GDB without --batch would sit at its prompt and the
+        # test would hang forever.  A non-interactive `vanta debug` must run
+        # its -ex commands and exit.
+        process = subprocess.Popen(
             [sys.executable, '-m', 'compiler', 'debug', self.source,
              '--build-dir', self.tmp, '--exec', 'show args',
              '--', '--level', '2'],
-            capture_output=True, text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('--level', result.stdout)
+        try:
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+                self.fail(
+                    f'the debug session did not exit within {timeout:g}s; '
+                    f'stdout={stdout!r}; stderr={stderr!r}')
+            stdout = process.stdout.read()
+            stderr = process.stderr.read()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertIn('--level', stdout)
 
 
 class RemoteTargetTests(unittest.TestCase):
@@ -1456,11 +1512,11 @@ class CommandLineDebugTests(unittest.TestCase):
                         '    let x = 41\n'
                         '    let y = x + 1\n'
                         '    print_i32(y)\n')
-            result = subprocess.run(
+            result = _run_bounded(
                 [sys.executable, '-m', 'compiler', 'debug', source,
                  '--build-dir', tmp,
                  '--exec', 'break 3', '--exec', 'info break'],
-                capture_output=True, text=True,
+                timeout=180,
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('main.vnt, line 3', result.stdout)

@@ -1691,7 +1691,15 @@ def cmd_debug(args):
     except Exception as exc:
         sys.stderr.write(f'error: debug build failed: {exc}\n')
         return 1
-    command = [gdb_path, '--quiet', build['exe']]
+    command = [gdb_path, '--quiet']
+    # `vanta debug` is normally an interactive session.  When commands were
+    # supplied with --exec and stdin is not a terminal (tests, CI, an editor),
+    # GDB would otherwise print its prompt and wait for input forever.  Batch
+    # mode runs the -ex commands and exits; a real terminal stays interactive.
+    interactive = bool(getattr(sys.stdin, 'isatty', lambda: False)())
+    if args.exec and not interactive:
+        command.append('--batch')
+    command.append(build['exe'])
     if args.prog_args:
         # The program's own arguments go to GDB before the commands, so a
         # `show args` in the session sees them.
