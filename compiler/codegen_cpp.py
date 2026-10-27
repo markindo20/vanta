@@ -1019,7 +1019,8 @@ class CodeGen:
         if '_vanta_runtime_type' not in ct.fields:
             self.emit(f'const int32_t v__vanta_runtime_type = '
                       f'VANTA_TYPE_ID_{ct.name};')
-        self.emit(f'{ct.name}_vtable* vtable = nullptr;')
+        # ``vtable`` is intentionally not emitted: virtual dispatch is carried
+        # by runtime type IDs rather than manually populated function tables.
         self.indent -= 1
         self.emit('};')
         self.emit('')
