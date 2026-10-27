@@ -40,6 +40,7 @@ extern "sdl2" {
     func SDL_DestroyTexture(texture: ptr<void>) -> void
     func SDL_RenderPresent(renderer: ptr<void>) -> void
     func SDL_PollEvent(event: ptr<i32>) -> i32
+    func SDL_PushEvent(event: ptr<i32>) -> i32
 }
 
 const SDL_INIT_VIDEO: u32 = 32
