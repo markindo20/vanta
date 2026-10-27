@@ -2,7 +2,7 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
-## Unreleased
+## v1.7.0 - 2026-10-27
 
 - **Deep signal payload types**: class signals now support up to four parameters and mixed types (`i32`, `u32`, `f32`, `f64`, `bool`, `str`, `ptr<T>`); emits use generated, typed dispatch over the instance signal registry.
 
@@ -19,6 +19,14 @@ Notable changes to Vanta, newest first. Versions correspond to git tags.
   result owns its byte, so it outlives the source value. Indexing is
   byte-based, consistent with `str_len`/`str_sub`; `s[i] = ...` is a compile
   error because `str` is immutable.
+- **Build and diagnostics:** imported dependency tracking changed from directory scans to the real loaded dependency graph; cache invalidation follows imports, including transitive and `VANTA_PATH` dependencies.
+- **Build cache hardening:** atomic cache promotion, age/size pruning, toolchain/runtime input hashing, bounded recovery, and property tests for unrelated-file and failed-promotion cases.
+- **Closures and ownership:** closure environments moved to reference-counted heap allocations, with durable captures, unsafe escaping-list diagnostics, and closure lifetime tests.
+- **Classes and virtual dispatch:** signature-based virtual methods, runtime type IDs, `reinterpret_cast` only after type checks, generated C++ constructors, and end-to-end class boundary regression tests.
+- **SDL events:** typed guard and payload accessors for quit, key, mouse, wheel, and window events; synthetic deterministic event tests; documented SDL ABI assumptions.
+- **LSP and diagnostics:** staged document-revision diagnostic validation, bounded parse cache, monotonic revision guards, with preserved synchronous deterministic behavior.
+- **Packages:** tag/ref checkout, transitive manifest merging, registry archive hardening, deterministic backend failures, and lockfile commit replay during install.
+- **Compiler and runtime:** byte-aware string indexing, class signals with multi-type payload dispatch, module/visibility behavior, and additional tests for parser, loader, integration, class, package, and cache behavior.
 
 ## v1.6.0 - 2026-10-26
 
