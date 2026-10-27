@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
@@ -168,6 +169,30 @@ private:
     const char* data_ = "";
     int32_t len_ = 0;
     Rep* rep_ = nullptr;
+};
+
+// ---------- ClosureHandle ----------
+template <typename T>
+struct ClosureHandle {
+    std::shared_ptr<T> env;
+    T* p = nullptr;
+
+    ClosureHandle() noexcept = default;
+
+    explicit ClosureHandle(T* q) noexcept
+        : env(q ? std::shared_ptr<T>(q) : nullptr),
+          p(q) {
+    }
+
+    T* get() const noexcept { return p; }
+    T* operator->() const noexcept { return p; }
+    T& operator*() const noexcept { return *p; }
+    operator T*() const noexcept { return p; }
+
+    ClosureHandle(const ClosureHandle&) = default;
+    ClosureHandle(ClosureHandle&&) noexcept = default;
+    ClosureHandle& operator=(const ClosureHandle&) = default;
+    ClosureHandle& operator=(ClosureHandle&&) noexcept = default;
 };
 
 // ---------- Vec2 ----------

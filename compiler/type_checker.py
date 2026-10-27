@@ -171,6 +171,11 @@ class TypeChecker:
         self.func_types: dict[FuncType, str] = {}
         # Closures encountered during type checking, for codegen.
         self.closures: List[A.LambdaExpr] = []
+        # Closure struct name -> set of captured names that are mutable
+        # bindings. Codegen uses this to store std::shared_ptr cells instead
+        # of raw pointers while retaining compatibility with the type fields.
+        self.closure_mutable_captures: dict[str, set[str]] = {}
+        self._local_closure_captures_list: dict[str, bool] = {}
         # Functions that return closures where a function type is declared.
         # Maps function name -> (closure_type, declared_func_type)
         self.funcs_returning_closures: dict[str, tuple[PtrType, FuncType]] = {}
@@ -1126,6 +1131,13 @@ class TypeChecker:
                 raise CheckError("Arena values cannot be copied or reassigned", self.filename, v.pos)
         self._declare(v.name, vt, v.mutable, v.pos)
         v.var_type = vt
+        if isinstance(v.value, A.LambdaExpr):
+            self._local_closure_captures_list[v.name] = bool(
+                getattr(v.value, 'captures_list', False))
+        elif isinstance(v.value, A.Name):
+            if v.value.name in self._local_closure_captures_list:
+                self._local_closure_captures_list[v.name] = \
+                    self._local_closure_captures_list[v.value.name]
 
     def _check_assign(self, a: A.AssignStmt):
         # Check the target first: that marks checked at() accesses and
@@ -1226,6 +1238,14 @@ class TypeChecker:
             raise CheckError("cannot return a value from a void function", self.filename, r.pos)
         # Allow closure-to-function return if signatures match
         if self._is_closure_compatible_with_func(vt, self.current_ret):
+            captures_list = False
+            if isinstance(r.value, A.LambdaExpr):
+                captures_list = getattr(r.value, 'captures_list', False)
+            elif isinstance(r.value, A.Name):
+                captures_list = self._local_closure_captures_list.get(r.value.name, False)
+            if captures_list:
+                raise CheckError("escaping closures cannot capture 'List' values",
+                                 self.filename, r.pos)
             # Track this function as returning a closure
             if hasattr(self, 'current_func') and self.current_func:
                 self.funcs_returning_closures[self.current_func] = (vt, self.current_ret)
@@ -1390,6 +1410,16 @@ class TypeChecker:
         # Store just the names for codegen compatibility
         expr.captured_names = [name for name, _ in captured]
 
+        # Captured List<T> values are arena-backed handles; available
+        # compiler support currently only safely handles them when the
+        # closure is not escaping. Record that the closure captures a List so
+        # escaping return paths can be rejected deterministically.
+        expr.captures_list = False
+        for cap_name, _ in captured:
+            leaf = self._lookup(cap_name)
+            if leaf is not None and isinstance(leaf[0], ListType):
+                expr.captures_list = True
+
         # Track which originating functions export mutable captures, so codegen
         # can give those bindings durable backing instead of raw stack cells.
         if captured and getattr(self, 'current_func', None) is not None:
@@ -1455,6 +1485,9 @@ class TypeChecker:
             closure_fields[cap_name] = (ctx_fields[cap_name], True)
         closure_struct.fields = closure_fields
 
+        self.closure_mutable_captures[closure_struct_name] = {
+            name for name, is_mutable in captured if is_mutable
+        }
         # Wrapper function: fn_closure__N(self: ptr<ClosureStruct>, params...) -> ret
         ctx_te = A.TypeExpr('ptr',
                             inner=A.TypeExpr('named', name=closure_struct_name),

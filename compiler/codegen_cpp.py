@@ -276,6 +276,10 @@ class CodeGen:
         if isinstance(t, ClassType): return t.name
         if isinstance(t, PtrType) and isinstance(t.inner, ClassType):
             return t.inner.name + '*'
+        if isinstance(t, PtrType) and isinstance(t.inner, StructType) and \
+           not getattr(t.inner, 'builtin', True) and \
+           getattr(t.inner, 'name', '').startswith("Closure__"):
+            return f'vanta::ClosureHandle<vanta_user::{t.inner.name}>'
         if isinstance(t, PtrType):
             return self._ctype(t.inner) + '*'
         if isinstance(t, ArrayType):
@@ -549,7 +553,12 @@ class CodeGen:
         # Function-pointer aliases, innermost first.
         if self.tc.func_types:
             for ft in self._ordered_func_types():
-                params = ', '.join(self._ctype(p) for p in ft.params)
+                params = ', '.join(
+                        (t.inner.name + '*' if (isinstance(t, PtrType)
+                            and isinstance(t.inner, StructType)
+                            and getattr(t.inner, 'name', '').startswith('Closure__'))
+                         else self._ctype(t))
+                        for t in ft.params)
                 self.emit(f'using {self.tc.func_types[ft]} = {self._ctype(ft.ret)}(*)({params});')
             self.emit('')
 
@@ -632,17 +641,25 @@ class CodeGen:
                 self.emit(f'{self._ctype(closure_type)} fn_{func_name}({params});')
             else:
                 self.emit(self._func_sig(fd) + ';')
-        # Forward declarations for closure make functions (needed by fn_main etc.)
+# Forward declarations for closure make functions (needed by fn_main etc.)
         for closure in getattr(self.tc, 'closures', []):
-            st = self.tc.structs.get(closure.ctx_struct_name)
-            if st is not None:
+            st_fwd = self.tc.structs.get(closure.ctx_struct_name)
+            if st_fwd is not None:
+                mutable_fwd = getattr(self.tc, 'closure_mutable_captures', {}).get(
+                    closure.ctx_struct_name, set())
                 cap_params = []
-                for fname, (ftype, _pub) in st.fields.items():
+                for fname, (ftype, _pub) in st_fwd.fields.items():
                     if fname == 'invoke':
                         continue
-                    cap_params.append(f'{self._ctype(ftype)} cap_{fname}')
+                    if fname in mutable_fwd and isinstance(ftype, PtrType):
+                        cap_params.append(
+                            f'std::shared_ptr<{self._ctype(ftype.inner)}> '
+                            f'cap_{fname}')
+                    else:
+                        cap_params.append(f'{self._ctype(ftype)} cap_{fname}')
                 params_str = ', '.join(cap_params)
-                self.emit(f'{closure.ctx_struct_name}* __make_closure_{closure.name}({params_str});')
+                self.emit(f'vanta::ClosureHandle<vanta_user::{closure.ctx_struct_name}> '
+                          f'__make_closure_{closure.name}({params_str});')
         self.emit('')
         self.wrapper_decl_index = len(self.lines)
         for fd in funcs:
@@ -826,6 +843,14 @@ class CodeGen:
                                for i, p in enumerate(fn.params))
             return self._declarator_c(ret, f'{fn.name}({params})')
         ret_s = self._ctype(ret)
+        if (not extern and fn.name.startswith('fn_closure__')):
+            idx = fn.name.split('__')[-1]
+            closure_name = 'Closure__' + idx
+            plist = [f'{closure_name}* v_{fn.params[0].name}']
+            plist += [f'{self._ctype(sig.params[i + 1][1])} v_{p.name}'
+                      for i, p in enumerate(fn.params[1:])]
+            params = ', '.join(plist)
+            return f'{ret_s} fn_{fn.name}({params})'
         params = ', '.join(f'{self._ctype(sig.params[i][1])} v_{p.name}'
                            for i, p in enumerate(fn.params))
         return f'{ret_s} fn_{fn.name}({params})'
@@ -1007,7 +1032,12 @@ class CodeGen:
         self.emit(f'struct {st.name} {{')
         self.indent += 1
         for fname, (ftype, _pub) in st.fields.items():
-            self.emit(f'{self._ctype(ftype)} v_{fname};')
+            mutable_captures = getattr(self.tc, 'closure_mutable_captures', {}).get(st.name, set())
+            if fname in mutable_captures and isinstance(ftype, PtrType):
+                ctype = f'std::shared_ptr<{self._ctype(ftype.inner)}>'
+            else:
+                ctype = self._ctype(ftype)
+            self.emit(f'{ctype} v_{fname};')
         self.indent -= 1
         self.emit('};')
         self.emit('')
@@ -1116,7 +1146,11 @@ class CodeGen:
             if ret_type is STR:
                 self.emit('return vanta::Str();')
             elif isinstance(ret_type, PtrType):
-                self.emit('return nullptr;')
+                if (isinstance(ret_type.inner, StructType) and
+                        getattr(ret_type.inner, 'name', '').startswith('Closure__')):
+                    self.emit(f'return vanta::ClosureHandle<vanta_user::{ret_type.inner.name}>();')
+                else:
+                    self.emit('return nullptr;')
             elif isinstance(ret_type, EnumType):
                 first = next(iter(ret_type.members))
                 if ret_type.has_payloads:
@@ -1175,25 +1209,31 @@ class CodeGen:
         st = self.tc.structs.get(closure.ctx_struct_name)
         if st is None:
             raise RuntimeError(f"missing closure struct {closure.ctx_struct_name}")
+        mutable_captures = getattr(self.tc, 'closure_mutable_captures', {}).get(
+            closure.ctx_struct_name, set())
         cap_params = []
         for fname, (ftype, _pub) in st.fields.items():
             if fname == 'invoke':
                 continue
             pname = f'cap_{fname}'
-            cap_params.append(f'{self._ctype(ftype)} {pname}')
+            if fname in mutable_captures and isinstance(ftype, PtrType):
+                cap_params.append(
+                    f'std::shared_ptr<{self._ctype(ftype.inner)}> {pname}')
+            else:
+                cap_params.append(f'{self._ctype(ftype)} {pname}')
         params_str = ', '.join(cap_params)
-        self.emit(f'{closure.ctx_struct_name}* '
+        self.emit(f'vanta::ClosureHandle<vanta_user::{closure.ctx_struct_name}> '
                   f'__make_closure_{closure.name}({params_str}) {{')
         self.indent += 1
-        self.emit(f'static vanta::Arena __arena = vanta::state_arena();')
-        self.emit(f'auto* __c = __arena.alloc<{closure.ctx_struct_name}>(1);')
+        self.emit(f'auto* __c = new {closure.ctx_struct_name}();')
+        self.emit(f'if (!__c) {{ std::fprintf(stderr, "vanta: closure alloc failed\\n"); std::exit(1); }}')
         self.emit(f'__c->v_invoke = &vanta_user::{closure.invoke_name};')
         for fname, (ftype, _pub) in st.fields.items():
             if fname == 'invoke':
                 continue
             pname = f'cap_{fname}'
             self.emit(f'__c->v_{fname} = {pname};')
-        self.emit('return __c;')
+        self.emit(f'return vanta::ClosureHandle<vanta_user::{closure.ctx_struct_name}>(__c);')
         self.indent -= 1
         self.emit('}')
         self.emit('')
@@ -1214,9 +1254,9 @@ class CodeGen:
             tt = getattr(stmt, 'var_type', None)
             captured_mut = getattr(self.tc, 'funcs_with_mutable_captures', {}).get(self._current_func, set())
             if stmt.mutable and stmt.name in captured_mut:
-                self.emit(f'static vanta::Arena __state_arena = vanta::state_arena();')
-                self.emit(f'auto& v_{stmt.name} = *(__state_arena.alloc<{self._ctype(tt)}>(1));')
-                self.emit(f'v_{stmt.name} = {self._expr(stmt.value)};')
+                ct = self._ctype(tt)
+                self.emit(f'auto __cap_{stmt.name} = std::make_shared<{ct}>({self._expr(stmt.value)});')
+                self.emit(f'auto& v_{stmt.name} = *__cap_{stmt.name};')
             else:
                 self.emit(f'{self._ctype(tt)} v_{stmt.name} = {self._expr(stmt.value)};')
         elif isinstance(stmt, A.AssignStmt):
@@ -1464,11 +1504,16 @@ class CodeGen:
                 st = self.tc.structs.get(e.ctx_struct_name)
                 for name in e.captured_names:
                     var_expr = self._expr(A.Name(name, e.pos))
-                    # If the captured field is a pointer type (mutable capture), pass address
+                    closure_mutable_captures = getattr(
+                        self.tc, 'closure_mutable_captures', {}).get(
+                        e.ctx_struct_name, set())
                     if st and name in st.fields:
                         ftype, _ = st.fields[name]
                         if isinstance(ftype, PtrType):
-                            var_expr = f'&{var_expr}'
+                            if name in closure_mutable_captures:
+                                var_expr = f'__cap_{name}'
+                            else:
+                                var_expr = f'&{var_expr}'
                     cap_args.append(var_expr)
                 return f'__make_closure_{e.name}({", ".join(cap_args)})'
             return f'vanta_user::fn_{e.name}'
@@ -1603,7 +1648,8 @@ class CodeGen:
             return f'{et.name}::{f.field}'
         if getattr(c, 'is_closure_call', False):
             func_expr = self._expr(c.func)
-            args = ', '.join([func_expr] + [self._expr(a) for a in c.args])
+            self_name = func_expr + '.p'
+            args = ', '.join([self_name] + [self._expr(a) for a in c.args])
             return f'{func_expr}->v_invoke({args})'
         if getattr(c, 'is_indirect_call', False):
             # The checker resolved this through a function value: a variable,
