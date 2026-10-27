@@ -190,7 +190,7 @@ class Parser:
                           type_params=type_params,
                           type_param_constraints=type_param_constraints)
 
-    def parse_func(self, is_system):
+    def parse_func(self, is_system, is_public=False):
         tok = self.advance()
         name = self.expect(TT.IDENT).value
         type_params, type_param_constraints = self._parse_type_params()
@@ -213,7 +213,8 @@ class Parser:
         body = self.parse_block()
         return A.FuncDecl(name, params, ret, body, is_system, A.Pos(tok.line, tok.col),
                           type_params=type_params,
-                          type_param_constraints=type_param_constraints)
+                          type_param_constraints=type_param_constraints,
+                          is_public=is_public)
 
     def _parse_type_params(self):
         """Parse an optional `<T, U>` or `<T: Copyable + Eq, U>` list after a
@@ -361,6 +362,14 @@ class Parser:
                 continue
             if self.check(TT.FUNC):
                 fd = self.parse_func(False)
+                if decorators:
+                    fd.decorators.extend(decorators)
+                    if "@export" in decorators:
+                        fd.is_exported = True
+                methods.append(fd)
+            elif self.check(TT.PUB) and self.peek(1).type == TT.FUNC:
+                self.advance()  # pub
+                fd = self.parse_func(False, True)
                 if decorators:
                     fd.decorators.extend(decorators)
                     if "@export" in decorators:

@@ -87,6 +87,7 @@ class ClassType(Type):
     name: str
     fields: Dict[str, Tuple[Type, bool]]
     methods: Dict[str, 'FuncType']
+    method_public: dict[str, bool] = field(default_factory=dict)
     parent: Optional[str] = None  # parent class name, resolved later
     builtin: bool = False
     family: Optional[str] = None

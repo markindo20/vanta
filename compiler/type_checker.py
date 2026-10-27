@@ -750,6 +750,7 @@ class TypeChecker:
         ct = self.classes[d.name]
         ct.fields = dict(all_fields)
         ct.methods = methods
+        ct.method_public = {fd.name: bool(fd.is_public) for fd in d.methods}
         ct.signals = dict(signals)
 
     def _check_class_methods(self, d):
@@ -1844,8 +1845,14 @@ class TypeChecker:
                         expr.type = ftype
                         return ftype
                     cur = self.classes.get(cur.parent) if cur.parent else None
-                # A bare method name is not a value (it must be called).
                 if expr.field in ot.methods:
+                    (mpub) = ot.method_public.get(expr.field, False)
+                    if (not mpub and ot.decl_file is not None
+                            and expr.pos.file is not None
+                            and expr.pos.file != ot.decl_file):
+                        raise CheckError(
+                            f"method '{expr.field}' is private to '{ot.name}'",
+                            self.filename, expr.pos)
                     raise CheckError(
                         f"method '{expr.field}' must be called",
                         self.filename, expr.pos)
@@ -3238,6 +3245,15 @@ class TypeChecker:
         if ft is None:
             raise CheckError(f"class '{ct.name}' has no method '{method}'",
                              self.filename, call.pos)
+        method_pub = (
+            True if declaring is None else
+            getattr(declaring, "method_public", {}).get(method, False))
+        if (not method_pub and getattr(declaring, "decl_file", None) is not None
+                and call.pos.file is not None
+                and declaring.decl_file != call.pos.file):
+            raise CheckError(
+                f"method '{method}' is private to '{declaring.name}'",
+                self.filename, call.pos)
         if call.arg_names is not None and any(x is not None for x in call.arg_names):
             raise CheckError(f"method '{method}' does not accept named arguments",
                              self.filename, call.pos)
