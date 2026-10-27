@@ -2,6 +2,12 @@
 
 Notable changes to Vanta, newest first. Versions correspond to git tags.
 
+## v1.7.1 - 2026-10-27
+
+- **CI and cross-drive cache keys:** `_build_cache_key` no longer calls `os.path.relpath` across Windows drive letters; dependency paths are canonicalized through `os.path.realpath` before hashing and in the cache-key normalization.
+- **Robust path normalization:** cache dependency discovery and property tests use a consistent `realpath` normalization to avoid temp-directory alias mismatches on macOS/CI.
+- **Synthetic SDL wheel test:** avoids platform-specific wheel payload scaling differences by wheel payload scaling assumptions.
+
 ## v1.7.0 - 2026-10-27
 
 - **Deep signal payload types**: class signals now support up to four parameters and mixed types (`i32`, `u32`, `f32`, `f64`, `bool`, `str`, `ptr<T>`); emits use generated, typed dispatch over the instance signal registry.

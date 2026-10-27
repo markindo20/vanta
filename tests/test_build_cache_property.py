@@ -89,7 +89,7 @@ class BuildCachePropertyTests(unittest.TestCase):
                 # must be included.
                 for dep in dependencies:
                     self.assertIn(
-                        os.path.normcase(os.path.abspath(
+                        os.path.normcase(os.path.realpath(
                             os.path.join(root, dep))), found,
                         '%s missing at case %d' % (dep, case))
 
@@ -189,7 +189,7 @@ class BuildCachePropertyTests(unittest.TestCase):
                 self.assertEqual(before, after,
                                  'missing import scanned unrelated file')
                 self.assertNotIn(
-                    os.path.normcase(os.path.abspath(unrelated)), after,
+                    os.path.normcase(os.path.realpath(unrelated)), after,
                     'unrelated file appeared in missing-import cache graph')
 
     def test_imported_dependency_reliably_invalidates_key(self):

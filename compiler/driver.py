@@ -1940,14 +1940,14 @@ def _dependency_files_for_cache(source):
     cannot be loaded; in normal builds this does not include unrelated
     source files.
     """
-    source = os.path.normcase(os.path.abspath(source))
+    source = os.path.normcase(os.path.realpath(source))
     files = [source]
     seen = {source}
     try:
         from .loader import load_program
         program = load_program(source)
         for dependency in getattr(program, 'loaded_paths', []) or []:
-            dependency = os.path.normcase(os.path.abspath(dependency))
+            dependency = os.path.normcase(os.path.realpath(dependency))
             if dependency not in seen and os.path.exists(dependency):
                 seen.add(dependency)
                 files.append(dependency)
@@ -1962,7 +1962,7 @@ def _dependency_files_for_cache(source):
     # gap between reproducible builds and friendly fallbacks after failure.
     try:
         for compiler_file in _toolchain_dependency_files():
-            compiler_file = os.path.normcase(os.path.abspath(compiler_file))
+            compiler_file = os.path.normcase(os.path.realpath(compiler_file))
             if compiler_file not in seen and os.path.exists(compiler_file):
                 seen.add(compiler_file)
                 files.append(compiler_file)
@@ -1982,9 +1982,8 @@ def _build_cache_key(source, release, debug, checked,
     for p in _dependency_files_for_cache(source):
         try:
             with open(p, 'rb') as f:
-                parts.append("file:" + os.path.normcase(
-                    os.path.relpath(p, os.path.dirname(source))) +
-                    ":" + f.read().hex())
+                parts.append("file:" + os.path.normcase(os.path.abspath(p)) +
+                             ":" + f.read().hex())
         except OSError:
             parts.append("missing:" + p)
     parts.append(f"release={release} debug={debug} checked={checked}")

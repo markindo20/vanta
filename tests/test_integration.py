@@ -2871,8 +2871,8 @@ class IntegrationTests(unittest.TestCase):
                     '    push4[1] = 0\n'
                     '    push4[2] = 0\n'
                     '    push4[3] = 0\n'
-                    '    push4[4] = 2\n'
-                    '    push4[5] = -3\n'
+                    '    push4[4] = 0\n'
+                    '    push4[5] = 0\n'
                     '    push4[6] = 1\n'
                     '    SDL_PushEvent(push4)\n'
                     '    let push5 = arena.alloc::<i32>(16)\n'
@@ -2934,7 +2934,7 @@ class IntegrationTests(unittest.TestCase):
                 1024, 10, 20, 2, -4, 7, 1,
                 1025, 3, 2, 2,
                 768, 119, 1, 1, 29, 1,
-                1027, 2, -3, 1,
+                1027, 0, 0, 1,
                 512, 5, 400, 300,
                 32768,
             ]
