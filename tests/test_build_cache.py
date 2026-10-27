@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import shutil
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -116,6 +117,48 @@ class BuildCacheTests(unittest.TestCase):
         write(unrelated, 'y')
         after = cache_key(entry)
         self.assertEqual(before, after)
+
+
+    def test_cross_drive_dependency_paths_are_stable(self):
+        import compiler.driver as driver
+
+        saved = driver._dependency_files_for_cache
+        try:
+            def files_for_cache(source):
+                return [source, os.path.join('D:\\\\', 'missing_simulated_dep.vnt')]
+            driver._dependency_files_for_cache = files_for_cache
+
+            key = cache_key(os.path.join('C:\\\\', 'main.vnt'))
+            self.assertRegex(key, r'^[0-9a-f]{24}$')
+        finally:
+            driver._dependency_files_for_cache = saved
+
+    def test_invalid_vanta_path_changes_cache_key(self):
+        root = tempfile.mkdtemp()
+        try:
+            entry = os.path.join(root, 'main.vnt')
+            write(entry, 'func main() -> void:\\n    print_i32(1)\\n')
+            old = os.environ.get('VANTA_PATH')
+
+            os.environ['VANTA_PATH'] = os.path.join(root, 'missing-a')
+            first = cache_key(entry)
+            os.environ['VANTA_PATH'] = os.path.join(root, 'missing-b')
+            second = cache_key(entry)
+
+            self.assertNotEqual(first, second)
+        finally:
+            if old is None:
+                os.environ.pop('VANTA_PATH', None)
+            else:
+                os.environ['VANTA_PATH'] = old
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_missing_source_does_not_raise_and_is_stable(self):
+        missing = os.path.join(tempfile.mkdtemp(), 'absent-source.vnt')
+        first = cache_key(missing)
+        second = cache_key(missing)
+        self.assertEqual(first, second)
+        self.assertRegex(first, r'^[0-9a-f]{24}$')
 
 
 if __name__ == '__main__':
