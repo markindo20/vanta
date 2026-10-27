@@ -315,5 +315,89 @@ class PackageVerificationTests(unittest.TestCase):
                  encoding='utf-8').read(),
             'func main() -> void: print_i32(2)\n')
 
+    def test_package_check_reports_source_drift_and_checksum_mismatch(self):
+        repository = os.path.join(self._tmp.name, 'driftrepo')
+        self._make_git_repo(repository, [
+            ({'vanta.toml': '[package]\nname = "driftpkg"\n',
+              'lib.vnt': 'func answer() -> i32:\n    return 1\n'}, 'first', 'v1'),
+            ({'vanta.toml': '[package]\nname = "driftpkg"\n',
+              'lib.vnt': 'func answer() -> i32:\n    return 2\n'}, 'second', 'v2'),
+        ])
+        first_commit = self._rev_parse(repository, 'v1')
+
+        cmd_pm(make_args(pm_command='init', name='driftcheck'))
+        src = self._git_source(repository, 'tag=v1')
+        self.assertEqual(cmd_pm(make_args(pm_command='add', sources=[src],
+                                         name='driftpkg')), 0)
+
+        baseline = _read_manifest()
+        baseline_lock = read_lock()
+
+        cleared = read_lock()['packages']['driftpkg']
+        cleared['commit'] = ''
+        cleared_lock = read_lock()
+        cleared_lock['packages']['driftpkg'] = cleared
+        write_lock(cleared_lock)
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 0)
+        write_lock(baseline_lock)
+
+        drifted_manifest = _read_manifest()
+        drifted_manifest['dependencies'] = {'driftpkg': {'git': 'https://example.invalid/driftpkg.git',
+                                                         'tag': 'v1'}}
+        write_toml(MANIFEST, drifted_manifest)
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 1)
+        write_toml(MANIFEST, baseline)
+
+        manifest_only = _read_manifest()
+        manifest_only['dependencies'] = {'driftpkg': {'git': repository, 'tag': 'v2'}}
+        write_toml(MANIFEST, manifest_only)
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 1)
+        write_toml(MANIFEST, baseline)
+
+        lock = baseline_lock
+        lock['packages']['driftpkg']['commit'] = 'deadbeef'
+        write_lock(lock)
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 1)
+        write_lock(baseline_lock)
+
+        extra = os.path.join(VENDOR, 'driftpkg', 'extra.txt')
+        with open(extra, 'w', encoding='utf-8') as f:
+            f.write('tampered')
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 1)
+        self.assertEqual(cmd_pm(make_args(pm_command='install', dest=None)), 1)
+        write_lock(baseline_lock)
+
+    def test_package_lock_missing_commit_and_checksum(self):
+        self._make_git_repo(os.path.join(self._tmp.name, 'minimalrepo'), [
+            ({'vanta.toml': '[package]\nname = "minimalpkg"\n',
+              'lib.vnt': 'func answer() -> i32:\n    return 1\n'},
+             'only commit', 'v1'),
+        ])
+        repository = os.path.join(self._tmp.name, 'minimalrepo')
+        cmd_pm(make_args(pm_command='init', name='project'))
+        src = self._git_source(repository, 'tag=v1')
+        self.assertEqual(cmd_pm(make_args(pm_command='add', sources=[src],
+                                         name='minimalpkg')), 0)
+
+        legacy = read_lock()
+        legacy['packages']['minimalpkg'] = {
+            'source': legacy['packages']['minimalpkg'].get(
+                'source', 'git+' + repository + '#tag=v1'),
+            'path': legacy['packages']['minimalpkg'].get(
+                'path', os.path.join(VENDOR, 'minimalpkg')),
+            'commit': '',
+            'sha256': '',
+        }
+        write_lock(legacy)
+        self.assertEqual(cmd_pm(make_args(pm_command='check')), 0)
+        if os.path.isdir(VENDOR):
+            _rmtree(VENDOR)
+        self.assertEqual(cmd_pm(make_args(pm_command='install', dest=None)), 0)
+        self.assertEqual(
+            open(os.path.join(VENDOR, 'minimalpkg', 'lib.vnt'),
+                 encoding='utf-8').read(),
+            'func answer() -> i32:\n    return 1\n')
+
+
 if __name__ == '__main__':
     unittest.main()
