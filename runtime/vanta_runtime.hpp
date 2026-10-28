@@ -1213,6 +1213,125 @@ inline bool str_ends_with(Str s, Str suffix) {
     return std::memcmp(s.c_str() + (s.size() - suffix.size()),
                        suffix.c_str(), suffix.size()) == 0;
 }
+
+
+// UTF-8 helpers -------------------------------------------------------
+// Returns the number of bytes occupied by the UTF-8 scalar beginning at
+// *p, or -1 if it is not a complete, valid start byte. Treats a NUL
+// terminator as the end of a valid string's data (handled by callers
+// checking available bounds).
+inline int utf8_seq_length(const char *p, const char *end) {
+    if (p >= end) return 0;
+    unsigned char c = (unsigned char)*p;
+    if ((c & 0x80u) == 0) return 1;
+    if ((c & 0xE0u) == 0xC0u && p + 1 < end &&
+        ((unsigned char)p[1] & 0xC0u) == 0x80u)
+        return 2;
+    if ((c & 0xF0u) == 0xE0u && p + 2 < end &&
+        ((unsigned char)p[1] & 0xC0u) == 0x80u &&
+        ((unsigned char)p[2] & 0xC0u) == 0x80u) {
+        // UTF-16 surrogate code points must not appear directly in UTF-8;
+        // reject them to keep lengths and indices well-defined.
+        unsigned int cp = ((c & 0x0Fu) << 12) |
+                          (((unsigned char)p[1] & 0x3Fu) << 6) |
+                          ((unsigned char)p[2] & 0x3Fu);
+        if (cp >= 0xD800u && cp <= 0xDFFFu) return -1;
+        return 3;
+    }
+    if ((c & 0xF8u) == 0xF0u && p + 3 < end &&
+        ((unsigned char)p[1] & 0xC0u) == 0x80u &&
+        ((unsigned char)p[2] & 0xC0u) == 0x80u &&
+        ((unsigned char)p[3] & 0xC0u) == 0x80u) {
+        unsigned int cp = ((c & 0x07u) << 18) |
+                          (((unsigned char)p[1] & 0x3Fu) << 12) |
+                          (((unsigned char)p[2] & 0x3Fu) << 6) |
+                          ((unsigned char)p[3] & 0x3Fu);
+        if (cp < 0x10000u || cp > 0x10FFFFu) return -1;
+        return 4;
+    }
+    return -1;
+}
+
+inline bool str_is_utf8(Str s) {
+    int idx = 0;
+    const char *p = s.c_str();
+    int n = (int)s.size();
+    while (idx < n) {
+        int len = utf8_seq_length(p + idx, p + n);
+        if (len < 0 || idx + len > n) return false;
+        idx += len;
+    }
+    return true;
+}
+
+inline int32_t str_char_len(Str s) {
+    // Count valid UTF-8 scalars. Any trailing invalid byte sequence is
+    // counted one byte at a time rather than rejected, mirroring the
+    // byte-oriented behaviour of str_len for arbitrary input.
+    int idx = 0;
+    const char *p = s.c_str();
+    int n = (int)s.size();
+    int32_t count = 0;
+    while (idx < n) {
+        int len = utf8_seq_length(p + idx, p + n);
+        if (len < 0 || idx + len > n) {
+            count += 1;
+            idx += 1;
+        } else {
+            count += 1;
+            idx += len;
+        }
+    }
+    return count;
+}
+
+inline int32_t str_char_to_byte(Str s, int32_t charIndex) {
+    if (charIndex < 0) return -1;
+    int idx = 0;
+    const char *p = s.c_str();
+    int n = (int)s.size();
+    int32_t pos = 0;
+    while (idx < n && pos < charIndex) {
+        int len = utf8_seq_length(p + idx, p + n);
+        if (len < 0 || idx + len > n) len = 1;
+        idx += len;
+        pos += 1;
+    }
+    if (pos != charIndex) return -1;
+    if (idx > n) return -1;
+    return (int32_t)idx;
+}
+
+inline Str str_char_at(Str s, int32_t charIndex) {
+    int32_t byteStart = str_char_to_byte(s, charIndex);
+    if (byteStart < 0) return Str();
+    int remaining = (int)s.size() - byteStart;
+    const char *p = s.c_str() + byteStart;
+    if (remaining <= 0) return Str();
+    int len = utf8_seq_length(p, p + remaining);
+    if (len < 0 || byteStart + len > (int)s.size()) len = 1;
+    return Str::copy(p, len);
+}
+
+inline Str str_chars_sub(Str s, int32_t start, int32_t n) {
+    if (start < 0) start = 0;
+    if (n < 0) n = 0;
+    int32_t byteStart = str_char_to_byte(s, start);
+    if (byteStart < 0) return Str();
+    int32_t idx = byteStart;
+    const char *p = s.c_str();
+    int size = (int)s.size();
+    while (idx < size && n > 0) {
+        int len = utf8_seq_length(p + idx, p + size);
+        if (len < 0 || idx + len > size) len = 1;
+        idx += len;
+        n -= 1;
+    }
+    int32_t byteCount = idx - byteStart;
+    if (byteCount <= 0) return Str();
+    return Str::copy(p + byteStart, byteCount);
+}
+
 inline Str to_str_i32(int32_t v) {
     char buf[24];
     int n = std::snprintf(buf, sizeof buf, "%d", (int)v);

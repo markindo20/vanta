@@ -261,6 +261,13 @@ class TypeChecker:
         bf("str_to_lower", [("s", STR)], STR)
         bf("str_trim", [("s", STR)], STR)
         bf("str_index_of", [("s", STR), ("sub", STR)], I32)
+        # UTF-8-aware helpers; str_len and str_sub stay byte-based to
+        # preserve the existing contract on every platform.
+        bf("str_char_len", [("s", STR)], I32)
+        bf("str_is_utf8", [("s", STR)], BOOL)
+        bf("str_char_at", [("s", STR), ("i", I32)], STR)
+        bf("str_chars_sub", [("s", STR), ("start", I32), ("n", I32)], STR)
+        bf("str_char_to_byte", [("s", STR), ("i", I32)], I32)
         bf("signal_emit", [("name", STR), ("value", I32)], VOID)
         bf("signal_emit_str", [("name", STR), ("value", STR)], VOID)
         _handler_type = FuncType((I32,), VOID)

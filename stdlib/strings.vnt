@@ -23,6 +23,26 @@ pub func substring(s: str, start: i32, length: i32) -> str:
         return ""
     return str_sub(s, start, length)
 
+pub func char_count(s: str) -> i32:
+    return str_char_len(s)
+
+pub func is_valid_utf8(s: str) -> bool:
+    return str_is_utf8(s)
+
+pub func utf8_char(s: str, index: i32) -> str:
+    # Character at an UTF-8 scalar-value index, or an empty string when
+    # the index is out of range.
+    return str_char_at(s, index)
+
+pub func utf8_substring(s: str, start_char: i32, char_count_: i32) -> str:
+    # Byte-boundary-safe slice expressed in UTF-8 scalar units.
+    if start_char < 0 or char_count_ < 0:
+        return ""
+    return str_chars_sub(s, start_char, char_count_)
+
+pub func byte_offset_of_char(s: str, char_index: i32) -> i32:
+    return str_char_to_byte(s, char_index)
+
 pub func suffix_after(s: str, separator: str) -> str:
     let pos = str_index_of(s, separator)
     if pos < 0:
