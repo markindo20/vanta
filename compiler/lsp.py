@@ -2556,6 +2556,11 @@ class LanguageServer:
         self.root_uri: Optional[str] = None
         self.root_path: Optional[str] = None
         self._workspace_cache: dict[str, tuple] = {}
+        # Coarse-grained diagnostic result cache.
+        self._diagnostic_cache_fingerprint: Optional[str] = None
+        self._diagnostic_cache_files: dict[str, list[dict]] = {}
+        self._diagnostic_cache_disk_digests: tuple[str, ...] = ()
+        self._diagnostic_cache_loaded_paths: tuple[str, ...] = ()
         self._file_list_cache: dict[str, tuple[float, list[str]]] = {}
         self._profile_enabled: bool = os.environ.get(
             'VANTA_LSP_PROFILE', '',) .strip().lower() in {'1', 'true', 'yes'}
@@ -2876,6 +2881,40 @@ class LanguageServer:
                           analysis_revision,
                           f'files={len(files)} published={len(current_keys)}')
 
+
+    def _fingerprint_sources(self, sources):
+        hasher = hashlib.sha256()
+        for path, text in sorted(sources.items()):
+            hasher.update(path.encode('utf-8', 'surrogateescape'))
+            hasher.update(b'\x00')
+            hasher.update(text.encode('utf-8', 'surrogateescape'))
+            hasher.update(b'\x01')
+        return hasher.hexdigest()
+
+    def _fingerprint_disk(self, paths):
+        out = []
+        for p in paths:
+            try:
+                with open(p, 'rb') as f:
+                    out.append(hashlib.sha256(f.read()).hexdigest())
+            except OSError:
+                return None
+        return tuple(out)
+
+    def _diagnostic_cache_commit(self, fingerprint, result, loaded_paths):
+        self._diagnostic_cache_fingerprint = fingerprint
+        self._diagnostic_cache_files = {k: [dict(d) for d in (v or [])]
+                                         for k, v in result.items()}
+        try:
+            self._diagnostic_cache_loaded_paths = tuple(
+                os.path.abspath(p) for p in loaded_paths)
+        except Exception:
+            self._diagnostic_cache_loaded_paths = ()
+        disk_digests = self._fingerprint_disk(
+            self._diagnostic_cache_loaded_paths)
+        if disk_digests is not None:
+            self._diagnostic_cache_disk_digests = disk_digests
+
     def _clear_diagnostics(self, uri: str) -> None:
         for path in self.diagnostics_by_doc.pop(uri, set()):
             self._publish(path, [])
@@ -2903,6 +2942,15 @@ class LanguageServer:
                     sources[path] = f.read()
             except (OSError, UnicodeError):
                 pass
+        open_fingerprint = self._fingerprint_sources(sources)
+        if (open_fingerprint == self._diagnostic_cache_fingerprint and
+                self._diagnostic_cache_loaded_paths):
+            disk_digests = self._fingerprint_disk(
+                self._diagnostic_cache_loaded_paths)
+            if (disk_digests is not None and
+                    disk_digests == self._diagnostic_cache_disk_digests):
+                return {k: [dict(d) for d in (v or [])]
+                        for k, v in self._diagnostic_cache_files.items()}
         result: dict[str, list[dict]] = {path: []}
         diagnostics: list[dict] = []
         try:
@@ -2922,11 +2970,15 @@ class LanguageServer:
                         'source': 'vanta',
                         'message': getattr(exc, 'msg', str(exc)),
                     })
+                self._diagnostic_cache_commit(
+                    open_fingerprint, result, program.loaded_paths)
                 return result
             tc = TypeChecker(program, path)
             tc.register(multi=True)
             tc.check(multi=True)
             if not tc.errors:
+                self._diagnostic_cache_commit(
+                    open_fingerprint, result, program.loaded_paths)
                 return result
             for exc in tc.errors:
                 filename, line, col = _error_location(exc, path)
@@ -2941,6 +2993,8 @@ class LanguageServer:
                     'source': 'vanta',
                     'message': getattr(exc, 'msg', str(exc)),
                 })
+            self._diagnostic_cache_commit(
+                open_fingerprint, result, program.loaded_paths)
             return result
         except (LexError, ParseError, LoadError) as exc:
             filename, line, col = _error_location(exc, path)
