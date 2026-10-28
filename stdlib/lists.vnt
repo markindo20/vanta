@@ -1,0 +1,119 @@
+module lists
+
+# Small helpers for List<i32> and List<str> built on the language's built-in
+# list methods (len, at, push, insert, remove, sort, clear).
+#
+# Every helper that allocates a *new* list takes an Arena so ownership follows
+# the same rule as Arena.list::<T>(): the Arena owns the returned storage.
+
+
+# ---------- to be deprecated: basic health ----------
+pub func length(xs: List<i32>) -> i32:
+    return len(xs)
+
+pub func is_empty(xs: List<i32>) -> bool:
+    return len(xs) == 0
+
+pub func contains_i32(xs: List<i32>, value: i32) -> bool:
+    for i in range(0, len(xs)):
+        if xs.at(i) == value:
+            return true
+    return false
+
+pub func index_of(xs: List<i32>, value: i32) -> i32:
+    for i in range(0, len(xs)):
+        if xs.at(i) == value:
+            return i
+    return -1
+
+pub func sum(xs: List<i32>) -> i32:
+    mut acc = 0
+    for i in range(0, len(xs)):
+        acc = acc + xs.at(i)
+    return acc
+
+pub func product(xs: List<i32>) -> i32:
+    mut acc = 1
+    for i in range(0, len(xs)):
+        acc = acc * xs.at(i)
+    return acc
+
+pub func min_or(xs: List<i32>, default_: i32) -> i32:
+    if len(xs) == 0:
+        return default_
+    mut acc = xs.at(0)
+    for i in range(1, len(xs)):
+        if xs.at(i) < acc:
+            acc = xs.at(i)
+    return acc
+
+pub func max_or(xs: List<i32>, default_: i32) -> i32:
+    if len(xs) == 0:
+        return default_
+    mut acc = xs.at(0)
+    for i in range(1, len(xs)):
+        if xs.at(i) > acc:
+            acc = xs.at(i)
+    return acc
+
+pub func copy(xs: List<i32>, arena: Arena) -> List<i32>:
+    let out = arena.list::<i32>()
+    for i in range(0, len(xs)):
+        out.push(xs.at(i))
+    return out
+
+pub func reverse(xs: List<i32>):
+    mut lo = 0
+    mut hi = len(xs) - 1
+    while lo < hi:
+        let tmp = xs.at(lo)
+        xs.at(lo) = xs.at(hi)
+        xs.at(hi) = tmp
+        lo = lo + 1
+        hi = hi - 1
+
+pub func reverse_into(dst: List<i32>, xs: List<i32>):
+    for i in range(0, len(xs)):
+        if len(dst) <= i:
+            dst.push(xs.at(len(xs) - 1 - i))
+        else:
+            dst.at(i) = xs.at(len(xs) - 1 - i)
+
+pub func concat(dst: List<i32>, xs: List<i32>):
+    for i in range(0, len(xs)):
+        dst.push(xs.at(i))
+
+pub func unique_into(out: List<i32>, xs: List<i32>) -> i32:
+    # Returns count of distinct values appended.
+    mut count = 0
+    for i in range(0, len(xs)):
+        mut v = xs.at(i)
+        if not contains_i32(out, v):
+            out.push(v)
+            count = count + 1
+    return count
+
+
+# ---------- List<str> helpers ----------
+pub func join(xs: List<str>, separator: str) -> str:
+    if len(xs) == 0:
+        return ""
+    mut out = xs.at(0)
+    mut i = 1
+    while i < len(xs):
+        out = str_concat(str_concat(out, separator), xs.at(i))
+        i = i + 1
+    return out
+
+pub func str_list_contains(xs: List<str>, value: str) -> bool:
+    for i in range(0, len(xs)):
+        if xs.at(i) == value:
+            return true
+    return false
+
+pub func count_prefix(xs: List<str>, prefix: str) -> i32:
+    mut n = 0
+    for i in range(0, len(xs)):
+        if str_starts_with(xs.at(i), prefix):
+            n = n + 1
+    return n
