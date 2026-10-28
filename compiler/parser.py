@@ -32,6 +32,7 @@ class Parser:
         # keeps checking later independent declarations where a safe boundary
         # can be found; callers should inspect this list.
         self.errors = []
+        self._error_keys = set()
 
     def peek(self, off=0):
         p = self.i + off
@@ -41,6 +42,22 @@ class Parser:
         tok = self.tokens[self.i]
         self.i += 1
         return tok
+
+    def _record(self, exc):
+        """Record a parse error, suppressing exact duplicates collected during recovery."""
+        key = (getattr(exc, 'msg', str(exc)), exc.filename,
+               exc.pos.line, exc.pos.col)
+        if key in self._error_keys:
+            return
+        self._error_keys.add(key)
+        self.errors.append(exc)
+
+    def _sync_to_newline(self):
+        while not self.check(TT.NEWLINE) and not self.check(TT.DEDENT) \
+                and not self.check(TT.EOF):
+            self.advance()
+        if self.check(TT.NEWLINE):
+            self.advance()
 
     def check(self, tt):
         return self.peek().type == tt
@@ -71,7 +88,7 @@ class Parser:
                 decls.append(decl)
                 continue
             except ParseError as exc:
-                self.errors.append(exc)
+                self._record(exc)
             # Do not spin between two identical positions.
             if self.i == start:
                 self.advance()
@@ -492,12 +509,29 @@ class Parser:
                           pos=A.Pos(t.line, t.col))
 
     def parse_block(self):
-        self.expect(TT.NEWLINE)
-        self.expect(TT.INDENT)
+        try:
+            self.expect(TT.NEWLINE)
+            self.expect(TT.INDENT)
+        except ParseError as exc:
+            self._record(exc)
+            return []
         stmts = []
         while not self.check(TT.DEDENT) and not self.check(TT.EOF):
-            stmts.append(self.parse_stmt())
-        self.expect(TT.DEDENT)
+            start = self.i
+            try:
+                stmt = self.parse_stmt()
+            except ParseError as exc:
+                self._record(exc)
+                if self.i == start:
+                    self.advance()
+                self._sync_to_newline()
+                continue
+            if stmt is not None:
+                stmts.append(stmt)
+        try:
+            self.expect(TT.DEDENT)
+        except ParseError as exc:
+            self._record(exc)
         return stmts
 
     def parse_stmt(self):
@@ -620,11 +654,27 @@ class Parser:
         self.expect(TT.INDENT)
         arms = []
         while not self.check(TT.DEDENT) and not self.check(TT.EOF):
-            arm = self.parse_match_arm()
+            start = self.i
+            try:
+                arm = self.parse_match_arm()
+            except ParseError as exc:
+                self._record(exc)
+                if self.i == start:
+                    self.advance()
+                self._sync_to_newline()
+                continue
             if arm.is_else and not (self.check(TT.DEDENT) or self.check(TT.EOF)):
-                self.error("'else' must be the last match arm")
+                try:
+                    self.error("'else' must be the last match arm")
+                except ParseError as exc:
+                    self._record(exc)
+                    self._sync_to_newline()
+                    continue
             arms.append(arm)
-        self.expect(TT.DEDENT)
+        try:
+            self.expect(TT.DEDENT)
+        except ParseError as exc:
+            self._record(exc)
         return A.MatchStmt(value, arms, A.Pos(tok.line, tok.col))
 
     def parse_match_arm(self):
