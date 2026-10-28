@@ -1,0 +1,355 @@
+# doom.vnt — a small 2.5D raycaster with SDL: movement, shaded walls,
+# floor, ceiling, doors and a handful of billboard sprites.  It keeps
+# to a fixed grid map so the whole renderer stays deterministic and fast.
+extern "sdl2" {
+    func SDL_Init(flags: u32) -> i32
+    func SDL_Quit() -> void
+    func SDL_CreateWindow(title: str, x: i32, y: i32, w: i32, h: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyWindow(window: ptr<void>) -> void
+    func SDL_CreateRenderer(window: ptr<void>, index: i32, flags: u32) -> ptr<void>
+    func SDL_DestroyRenderer(renderer: ptr<void>) -> void
+    func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
+    func SDL_RenderClear(renderer: ptr<void>) -> i32
+    func SDL_RenderFillRect(renderer: ptr<void>, rect: ptr<i32>) -> i32
+    func SDL_RenderPresent(renderer: ptr<void>) -> void
+    func SDL_PollEvent(event: ptr<i32>) -> i32
+    func SDL_Delay(ms: u32) -> void
+}
+
+# ---------- constants ----------
+const SCR_W: i32 = 320
+const SCR_H: i32 = 200
+const MAP_W: i32 = 16
+const MAP_H: i32 = 16
+const FOV: f32 = 1.0471975512   # 60 degrees
+const MOVE: f32 = 0.06
+const TURN: f32 = 0.04
+const TORCH: f32 = 0.7
+const MAX_FRAMES: i32 = 0
+
+# tile codes: 0 = empty, 1 = wall, 2 = closed door, 3 = door just opened, 4 = key (blue)
+const T_OPEN: i32 = 0
+const T_WALL: i32 = 1
+const T_DOOR: i32 = 2
+const T_DOOR_OPEN: i32 = 3
+const T_KEY: i32 = 4
+
+# event constants (as used by the gamekit; repeated here for independence)
+const EV_QUIT: i32 = 256
+const EV_KEYDOWN: i32 = 768
+const EV_KEYUP: i32 = 769
+const KEY_LEFT: i32 = 1073741904
+const KEY_RIGHT: i32 = 1073741903
+const KEY_UP: i32 = 1073741906
+const KEY_DOWN: i32 = 1073741905
+const KEY_SPACE: i32 = 32
+const KEY_ESC: i32 = 27
+
+# raycaster working arenas
+const TILE_W: i32 = 8
+const HORIZON: i32 = 100
+const SHORTEST: f32 = 0.1
+
+# ---------- helpers ----------
+func inv_dist(z: f32) -> f32:
+    if z < SHORTEST:
+        return 1.0 / SHORTEST
+    return 1.0 / z
+
+func tile_color(tile: i32, dist: f32) -> i32:
+    mut q = 255.0 - dist * 130.0
+    if q < 40.0:
+        q = 40.0
+    if tile == 1:
+        return f32_to_i32(q)
+    if tile == 3:
+        # a just-cleared door - darker than a wall
+        return f32_to_i32(q * 0.65)
+    return 0
+
+# Convert a ray intersection into a column color and wall height.
+func draw_column(renderer: ptr<void>, column: i32, wall_h: i32, wall_s: f32, kind: i32, rect: ptr<i32>) -> void:
+    if wall_h < 1:
+        return
+    mut r = 0
+    mut g = 0
+    mut b = 0
+    if kind == 1:
+        r = 200
+        g = 190
+        b = 165
+    elif kind == 3:
+        r = 120
+        g = 95
+        b = 70
+    else:
+        r = 120
+        g = 120
+        b = 120
+    mut shade = 1.0 - wall_s * 0.7
+    if shade < 0.25:
+        shade = 0.25
+    r = f32_to_i32(i32_to_f32(r) * shade)
+    g = f32_to_i32(i32_to_f32(g) * shade)
+    b = f32_to_i32(i32_to_f32(b) * shade)
+    SDL_SetRenderDrawColor(renderer, r, g, b, 255)
+    mut y0 = (SCR_H - wall_h) / 2
+    if y0 < 0:
+        y0 = 0
+    rect[0] = column
+    rect[1] = y0
+    rect[2] = 1
+    rect[3] = wall_h
+    SDL_RenderFillRect(renderer, rect)
+
+func tile_at(grid: ptr<i32>, x: i32, y: i32) -> i32:
+    if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H:
+        return 1  # treat out-of-bounds like solid
+    return grid[x + y * MAP_W]
+
+func set_tile(grid: ptr<i32>, x: i32, y: i32, v: i32) -> void:
+    if x < 0 or y < 0 or x >= MAP_W or y >= MAP_H:
+        return
+    grid[x + y * MAP_W] = v
+
+# ---------- main ----------
+func main() -> void:
+    if SDL_Init(32) != 0:
+        print_str("SDL_Init failed")
+        return
+    let window = SDL_CreateWindow("Vanta raycaster", 80, 80, SCR_W * 2, SCR_H * 2, 4)
+    if ptr_is_null(window):
+        print_str("SDL_CreateWindow failed")
+        SDL_Quit()
+        return
+    mut renderer = SDL_CreateRenderer(window, -1, 6)
+    if ptr_is_null(renderer):
+        renderer = SDL_CreateRenderer(window, -1, 0)
+    if ptr_is_null(renderer):
+        print_str("SDL_CreateRenderer failed")
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
+
+    # world
+    let arena = Arena(65536)
+    let grid = arena.alloc::<i32>(MAP_W * MAP_H)
+    let rect = arena.alloc::<i32>(4)
+    let ev = arena.alloc::<i32>(16)
+    # wipe world
+    mut wi = 0
+    while wi < MAP_W * MAP_H:
+        grid[wi] = 0
+        wi += 1
+    # border
+    mut bx = 0
+    while bx < MAP_W:
+        set_tile(grid, bx, 0, 1)
+        set_tile(grid, bx, MAP_H - 1, 1)
+        bx += 1
+    mut by = 0
+    while by < MAP_H:
+        set_tile(grid, 0, by, 1)
+        set_tile(grid, MAP_W - 1, by, 1)
+        by += 1
+    # a few internal walls
+    set_tile(grid, 4, 4, 1)
+    set_tile(grid, 5, 4, 1)
+    set_tile(grid, 6, 4, 1)
+    set_tile(grid, 4, 5, 1)
+    set_tile(grid, 4, 6, 1)
+    set_tile(grid, 9, 3, 2)   # door
+    set_tile(grid, 9, 4, 2)
+    set_tile(grid, 9, 5, 2)
+    set_tile(grid, 12, 8, 4)  # key cell
+    set_tile(grid, 11, 10, 1)
+    set_tile(grid, 12, 10, 1)
+    set_tile(grid, 13, 10, 1)
+    set_tile(grid, 12, 11, 1)
+
+    # sprites - simple positions (x, y) flattened into two pa
+    let sx = arena.alloc::<f32>(4)
+    let sy = arena.alloc::<f32>(4)
+    sx[0] = 3.5
+    sy[0] = 3.5
+    sx[1] = 12.5
+    sy[1] = 2.5
+    sx[2] = 2.0
+    sy[2] = 12.0
+    sx[3] = 7.5
+    sy[3] = 11.5
+
+    mut px = 2.5
+    mut py = 2.5
+    mut pa = 0.0
+    mut keys = 0
+    mut door_toggle = true
+    mut running = true
+    mut frames = 0
+    mut max_frames = MAX_FRAMES
+    if arg_count() > 1:
+        max_frames = str_to_i32(arg_str(1))
+    mut prev_space = false
+    mut left = false
+    mut right = false
+    mut up = false
+    mut down_pressed = false
+
+    while running:
+        while SDL_PollEvent(ev) == 1:
+            let t = ev[0]
+            if t == EV_QUIT:
+                running = false
+            elif t == EV_KEYDOWN or t == EV_KEYUP:
+                let down = t == EV_KEYDOWN
+                let sym = ev[5]
+                if sym == KEY_LEFT:
+                    left = down
+                elif sym == KEY_RIGHT:
+                    right = down
+                elif sym == KEY_UP:
+                    up = down
+                elif sym == KEY_DOWN:
+                    down_pressed = down
+                elif sym == KEY_SPACE:
+                    if down and not prev_space:
+                        # only activate adjacent doors
+                        let fx = f32_to_i32(px + cos_f32(pa) * 1.0)
+                        let fy = f32_to_i32(py + sin_f32(pa) * 1.0)
+                        let here = tile_at(grid, fx, fy)
+                        if here == T_DOOR:
+                            set_tile(grid, fx, fy, T_DOOR_OPEN)
+                    prev_space = down
+                elif sym == KEY_ESC:
+                    if down:
+                        running = false
+
+        if left:
+            pa -= TURN
+        if right:
+            pa += TURN
+        mut nx = px
+        mut ny = py
+        if up:
+            nx += cos_f32(pa) * MOVE
+            ny += sin_f32(pa) * MOVE
+        if down_pressed:
+            nx -= cos_f32(pa) * MOVE
+            ny -= sin_f32(pa) * MOVE
+        mut strafe_x = 0.0
+        mut strafe_y = 0.0
+        mut can = true
+        let tcell = tile_at(grid, f32_to_i32(nx), f32_to_i32(py))
+        if tcell != T_OPEN and tcell != T_KEY and tcell != T_DOOR_OPEN:
+            can = false
+        if can:
+            let ty = tile_at(grid, f32_to_i32(px), f32_to_i32(ny))
+            if ty == T_OPEN or ty == T_KEY or ty == T_DOOR_OPEN:
+                py = ny
+            px = nx
+        else:
+            let ty = tile_at(grid, f32_to_i32(px), f32_to_i32(ny))
+            if ty == T_OPEN or ty == T_KEY or ty == T_DOOR_OPEN:
+                py = ny
+
+        # pick up key
+        let gx = f32_to_i32(px)
+        let gy = f32_to_i32(py)
+        if tile_at(grid, gx, gy) == T_KEY:
+            set_tile(grid, gx, gy, T_OPEN)
+            keys += 1
+
+        # ---------- draw ----------
+        # ceiling / floor bands
+        SDL_SetRenderDrawColor(renderer, 30, 30, 55, 255)
+        rect[0] = 0
+        rect[1] = 0
+        rect[2] = SCR_W
+        rect[3] = HORIZON
+        SDL_RenderFillRect(renderer, rect)
+        SDL_SetRenderDrawColor(renderer, 24, 20, 18, 255)
+        rect[1] = HORIZON
+        rect[3] = SCR_H - HORIZON
+        SDL_RenderFillRect(renderer, rect)
+
+        # walls via DDA
+        mut column = 0
+        while column < SCR_W:
+            let ray_angle = pa + FOV * (i32_to_f32(column) - i32_to_f32(SCR_W) / 2.0) / i32_to_f32(SCR_W)
+            let c = cos_f32(ray_angle)
+            let s = sin_f32(ray_angle)
+            mut rx = px
+            mut ry = py
+            mut dist = 0.0
+            mut kind = 0
+            mut hit = false
+            mut step = 0
+            while step < 64:
+                let nx2 = rx + c * 0.05
+                let ny2 = ry + s * 0.05
+                let cell = tile_at(grid, f32_to_i32(nx2), f32_to_i32(ny2))
+                if cell != T_OPEN and cell != T_KEY and cell != T_DOOR_OPEN:
+                    dist = i32_to_f32(step) * 0.05
+                    kind = cell
+                    hit = true
+                    step = 64
+                else:
+                    rx = nx2
+                    ry = ny2
+                    step += 1
+            if hit:
+                let spinv = inv_dist(dist)
+                let h = f32_to_i32(i32_to_f32(SCR_H) * spinv * 0.5)
+                mut fade = 255.0 - dist * 80.0
+                if fade < 40.0:
+                    fade = 40.0
+                draw_column(renderer, column, h, 1.0 - spinv * 0.5, kind, rect)
+            column += 1
+
+        # sprites
+        mut si = 0
+        while si < 4:
+            let dx = sx[si] - px
+            let dy = sy[si] - py
+            let d = sqrt_f32(dx * dx + dy * dy)
+            if d > 0.1 and d < 7.0:
+                let sprite_size = f32_to_i32(i32_to_f32(SCR_H) / d)
+                if sprite_size > 4:
+                    let ang = pa
+                    let cw = dx * cos_f32(ang) + dy * sin_f32(ang)
+                    let cs = -dx * sin_f32(ang) + dy * cos_f32(ang)
+                    if cs > 0.0:
+                        let scx = f32_to_i32(i32_to_f32(SCR_W) / 2.0 + (cw / cs) * i32_to_f32(SCR_W) / 2.0)
+                        let sy0 = (SCR_H - sprite_size) / 2
+                        SDL_SetRenderDrawColor(renderer, 210, 70, 60, 255)
+                        rect[0] = scx - sprite_size / 4
+                        rect[1] = sy0
+                        rect[2] = sprite_size / 2
+                        rect[3] = sprite_size
+                        SDL_RenderFillRect(renderer, rect)
+            si += 1
+
+        # HUD bar (health-ish fixed)
+        SDL_SetRenderDrawColor(renderer, 190, 40, 40, 255)
+        rect[0] = 0
+        rect[1] = SCR_H - 12
+        rect[2] = 320
+        rect[3] = 4
+        SDL_RenderFillRect(renderer, rect)
+        SDL_SetRenderDrawColor(renderer, 230, 210, 60, 255)
+        rect[0] = 0
+        rect[1] = SCR_H - 18
+        rect[2] = 60 + keys * 4
+        rect[3] = 4
+        SDL_RenderFillRect(renderer, rect)
+
+        SDL_RenderPresent(renderer)
+        SDL_Delay(15)
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
+
+    SDL_DestroyRenderer(renderer)
+    SDL_DestroyWindow(window)
+    SDL_Quit()
+    print_fmt("frames {} keys {}", frames, keys)
