@@ -1716,7 +1716,7 @@ SDL2_image calls above — ordinary `.vnt` files, imported like anything else.
 | Module | Provides |
 |---|---|
 | `sdl.vnt` | SDL2 `extern` declarations, the `EV_*` / `KEY_*` / `SDL_FLIP_*` constants, `Screen`, `screen_open` / `screen_ok` / `screen_close` |
-| `input.vnt` | Event accessors over a `ptr<i32>` SDL event buffer: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key`, scancode, modifiers, mouse, button, wheel, window-event, and button-state/click accessors. Mismatched accessors fail at runtime with `vanta: assertion failed` rather than returning another event's field. Layout constants target the SDL2 `SDL_Event` ABI used by Vanta's tests and examples; other SDL header versions may need updated constants. |
+| `input.vnt` | Event accessors over a `ptr<i32>` SDL event buffer: `ev_is_quit`, `ev_is_keydown`, `ev_is_keyup`, `ev_key`, scancode, modifiers, mouse, button, wheel, window-event, and button-state/click accessors. Mismatched accessors fail at runtime with `vanta: assertion failed` rather than returning another event's field. Layout constants target the SDL2 `SDL_Event` ABI used by Vanta's tests and examples; `tests/test_sdl_abi_layout.py` compiles a small offset probe against the installed SDL2 headers, so a header layout change fails there first, and other SDL header versions may still need updated constants. |
 | `gamepad.vnt` | SDL2 controllers: `Pad`, `pad_open` / `pad_ok` / `pad_close`, `pad_attached`, `pad_button`, `pad_axis`, the `PAD_BUTTON_*` / `PAD_AXIS_*` constants |
 | `gfx.vnt` | `gfx_clear`, `gfx_fill_rect`, `gfx_stroke_rect`, `gfx_present` |
 | `image.vnt` | SDL2_image: `Tex`, `tex_load` / `tex_ok` / `tex_free`, `tex_tint`, `tex_alpha`, `tex_draw` / `tex_draw_src` / `tex_draw_ex` |
@@ -2255,7 +2255,31 @@ When C++ compilation fails during `build`, the generated source is saved to
 
 ## Language server profiling
 
-Set `VANTA_LSP_PROFILE=1` to write compact diagnostic latency records to stderr.
-The existing server remains single-threaded and deterministic. Measured small-file
-diagnostic validation is typically in the sub-millisecond to low-millisecond
-range; re-open batched execution only if documented latency targets are missed.
+Set `VANTA_LSP_PROFILE=1` to write compact diagnostic latency records to
+stderr. Each record looks like:
+
+    vanta lsp profile: phase=diagnostics uri='file:///...' rev=12 \
+        elapsed_ms=1.33 files=1 published=1
+
+`python scripts/lsp_profile.py` runs realistic editor scenarios over the
+real server paths and prints p50/p95/p99 (milliseconds):
+
+| Scenario (examples tree) | p50 | p95 | p99 |
+|---|---|---|---|
+| `pong.vnt` edit + diagnostics | 62.2 | 89.0 | 92.6 |
+| `pong.vnt` completion | 31.3 | 61.1 | 76.8 |
+| `gamekit/input.vnt` edit with 3 docs open | 19.7 | 55.7 | 62.9 |
+| per-file cold open (57 files) | 11.6 | 90.8 | 114.1 |
+| per-file edit, full sweep of 57 files | 15.5 | 90.8 | 96.7 |
+| whole sweep (57 edits) | 1379.8 total | — | — |
+
+(Measured 2026-10-28 on the development machine, Windows, Python 3.10,
+full-sync `didChange`; the absolute numbers scale with machine speed and
+project size — `scripts/lsp_profile.py` reproduces them.)
+
+Documented reopening criteria for batched or threaded diagnostics: a
+representative project whose edit-to-diagnostics p95 exceeds **250 ms**, or
+whose whole-workspace edit sweep exceeds **5 s** for ~60 files. The current
+server is deliberately single-threaded and deterministic: it stays far below
+those targets (tens of milliseconds per edit), and small warm files still
+validate in the sub-millisecond range.
