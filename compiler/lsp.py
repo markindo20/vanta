@@ -32,7 +32,7 @@ from . import VERSION
 from . import ast_nodes as A
 from .formatter import FormatError, format_source
 from .lexer import LexError, Lexer
-from .loader import LoadError, STDLIB_DIR, load_program
+from .loader import LoadError, STDLIB_DIR, load_program, load_program_cached, MemoryModuleCache
 from .tokens import KEYWORDS, TT
 from .parser import ParseError, Parser
 from .type_checker import CheckError, TypeChecker
@@ -2561,7 +2561,10 @@ class LanguageServer:
         self._diagnostic_cache_files: dict[str, list[dict]] = {}
         self._diagnostic_cache_disk_digests: tuple[str, ...] = ()
         self._diagnostic_cache_loaded_paths: tuple[str, ...] = ()
+        self._diagnostic_cache_entry_path: Optional[str] = None
         self._file_list_cache: dict[str, tuple[float, list[str]]] = {}
+        # Optional per-module cache.  Tests/benchmarks enable it explicitly.
+        self._module_cache = None
         self._profile_enabled: bool = os.environ.get(
             'VANTA_LSP_PROFILE', '',) .strip().lower() in {'1', 'true', 'yes'}
         self._profile_started_at: float = time.perf_counter()
@@ -2901,10 +2904,17 @@ class LanguageServer:
                 return None
         return tuple(out)
 
-    def _diagnostic_cache_commit(self, fingerprint, result, loaded_paths):
+    def _diagnostic_cache_commit(self, fingerprint, result, loaded_paths,
+                                 entry_path=None):
         self._diagnostic_cache_fingerprint = fingerprint
         self._diagnostic_cache_files = {k: [dict(d) for d in (v or [])]
                                          for k, v in result.items()}
+        if entry_path is not None:
+            try:
+                self._diagnostic_cache_entry_path = os.path.abspath(
+                    str(entry_path))
+            except Exception:
+                self._diagnostic_cache_entry_path = str(entry_path)
         try:
             self._diagnostic_cache_loaded_paths = tuple(
                 os.path.abspath(p) for p in loaded_paths)
@@ -2943,8 +2953,15 @@ class LanguageServer:
             except (OSError, UnicodeError):
                 pass
         open_fingerprint = self._fingerprint_sources(sources)
+        # The cached diagnostic result is only valid for the same entry path:
+        # a diagnostic run for `dep.vnt` must not be reused when the caller
+        # subsequently analyses `main.vnt`, even if the open-document bytes
+        # and on-disk digests happen to match.
         if (open_fingerprint == self._diagnostic_cache_fingerprint and
-                self._diagnostic_cache_loaded_paths):
+                self._diagnostic_cache_loaded_paths and
+                self._diagnostic_cache_entry_path is not None and
+                os.path.abspath(str(path)) ==
+                os.path.abspath(str(self._diagnostic_cache_entry_path))):
             disk_digests = self._fingerprint_disk(
                 self._diagnostic_cache_loaded_paths)
             if (disk_digests is not None and
@@ -2954,7 +2971,12 @@ class LanguageServer:
         result: dict[str, list[dict]] = {path: []}
         diagnostics: list[dict] = []
         try:
-            program = load_program(path, sources=sources)
+            if getattr(self, '_module_cache', None) is not None:
+                program = load_program_cached(
+                    path, sources=sources, search_paths=None,
+                    cache=self._module_cache)
+            else:
+                program = load_program(path, sources=sources)
             parse_errors = list(getattr(program, 'parse_errors', []) or [])
             if parse_errors:
                 for exc in parse_errors:
@@ -2971,14 +2993,14 @@ class LanguageServer:
                         'message': getattr(exc, 'msg', str(exc)),
                     })
                 self._diagnostic_cache_commit(
-                    open_fingerprint, result, program.loaded_paths)
+                    open_fingerprint, result, program.loaded_paths, path)
                 return result
             tc = TypeChecker(program, path)
             tc.register(multi=True)
             tc.check(multi=True)
             if not tc.errors:
                 self._diagnostic_cache_commit(
-                    open_fingerprint, result, program.loaded_paths)
+                    open_fingerprint, result, program.loaded_paths, path)
                 return result
             for exc in tc.errors:
                 filename, line, col = _error_location(exc, path)
@@ -2994,7 +3016,7 @@ class LanguageServer:
                     'message': getattr(exc, 'msg', str(exc)),
                 })
             self._diagnostic_cache_commit(
-                open_fingerprint, result, program.loaded_paths)
+                open_fingerprint, result, program.loaded_paths, path)
             return result
         except (LexError, ParseError, LoadError) as exc:
             filename, line, col = _error_location(exc, path)

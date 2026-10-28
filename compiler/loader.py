@@ -20,6 +20,8 @@ still allowing two modules to define the same source name.
 """
 
 import os
+import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 
 from . import ast_nodes as A
@@ -795,4 +797,225 @@ def load_program(entry_path, sources=None, search_paths=None):
     ]
     program.parse_errors = getattr(program, 'parse_errors', []) + list(
         getattr(loader, '_parse_errors', []))
+    return program
+
+
+def _fingerprint_disk_tuple(paths):
+    out = []
+    for p in (paths or ()):
+        try:
+            with open(p, 'rb') as f:
+                out.append(hashlib.sha256(f.read()).hexdigest())
+        except (OSError, TypeError, ValueError):
+            return None
+    return tuple(out)
+
+
+def _normalize_loader_cache_path(path):
+    if path is None:
+        return ''
+    try:
+        return os.path.normcase(os.path.normpath(str(path)))
+    except Exception:
+        return str(path)
+
+
+class MemoryModuleCache:
+    """In-memory cache for loader parsed/resolved outputs.
+
+    Keys are derived from a path plus source text (or any string used as
+    the cache key).  ``get``/``put`` accept the path and text in that order
+    so callers can use ``cache.get(path, text)`` and
+    ``cache.put(path, text, value)``.
+    """
+
+    def __init__(self, capacity=256):
+        try:
+            self.capacity = max(1, int(capacity))
+        except (TypeError, ValueError):
+            self.capacity = 256
+        self._entries = OrderedDict()
+
+    @staticmethod
+    def _unpack_key_args(path, text):
+        if isinstance(path, (tuple, list)):
+            if len(path) == 0:
+                path = None
+                text = '' if text is None else text
+            elif len(path) == 1:
+                if text is None:
+                    text = ''
+                path = path[0]
+            else:
+                if text is None:
+                    text = path[1]
+                path = path[0]
+        if text is None:
+            text = ''
+        return path, text
+
+    @staticmethod
+    def _coerce_text(text):
+        if text is None:
+            return ''
+        if isinstance(text, str):
+            return text
+        try:
+            return str(text)
+        except Exception:
+            return repr(text)
+
+    def _key(self, path, text):
+        path, text = self._unpack_key_args(path, text)
+        path = _normalize_loader_cache_path(path)
+        text = self._coerce_text(text)
+        return (path, hashlib.sha256(text.encode('utf-8', 'surrogateescape')).hexdigest())
+
+    def get(self, path, text=None, **kwargs):
+        # Accept optional keyword spellings for the value position.
+        if text is None:
+            for name in ('text', 'source', 'inputs', 'key'):
+                if name in kwargs:
+                    text = kwargs.get(name)
+                    break
+        key = self._key(path, text)
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return self._entries[key]
+        return None
+
+    def put(self, path, text=None, value=None, **kwargs):
+        # Flexible value handling.
+        if value is None:
+            for name in ('value', 'result', 'program', 'module', 'data',
+                         'entry', 'payload', 'cached'):
+                if name in kwargs:
+                    value = kwargs.pop(name)
+                    break
+
+        # Support callers that omit the cache key text when a value is given
+        # positionally as the second argument.
+        if value is None and text is not None and not isinstance(text, str):
+            # Distinguish a deliberate (path, text, omitted value) call: if
+            # text looks like a program/result object, treat it as the value.
+            value = text
+            text = kwargs.get('text', kwargs.get('source', kwargs.get('inputs', '')))
+
+        path, text = self._unpack_key_args(path, text)
+        key = self._key(path, text)
+        self._entries[key] = value
+        self._entries.move_to_end(key)
+        while len(self._entries) > self.capacity:
+            self._entries.popitem(last=False)
+        return value
+
+    def clear(self):
+        self._entries.clear()
+
+    def __len__(self):
+        return len(self._entries)
+
+    def __contains__(self, item):
+        # item may be a (path, text) pair or a key.
+        try:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                return self._key(item[0], item[1]) in self._entries
+        except Exception:
+            pass
+        return item in self._entries
+
+    def items(self):
+        return list(self._entries.items())
+
+    def keys(self):
+        return list(self._entries.keys())
+
+    def values(self):
+        return list(self._entries.values())
+
+
+def _serialize_load_inputs(entry_path, sources, search_paths):
+    parts = [os.path.normpath(str(entry_path or ''))]
+    try:
+        parts.append(os.path.normcase(os.path.abspath(str(entry_path))))
+    except Exception:
+        pass
+    for sp in (search_paths or ()):
+        parts.append('search_path:' + str(sp))
+    try:
+        env = os.environ.get('VANTA_PATH')
+    except Exception:
+        env = None
+    if env is not None:
+        parts.append('vanta_path:' + str(env))
+    items = []
+    for path, text in (sources or {}).items():
+        items.append((str(path), '' if text is None else str(text)))
+    for path, text in sorted(items):
+        parts.append('source:' + path + '\x00' + text)
+    return '\n'.join(parts)
+
+
+def load_program_cached(entry_path, sources=None, search_paths=None, cache=None):
+    """Load a program, reusing a cached result when inputs are byte-identical.
+
+    ``cache`` may be a ``MemoryModuleCache`` or ``None``.  When ``None`` a
+    local cache is used for the duration of the call.  The function never
+    raises because of cache operations: any cache failure falls back to a
+    fresh ``load_program`` call.
+    """
+    if sources is None:
+        sources = {}
+    if search_paths is None:
+        env = os.environ.get('VANTA_PATH')
+        search_paths = env.split(os.pathsep) if env else []
+    search_paths = list(search_paths)
+
+    if cache is None:
+        cache = MemoryModuleCache()
+
+    input_text = _serialize_load_inputs(entry_path, sources, search_paths)
+
+    program = None
+    loaded_paths = ()
+    stored_digest = None
+    try:
+        cached = cache.get(entry_path, input_text)
+    except Exception:
+        cached = None
+
+    if isinstance(cached, tuple):
+        if len(cached) >= 1:
+            program = cached[0]
+        if len(cached) >= 2:
+            loaded_paths = tuple(cached[1] or ())
+        if len(cached) >= 3:
+            stored_digest = cached[2]
+    elif cached is not None and not isinstance(cached, (str, bytes, dict)):
+        program = cached
+
+    if program is not None:
+        if not loaded_paths:
+            loaded_paths = tuple(getattr(program, 'loaded_paths', []) or ())
+        if stored_digest is None:
+            stored_digest = _fingerprint_disk_tuple(loaded_paths)
+        current_digest = _fingerprint_disk_tuple(loaded_paths)
+        # Reuse if nothing on disk changed (or there are no disk paths).
+        if stored_digest is None and current_digest is None:
+            return program
+        if stored_digest is not None and current_digest is not None and \
+                stored_digest == current_digest:
+            return program
+
+    # Fall back to a fresh load and update the cache.
+    program = load_program(entry_path, sources=sources, search_paths=search_paths)
+    loaded_paths = tuple(getattr(program, 'loaded_paths', []) or ())
+    current_digest = _fingerprint_disk_tuple(loaded_paths)
+    try:
+        cache.put(entry_path, input_text, (program, loaded_paths, current_digest))
+    except Exception:
+        try:
+            cache.put(entry_path, input_text, program)
+        except Exception:
+            pass
     return program
