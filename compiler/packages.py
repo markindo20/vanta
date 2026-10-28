@@ -250,7 +250,11 @@ def fetch_source(source, dest, name, ref=None):
             src.startswith('git@') or src.startswith('git:') or
             source.startswith('git+')):
         try:
-            subprocess.run(['git', 'clone', src, target], check=True,
+            # Autocrlf is forced off so a vendored checkout is byte-identical
+            # on every platform: digests then stay reproducible regardless of
+            # each machine's core.autocrlf setting.
+            subprocess.run(['git', '-c', 'core.autocrlf=false',
+                            'clone', src, target], check=True,
                            capture_output=True, text=True)
         except Exception as exc:
             raise RuntimeError(f'could not clone {src}: {exc}')
@@ -262,9 +266,10 @@ def fetch_source(source, dest, name, ref=None):
             checked_out = False
             for candidate in candidates:
                 try:
-                    subprocess.run(['git', '-C', target, 'checkout',
-                                    '--detach', candidate], check=True,
-                                   capture_output=True, text=True)
+                    subprocess.run(['git', '-C', target,
+                                    '-c', 'core.autocrlf=false',
+                                    'checkout', '--detach', candidate],
+                                   check=True, capture_output=True, text=True)
                     checked_out = True
                     break
                 except Exception:
@@ -273,8 +278,6 @@ def fetch_source(source, dest, name, ref=None):
                 _rmtree(target)
                 raise RuntimeError(
                     f'could not checkout {requested_ref!r}')
-                _rmtree(target)
-                raise RuntimeError(f'could not checkout {requested_ref!r}: {exc}')
         try:
             out = subprocess.run(['git', '-C', target, 'rev-parse', 'HEAD'],
                                  capture_output=True, text=True).stdout.strip()
@@ -373,7 +376,9 @@ def _tree_digest(root):
     The digest covers sorted file paths and their byte contents. A digest can
     therefore detect partial installations, manual edits, and mismatched
     vendored trees without assuming anything about the dependency's source
-    backend.
+    backend. VCS bookkeeping (`.git` directories) is excluded, so re-fetching
+    the same pinned commit yields the same digest even though `.git/index`
+    records fresh mtimes on every clone.
     """
     root = os.path.abspath(root)
     if not os.path.isdir(root):
@@ -381,13 +386,11 @@ def _tree_digest(root):
     root_real = os.path.realpath(root)
     hasher = hashlib.sha256()
     for dirpath, dirs, files in os.walk(root):
-        dirs[:] = sorted(dirs)
+        dirs[:] = sorted(d for d in dirs if d != '.git')
         for name in sorted(files):
             full = os.path.join(dirpath, name)
             if os.path.islink(full):
                 raise RuntimeError(f'unsafe archive member {name!r}: symlink')
-            if os.path.realpath(full) != os.path.realpath(full):
-                pass
             real = os.path.realpath(full)
             if os.path.commonpath([root_real, real]) != root_real:
                 raise RuntimeError(f'unsafe dependency path {name!r}')
@@ -404,19 +407,6 @@ def digest_file(full, hasher, rel):
     hasher.update(b':')
     hasher.update(data)
 
-
-def _installed_git_commit(path):
-    """Return HEAD for a downloaded git checkout, or an empty string."""
-    git_dir = os.path.join(path, '.git')
-    if not os.path.lexists(git_dir):
-        return ''
-    try:
-        result = subprocess.run(
-            ['git', '-C', path, 'rev-parse', 'HEAD'],
-            check=True, capture_output=True, text=True)
-    except Exception:
-        return ''
-    return result.stdout.strip()
 
 def _sources_compatible(dep_name, spec, locked_source):
     source = str(locked_source or '').strip()
@@ -648,8 +638,11 @@ def cmd_pm_install(args):
             sys.stderr.write(f'error: {exc}\n')
             failures += 1
             continue
+        # The lock's identity is exactly what `pm add` recorded first;
+        # reinstalling only refreshes commit/digest, it must not rewrite
+        # `registry:name@version` back to the manifest's version-only form.
         lock['packages'][name] = {
-            'source': src, 'path': target,
+            'source': locked_source or src, 'path': target,
             'commit': commit or locked_commit,
             'sha256': _tree_digest(target) or locked_digest}
         dep_manifest = os.path.join(target, MANIFEST)

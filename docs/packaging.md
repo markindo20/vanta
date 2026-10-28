@@ -87,6 +87,16 @@ Install behavior:
   older `vanta.lock` files; `pm check` passes and `pm install` records values
   on the next fetch.
 
+Digest and checkout determinism:
+- The tree digest covers files and contents only; VCS bookkeeping (`.git`
+  directories) is excluded, so re-fetching the same pinned commit is
+  byte-identical across machines.
+- Git fetches force `core.autocrlf=false` on clone and checkout, so vendored
+  files keep LF endings no matter the local Git policy.
+- A successful install keeps the source identity the lock already records;
+  it refreshes `commit`/`sha256` but does not rewrite `registry:name@version`
+  into the manifest's version-only form.
+
 ## Unsupported and incomplete features
 
 - No signed registry; HTTP and local directory registry modes are simple
