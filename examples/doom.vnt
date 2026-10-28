@@ -161,28 +161,38 @@ func main() -> void:
     set_tile(grid, 9, 3, 2)   # door
     set_tile(grid, 9, 4, 2)
     set_tile(grid, 9, 5, 2)
-    set_tile(grid, 12, 8, 4)  # key cell
+    set_tile(grid, 12, 8, 4)  # key tile (emerald): pick up for a door? here just XP
     set_tile(grid, 11, 10, 1)
     set_tile(grid, 12, 10, 1)
     set_tile(grid, 13, 10, 1)
     set_tile(grid, 12, 11, 1)
+    set_tile(grid, 7, 6, 5)    # ammo pickup
+    set_tile(grid, 5, 11, 5)
+    set_tile(grid, 14, 3, 6)   # exit (reach to win)
 
     # sprites - simple positions (x, y) flattened into two pa
     let sx = arena.alloc::<f32>(4)
     let sy = arena.alloc::<f32>(4)
+    let sh = arena.alloc::<i32>(4)
     sx[0] = 3.5
     sy[0] = 3.5
+    sh[0] = 100
     sx[1] = 12.5
     sy[1] = 2.5
+    sh[1] = 100
     sx[2] = 2.0
     sy[2] = 12.0
+    sh[2] = 100
     sx[3] = 7.5
     sy[3] = 11.5
+    sh[3] = 100
 
     mut px = 2.5
     mut py = 2.5
     mut pa = 0.0
     mut keys = 0
+    mut health = 100
+    mut ammo = 24
     mut door_toggle = true
     mut running = true
     mut frames = 0
@@ -190,10 +200,13 @@ func main() -> void:
     if arg_count() > 1:
         max_frames = str_to_i32(arg_str(1))
     mut prev_space = false
+    mut prev_fire = false
+    mut cooldown = 0
     mut left = false
     mut right = false
     mut up = false
     mut down_pressed = false
+    mut fire_pressed = false
 
     while running:
         while SDL_PollEvent(ev) == 1:
@@ -213,13 +226,16 @@ func main() -> void:
                     down_pressed = down
                 elif sym == KEY_SPACE:
                     if down and not prev_space:
-                        # only activate adjacent doors
+                        # doors open instantly when facing them
                         let fx = f32_to_i32(px + cos_f32(pa) * 1.0)
                         let fy = f32_to_i32(py + sin_f32(pa) * 1.0)
-                        let here = tile_at(grid, fx, fy)
-                        if here == T_DOOR:
+                        if tile_at(grid, fx, fy) == T_DOOR:
                             set_tile(grid, fx, fy, T_DOOR_OPEN)
                     prev_space = down
+                elif sym == 102:    # F fires one projectile
+                    if down and not prev_fire:
+                        fire_pressed = true
+                    prev_fire = down
                 elif sym == KEY_ESC:
                     if down:
                         running = false
@@ -252,12 +268,43 @@ func main() -> void:
             if ty == T_OPEN or ty == T_KEY or ty == T_DOOR_OPEN:
                 py = ny
 
-        # pick up key
+        # pick up key / ammo / exit
         let gx = f32_to_i32(px)
         let gy = f32_to_i32(py)
-        if tile_at(grid, gx, gy) == T_KEY:
+        let gcell = tile_at(grid, gx, gy)
+        if gcell == T_KEY:
             set_tile(grid, gx, gy, T_OPEN)
             keys += 1
+        elif gcell == 5:
+            set_tile(grid, gx, gy, T_OPEN)
+            ammo += 6
+        elif gcell == 6:
+            running = false
+            print_str("EXIT REACHED")
+        # shooting: raycast from facing cell
+        if fire_pressed:
+            fire_pressed = false
+            if ammo > 0:
+                ammo = ammo - 1
+                mut si = 0
+                while si < 4:
+                    let ex_ = sx[si]
+                    let ey_ = sy[si]
+                    let dx_ = ex_ - px
+                    let dy_ = ey_ - py
+                    let d_ = sqrt_f32(dx_ * dx_ + dy_ * dy_)
+                    mut aim_ok = false
+                    # test whether sprite is roughly on the forward ray
+                    if d_ < 8.0 and d_ > 0.1:
+                        let ca_ = dx_ * cos_f32(pa) + dy_ * sin_f32(pa)
+                        if ca_ > 0.0 and ca_ > d_ - 0.6:
+                            aim_ok = true
+                    if aim_ok:
+                        sh[si] = sh[si] - 34
+                        if sh[si] <= 0:
+                            sx[si] = -100.0
+                            sy[si] = -100.0
+                    si += 1
 
         # ---------- draw ----------
         # ceiling / floor bands
@@ -336,15 +383,42 @@ func main() -> void:
         rect[2] = 320
         rect[3] = 4
         SDL_RenderFillRect(renderer, rect)
-        SDL_SetRenderDrawColor(renderer, 230, 210, 60, 255)
+        SDL_SetRenderDrawColor(renderer, 40, 220, 120, 255)
         rect[0] = 0
         rect[1] = SCR_H - 18
-        rect[2] = 60 + keys * 4
+        rect[2] = 20 + ammo * 4
+        rect[3] = 4
+        if rect[2] > 160:
+            rect[2] = 160
+        SDL_RenderFillRect(renderer, rect)
+        SDL_SetRenderDrawColor(renderer, 230, 210, 60, 255)
+        rect[0] = 164
+        rect[1] = SCR_H - 18
+        rect[2] = 60 + keys * 12
         rect[3] = 4
         SDL_RenderFillRect(renderer, rect)
 
         SDL_RenderPresent(renderer)
         SDL_Delay(15)
+        if cooldown > 0:
+            cooldown -= 1
+        # hazard tick + proximity damage
+        mut damaged = false
+        # red-bar health shown in hud; reduce slightly near enemies
+        mut sih = 0
+        while sih < 4:
+            if sx[sih] > -99.0:
+                let dxi = sx[sih] - px
+                let dyi = sy[sih] - py
+                let di = sqrt_f32(dxi * dxi + dyi * dyi)
+                if di < 1.0 and frames % 30 == 0:
+                    health -= 2
+                    if health < 0:
+                        health = 0
+            sih += 1
+        if health <= 0:
+            running = false
+            print_str("YOU DIED")
         frames += 1
         if max_frames > 0 and frames >= max_frames:
             running = false
