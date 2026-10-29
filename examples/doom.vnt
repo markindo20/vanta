@@ -34,6 +34,8 @@ const T_WALL: i32 = 1
 const T_DOOR: i32 = 2
 const T_DOOR_OPEN: i32 = 3
 const T_KEY: i32 = 4
+const T_AMMO: i32 = 5
+const T_EXIT: i32 = 6
 
 # event constants (as used by the gamekit; repeated here for independence)
 const EV_QUIT: i32 = 256
@@ -143,6 +145,20 @@ func set_tile(grid: ptr<i32>, x: i32, y: i32, v: i32) -> void:
     grid[x + y * MAP_W] = v
 
 # ---------- main ----------
+func walkable(grid: ptr<i32>, x: i32, y: i32) -> bool:
+    let c = tile_at(grid, x, y)
+    if c == T_OPEN:
+        return true
+    if c == T_KEY:
+        return true
+    if c == T_AMMO:
+        return true
+    if c == T_EXIT:
+        return true
+    if c == T_DOOR_OPEN:
+        return true
+    return false
+
 func main() -> void:
     if SDL_Init(32) != 0:
         print_str("SDL_Init failed")
@@ -225,6 +241,8 @@ func main() -> void:
     mut keys = 0
     mut health = 100
     mut ammo = 24
+    mut level = 1
+    mut level_ticks = 0
     mut door_toggle = true
     mut running = true
     mut frames = 0
@@ -300,6 +318,34 @@ func main() -> void:
             if ty == T_OPEN or ty == T_KEY or ty == T_DOOR_OPEN:
                 py = ny
 
+        # lightweight enemy pursuit (greedy, wall-avoiding)
+        mut e_i = 0
+        while e_i < 4:
+            if sx[e_i] > -90.0 and sh[e_i] > 0:
+                mut tx = sx[e_i]
+                mut ty = sy[e_i]
+                let dxp_ = px - tx
+                let dyp_ = py - ty
+                if dxp_ < -0.05:
+                    mut stepx = -0.02
+                    if walkable(grid, f32_to_i32(tx + stepx), f32_to_i32(ty)):
+                        tx = tx + stepx
+                elif dxp_ > 0.05:
+                    mut stepx = 0.02
+                    if walkable(grid, f32_to_i32(tx + stepx), f32_to_i32(ty)):
+                        tx = tx + stepx
+                if dyp_ < -0.05:
+                    mut stepy = -0.02
+                    if walkable(grid, f32_to_i32(tx), f32_to_i32(ty + stepy)):
+                        ty = ty + stepy
+                elif dyp_ > 0.05:
+                    mut stepy = 0.02
+                    if walkable(grid, f32_to_i32(tx), f32_to_i32(ty + stepy)):
+                        ty = ty + stepy
+                sx[e_i] = tx
+                sy[e_i] = ty
+            e_i += 1
+
         # pick up key / ammo / exit
         let gx = f32_to_i32(px)
         let gy = f32_to_i32(py)
@@ -311,8 +357,58 @@ func main() -> void:
             set_tile(grid, gx, gy, T_OPEN)
             ammo += 6
         elif gcell == 6:
-            running = false
-            print_str("EXIT REACHED")
+            if level == 1:
+                mut i_ = 0
+                while i_ < MAP_W * MAP_H:
+                    grid[i_] = 0
+                    i_ += 1
+                mut bx_ = 0
+                while bx_ < MAP_W:
+                    set_tile(grid, bx_, 0, 1)
+                    set_tile(grid, bx_, MAP_H - 1, 1)
+                    bx_ += 1
+                mut by_ = 0
+                while by_ < MAP_H:
+                    set_tile(grid, 0, by_, 1)
+                    set_tile(grid, MAP_W - 1, by_, 1)
+                    by_ += 1
+                set_tile(grid, 3, 3, 1)
+                set_tile(grid, 4, 3, 1)
+                set_tile(grid, 5, 3, 1)
+                set_tile(grid, 3, 4, 1)
+                set_tile(grid, 8, 7, T_DOOR)
+                set_tile(grid, 8, 8, 2)
+                set_tile(grid, 8, 9, 2)
+                set_tile(grid, 6, 10, 1)
+                set_tile(grid, 7, 10, 1)
+                set_tile(grid, 8, 10, 1)
+                set_tile(grid, 8, 11, 1)
+                set_tile(grid, 12, 3, T_KEY)
+                set_tile(grid, 14, 5, T_AMMO)
+                set_tile(grid, 2, 13, 6)
+                sx[0] = 3.5
+                sy[0] = 5.5
+                sh[0] = 140
+                sx[1] = 12.5
+                sy[1] = 8.5
+                sh[1] = 140
+                sx[2] = -100.0
+                sy[2] = -100.0
+                sh[2] = 60
+                sx[3] = -100.0
+                sy[3] = -100.0
+                sh[3] = 60
+                px = 1.5
+                py = 1.5
+                pa = 0.0
+                level = 2
+                print_str("LEVEL 2")
+            running = (level < 2) or (frames < 9000)
+            if level >= 2 and frames > 1000:
+                print_str("LEVEL 2 CLEARED BY RETREAT")
+            level_ticks += 1
+            if running:
+                set_tile(grid, gx, gy, T_OPEN)
         # shooting: raycast from facing cell
         if fire_pressed:
             fire_pressed = false
@@ -458,4 +554,4 @@ func main() -> void:
     SDL_DestroyRenderer(renderer)
     SDL_DestroyWindow(window)
     SDL_Quit()
-    print_fmt("frames {} keys {}", frames, keys)
+    print_fmt("frames {} level {} keys {} health {} ammo {}", frames, level, keys, health, ammo)
