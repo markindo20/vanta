@@ -1,6 +1,17 @@
 # doom.vnt — a small 2.5D raycaster with SDL: movement, shaded walls,
 # floor, ceiling, doors and a handful of billboard sprites.  It keeps
 # to a fixed grid map so the whole renderer stays deterministic and fast.
+struct SDL_AudioSpec:
+    freq: i32
+    format: u16
+    channels: u8
+    silence: u8
+    samples: u16
+    padding: u16
+    size: u32
+    callback: func(ptr<void>, ptr<u8>, i32)
+    userdata: ptr<void>
+
 extern "sdl2" {
     func SDL_Init(flags: u32) -> i32
     func SDL_Quit() -> void
@@ -14,6 +25,14 @@ extern "sdl2" {
     func SDL_RenderSetLogicalSize(renderer: ptr<void>, w: i32, h: i32) -> i32
     func SDL_RenderPresent(renderer: ptr<void>) -> void
     func SDL_PollEvent(event: ptr<i32>) -> i32
+    func SDL_OpenAudioDevice(device: ptr<u8>, iscapture: i32, desired: ptr<SDL_AudioSpec>, obtained: ptr<SDL_AudioSpec>, allowed_changes: i32) -> u32
+    func SDL_QueueAudio(dev: u32, data: ptr<void>, len: i32) -> i32
+    func SDL_GetQueuedAudioSize(dev: u32) -> u32
+    func SDL_PauseAudioDevice(dev: u32, pause_on: i32) -> void
+    func SDL_CloseAudioDevice(dev: u32) -> void
+    func SDL_RWFromFile(file: str, mode: str) -> ptr<void>
+    func SDL_LoadWAV_RW(src: ptr<void>, freesrc: i32, spec: ptr<SDL_AudioSpec>, audio_buf: ptr<ptr<u8>>, audio_len: ptr<u32>) -> ptr<SDL_AudioSpec>
+    func SDL_FreeWAV(audio_buf: ptr<u8>) -> void
     func SDL_Delay(ms: u32) -> void
 }
 
@@ -38,6 +57,8 @@ const T_AMMO: i32 = 5
 const T_EXIT: i32 = 6
 
 # event constants (as used by the gamekit; repeated here for independence)
+const SDL_INIT_AUDIO: u32 = 16
+const AUDIO_S16SYS: u16 = 32784
 const EV_QUIT: i32 = 256
 const EV_KEYDOWN: i32 = 768
 const EV_KEYUP: i32 = 769
@@ -160,7 +181,7 @@ func walkable(grid: ptr<i32>, x: i32, y: i32) -> bool:
     return false
 
 func main() -> void:
-    if SDL_Init(32) != 0:
+    if SDL_Init(48) != 0:
         print_str("SDL_Init failed")
         return
     let window = SDL_CreateWindow("Vanta raycaster", 0, 0, SCR_W * 2, SCR_H * 2, 4101)
@@ -182,6 +203,28 @@ func main() -> void:
 
     let arena = Arena(65536)
     let grid = arena.alloc::<i32>(MAP_W * MAP_H)
+    let audio_spec = arena.alloc::<SDL_AudioSpec>(1)
+    let desired_spec = arena.alloc::<SDL_AudioSpec>(1)
+    let pause_handle = arena.alloc::<i32>(1)
+    let audio_data = arena.alloc::<ptr<u8>>(1)
+    let audio_len = arena.alloc::<u32>(1)
+    audio_data[0] = ptr_null::<u8>()
+    audio_len[0] = 0
+    mut audio_dev: u32 = 0
+    mut audio_nbytes = 0
+    let rw = SDL_RWFromFile("examples/assets/blip.wav", "rb")
+    if not ptr_is_null(rw):
+        desired_spec[0] = SDL_AudioSpec(
+            freq: 44100, format: AUDIO_S16SYS, channels: 1, silence: 0,
+            samples: 1024, padding: 0, size: 0,
+            callback: ptr_null::<func(ptr<void>, ptr<u8>, i32)>(),
+            userdata: ptr_null::<void>())
+        let loaded_spec = SDL_LoadWAV_RW(rw, 1, audio_spec, audio_data, audio_len)
+        if not ptr_is_null(loaded_spec):
+            audio_dev = SDL_OpenAudioDevice(ptr_null::<u8>(), 0, desired_spec, audio_spec, 0)
+            if audio_dev != 0:
+                SDL_PauseAudioDevice(audio_dev, 1)
+                audio_nbytes = ptr_cast::<i32>(audio_len)[0]
     let rect = arena.alloc::<i32>(4)
     let ev = arena.alloc::<i32>(16)
     # wipe world
@@ -353,10 +396,14 @@ func main() -> void:
         if gcell == T_KEY:
             set_tile(grid, gx, gy, T_OPEN)
             keys += 1
+            if audio_dev != 0 and audio_nbytes > 0 and SDL_GetQueuedAudioSize(audio_dev) == 0:
+                let _sq = SDL_QueueAudio(audio_dev, audio_data[0], audio_nbytes)
         elif gcell == 5:
             set_tile(grid, gx, gy, T_OPEN)
             ammo += 6
         elif gcell == 6:
+            if audio_dev != 0 and audio_nbytes > 0 and SDL_GetQueuedAudioSize(audio_dev) == 0:
+                let _sq = SDL_QueueAudio(audio_dev, audio_data[0], audio_nbytes)
             if level == 1:
                 mut i_ = 0
                 while i_ < MAP_W * MAP_H:
@@ -414,6 +461,8 @@ func main() -> void:
             fire_pressed = false
             if ammo > 0:
                 ammo = ammo - 1
+                if audio_dev != 0 and audio_nbytes > 0 and SDL_GetQueuedAudioSize(audio_dev) == 0:
+                    let _sq = SDL_QueueAudio(audio_dev, audio_data[0], audio_nbytes)
                 mut si = 0
                 while si < 4:
                     let ex_ = sx[si]
@@ -551,6 +600,8 @@ func main() -> void:
         if max_frames > 0 and frames >= max_frames:
             running = false
 
+    if audio_dev != 0:
+        SDL_CloseAudioDevice(audio_dev)
     SDL_DestroyRenderer(renderer)
     SDL_DestroyWindow(window)
     SDL_Quit()
