@@ -130,16 +130,18 @@ func draw_column(renderer: ptr<void>, column: i32, wall_h: i32, wall_s: f32, kin
         mut r2 = r
         mut g2 = g
         mut b2 = b
-        if ((band - y0) / 8) % 2 == 0:
-            r2 = r2 - 18
-            g2 = g2 - 18
+        # cross-column weaving so brick tile patterns read horizontally, not as pure stripes
+        if (((band - y0) / 12) + (column / 6)) % 2 == 0:
+            r2 = r2 - 28
+            g2 = g2 - 22
             b2 = b2 - 18
-            if r2 < 20:
-                r2 = 20
-            if g2 < 15:
-                g2 = 15
-            if b2 < 10:
-                b2 = 10
+        if r2 < 20:
+            r2 = 20
+        if g2 < 15:
+            g2 = 15
+        if b2 < 10:
+            b2 = 10
+
         SDL_SetRenderDrawColor(renderer, r2, g2, b2, 255)
         rect[0] = column
         rect[1] = band
