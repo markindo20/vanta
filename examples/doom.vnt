@@ -11,6 +11,7 @@ extern "sdl2" {
     func SDL_SetRenderDrawColor(renderer: ptr<void>, r: i32, g: i32, b: i32, a: i32) -> i32
     func SDL_RenderClear(renderer: ptr<void>) -> i32
     func SDL_RenderFillRect(renderer: ptr<void>, rect: ptr<i32>) -> i32
+    func SDL_RenderSetLogicalSize(renderer: ptr<void>, w: i32, h: i32) -> i32
     func SDL_RenderPresent(renderer: ptr<void>) -> void
     func SDL_PollEvent(event: ptr<i32>) -> i32
     func SDL_Delay(ms: u32) -> void
@@ -146,7 +147,7 @@ func main() -> void:
     if SDL_Init(32) != 0:
         print_str("SDL_Init failed")
         return
-    let window = SDL_CreateWindow("Vanta raycaster", 80, 80, SCR_W * 2, SCR_H * 2, 4)
+    let window = SDL_CreateWindow("Vanta raycaster", 0, 0, SCR_W * 2, SCR_H * 2, 4101)
     if ptr_is_null(window):
         print_str("SDL_CreateWindow failed")
         SDL_Quit()
@@ -161,6 +162,8 @@ func main() -> void:
         return
 
     # world
+    SDL_RenderSetLogicalSize(renderer, SCR_W, SCR_H)
+
     let arena = Arena(65536)
     let grid = arena.alloc::<i32>(MAP_W * MAP_H)
     let rect = arena.alloc::<i32>(4)
