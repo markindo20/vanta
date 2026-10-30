@@ -25,6 +25,10 @@ extern "sdl2" {
     func SDL_RenderSetLogicalSize(renderer: ptr<void>, w: i32, h: i32) -> i32
     func SDL_RenderPresent(renderer: ptr<void>) -> void
     func SDL_PollEvent(event: ptr<i32>) -> i32
+    func SDL_CreateTexture(renderer: ptr<void>, format: u32, access: i32, w: i32, h: i32) -> ptr<void>
+    func SDL_DestroyTexture(texture: ptr<void>) -> void
+    func SDL_UpdateTexture(texture: ptr<void>, rect: ptr<i32>, pixels: ptr<i32>, pitch: i32) -> i32
+    func SDL_RenderCopy(renderer: ptr<void>, texture: ptr<void>, src: ptr<i32>, dst: ptr<i32>) -> i32
     func SDL_OpenAudioDevice(device: ptr<u8>, iscapture: i32, desired: ptr<SDL_AudioSpec>, obtained: ptr<SDL_AudioSpec>, allowed_changes: i32) -> u32
     func SDL_QueueAudio(dev: u32, data: ptr<void>, len: i32) -> i32
     func SDL_GetQueuedAudioSize(dev: u32) -> u32
@@ -75,6 +79,11 @@ const HORIZON: i32 = 100
 const SHORTEST: f32 = 0.1
 
 # ---------- helpers ----------
+func argb(r: i32, g: i32, b: i32) -> i32:
+    mut c = -16777216
+    c = c + r * 65536 + g * 256 + b
+    return c
+
 func inv_dist(z: f32) -> f32:
     if z < SHORTEST:
         return 1.0 / SHORTEST
@@ -199,12 +208,21 @@ func main() -> void:
         SDL_DestroyWindow(window)
         SDL_Quit()
         return
+    let texture = SDL_CreateTexture(renderer, 372645892, 2, SCR_W, SCR_H)
+    if ptr_is_null(texture):
+        print_str("SDL_CreateTexture failed")
+        SDL_DestroyRenderer(renderer)
+        SDL_DestroyWindow(window)
+        SDL_Quit()
+        return
 
     # world
     SDL_RenderSetLogicalSize(renderer, SCR_W, SCR_H)
 
-    let arena = Arena(65536)
+    let arena = Arena(1048576)
     let grid = arena.alloc::<i32>(MAP_W * MAP_H)
+    let frame = arena.alloc::<i32>(SCR_W * SCR_H)
+    let depth = arena.alloc::<f32>(SCR_W)
     let audio_spec = arena.alloc::<SDL_AudioSpec>(1)
     let desired_spec = arena.alloc::<SDL_AudioSpec>(1)
     let pause_handle = arena.alloc::<i32>(1)
@@ -485,19 +503,27 @@ func main() -> void:
                             sy[si] = -100.0
                     si += 1
 
-        # ---------- draw ----------
-        # ceiling / floor bands
-        SDL_SetRenderDrawColor(renderer, 30, 30, 55, 255)
-        rect[0] = 0
-        rect[1] = 0
-        rect[2] = SCR_W
-        rect[3] = HORIZON
-        SDL_RenderFillRect(renderer, rect)
-        SDL_SetRenderDrawColor(renderer, 24, 20, 18, 255)
-        rect[1] = HORIZON
-        rect[3] = SCR_H - HORIZON
-        SDL_RenderFillRect(renderer, rect)
-
+# ---------- software backbuffer draw ----------
+        # ceiling floor
+        mut y = 0
+        while y < HORIZON:
+            mut x = 0
+            while x < SCR_W:
+                frame[x + y * SCR_W] = argb(16 + y / 8, 16 + y / 8, 32)
+                x += 1
+            y += 1
+        y = HORIZON
+        while y < SCR_H:
+            mut x = 0
+            while x < SCR_W:
+                frame[x + y * SCR_W] = argb(16 + (x + y) / 12, 8 + (x + y) / 12, 8 + (x + y) / 12)
+                x += 1
+            y += 1
+        # depth
+        mut zi = 0
+        while zi < SCR_W:
+            depth[zi] = 1000.0
+            zi += 1
         # walls via DDA
         mut column = 0
         while column < SCR_W:
@@ -508,76 +534,139 @@ func main() -> void:
             mut ry = py
             mut dist = 0.0
             mut kind = 0
-            mut hit = false
+            mut halt = false
             mut step = 0
             while step < 64:
                 let nx2 = rx + c * 0.05
                 let ny2 = ry + s * 0.05
                 let cell = tile_at(grid, f32_to_i32(nx2), f32_to_i32(ny2))
-                if cell != T_OPEN and cell != T_KEY and cell != T_DOOR_OPEN:
+                if cell != T_OPEN and cell != T_KEY and cell != T_DOOR_OPEN and cell != 5 and cell != 6:
                     dist = i32_to_f32(step) * 0.05
                     kind = cell
-                    hit = true
+                    halt = true
                     step = 64
                 else:
                     rx = nx2
                     ry = ny2
-                    step += 1
-            if hit:
+                step += 1
+            if halt:
                 let spinv = inv_dist(dist)
                 let h = f32_to_i32(i32_to_f32(SCR_H) * spinv * 0.5)
-                mut fade = 255.0 - dist * 80.0
-                if fade < 40.0:
-                    fade = 40.0
-                draw_column(renderer, column, h, 1.0 - spinv * 0.5, kind, rect)
+                depth[column] = dist
+                mut y0 = (SCR_H - h) / 2
+                if y0 < 0:
+                    y0 = 0
+                mut y1 = y0 + h
+                if y1 > SCR_H:
+                    y1 = SCR_H
+                mut y = y0
+                while y < y1:
+                    mut r = 120
+                    mut g = 120
+                    mut b = 120
+                    if kind == 1:
+                        r = 196
+                        g = 170
+                        b = 132
+                    elif kind == 2 or kind == 3:
+                        r = 128
+                        g = 88
+                        b = 55
+                    elif kind == 4:
+                        r = 50
+                        g = 200
+                        b = 80
+                    elif kind == 5:
+                        r = 210
+                        g = 200
+                        b = 60
+                    else:
+                        r = 115
+                        g = 115
+                        b = 115
+                    let weave = (((y / 13) * 17) + (column * 3) + (y / 7)) % 3
+                    if weave == 0:
+                        r = r - 20
+                        g = g - 14
+                        b = b - 10
+                        if r < 15:
+                            r = 15
+                        if g < 12:
+                            g = 12
+                        if b < 8:
+                            b = 8
+                    mut shade = 1.0 - spinv * 0.9
+                    if shade < 0.18:
+                        shade = 0.18
+                    r = f32_to_i32(i32_to_f32(r) * shade)
+                    g = f32_to_i32(i32_to_f32(g) * shade)
+                    b = f32_to_i32(i32_to_f32(b) * shade)
+                    frame[column + y * SCR_W] = argb(r, g, b)
+                    y += 1
             column += 1
-
         # sprites
         mut si = 0
         while si < 4:
-            let dx = sx[si] - px
-            let dy = sy[si] - py
-            let d = sqrt_f32(dx * dx + dy * dy)
-            if d > 0.1 and d < 7.0:
-                let sprite_size = f32_to_i32(i32_to_f32(SCR_H) / d)
-                if sprite_size > 4:
-                    let ang = pa
-                    let cw = dx * cos_f32(ang) + dy * sin_f32(ang)
-                    let cs = -dx * sin_f32(ang) + dy * cos_f32(ang)
-                    if cs > 0.0:
+            if sx[si] > -90.0 and sh[si] > 0:
+                let dx = sx[si] - px
+                let dy = sy[si] - py
+                let d = sqrt_f32(dx * dx + dy * dy)
+                if d > 0.1 and d < 9.0:
+                    let cw = dx * cos_f32(pa) + dy * sin_f32(pa)
+                    if cw > 0.0:
+                        let cs = -dx * sin_f32(pa) + dy * cos_f32(pa)
                         let scx = f32_to_i32(i32_to_f32(SCR_W) / 2.0 + (cw / cs) * i32_to_f32(SCR_W) / 2.0)
-                        let sy0 = (SCR_H - sprite_size) / 2
-                        SDL_SetRenderDrawColor(renderer, 210, 70, 60, 255)
-                        rect[0] = scx - sprite_size / 4
-                        rect[1] = sy0
-                        rect[2] = sprite_size / 2
-                        rect[3] = sprite_size
-                        SDL_RenderFillRect(renderer, rect)
+                        let ssize = f32_to_i32(i32_to_f32(SCR_H) / cw)
+                        if ssize > 6 and sx[si] > 0.0 and sy[si] > 0.0:
+                            mut yy = (SCR_H - ssize) / 2
+                            if yy < 0:
+                                yy = 0
+                            mut yy2 = yy + ssize
+                            if yy2 > SCR_H:
+                                yy2 = SCR_H
+                            let xa = scx - ssize / 4
+                            let xb = scx + ssize / 4
+                            mut yyi = yy
+                            while yyi < yy2:
+                                mut offset = xa
+                                if offset < 0:
+                                    offset = 0
+                                while offset < xb and offset < SCR_W:
+                                    frame[offset + yyi * SCR_W] = argb(208, 80, 70)
+                                    offset += 1
+                                yyi += 1
             si += 1
+        # HUD bars
+        mut yyi = SCR_H - 16
+        while yyi < SCR_H:
+            mut x = 0
+            while x < SCR_W:
+                frame[x + yyi * SCR_W] = argb(40, 8, 8)
+                x += 1
+            yyi += 1
+        yyi = SCR_H - 20
+        while yyi < SCR_H - 12:
+            mut x = 0
+            while x < 20 + ammo * 4 and x < SCR_W:
+                frame[x + yyi * SCR_W] = argb(16, 160, 32)
+                x += 1
+            x = 164
+            while x < 164 + 60 + keys * 12 and x < SCR_W:
+                frame[x + yyi * SCR_W] = argb(208, 192, 32)
+                x += 1
+            yyi += 1
 
-        # HUD bar (health-ish fixed)
-        SDL_SetRenderDrawColor(renderer, 190, 40, 40, 255)
-        rect[0] = 0
-        rect[1] = SCR_H - 12
-        rect[2] = 320
-        rect[3] = 4
-        SDL_RenderFillRect(renderer, rect)
-        SDL_SetRenderDrawColor(renderer, 40, 220, 120, 255)
-        rect[0] = 0
-        rect[1] = SCR_H - 18
-        rect[2] = 20 + ammo * 4
-        rect[3] = 4
-        if rect[2] > 160:
-            rect[2] = 160
-        SDL_RenderFillRect(renderer, rect)
-        SDL_SetRenderDrawColor(renderer, 230, 210, 60, 255)
-        rect[0] = 164
-        rect[1] = SCR_H - 18
-        rect[2] = 60 + keys * 12
-        rect[3] = 4
-        SDL_RenderFillRect(renderer, rect)
-
+        # one CPU-side upload
+        SDL_UpdateTexture(texture, ptr_null::<i32>(), frame, SCR_W * 4)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
+        SDL_RenderClear(renderer)
+        SDL_RenderCopy(renderer, texture, ptr_null::<i32>(), ptr_null::<i32>())
         SDL_RenderPresent(renderer)
+
+        SDL_Delay(16)
+        frames += 1
+        if max_frames > 0 and frames >= max_frames:
+            running = false
         SDL_Delay(15)
         if cooldown > 0:
             cooldown -= 1
